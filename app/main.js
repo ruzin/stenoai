@@ -4078,13 +4078,22 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       let updatedRaw = raw;
 
       // Does this call touch the note's generated content (as opposed to only
-      // its title or the user's own notes)? Drives the snapshot capture and the
-      // missing-frontmatter guard below.
+      // its title or the user's own notes)? Drives the snapshot capture below.
       const structural =
         updates.summary !== undefined ||
         updates.key_points !== undefined ||
         updates.action_items !== undefined ||
         updates.discussion_areas !== undefined;
+
+      // Does it touch the note BODY at all? Every body writer - the generated
+      // sections AND the user's own notes - lives inside the frontmatter branch
+      // below, so this is what the missing-frontmatter guard has to key off.
+      // `structural` alone would leave the My-notes autosave (which records no
+      // edited field) reporting success over a file it never changed.
+      const bodyEdit = structural || updates.user_notes !== undefined;
+      // Set only where the body is actually reachable. A note whose frontmatter
+      // is missing or never closed leaves this false, and the guard fires.
+      let frontmatterParsed = false;
 
       if (raw.startsWith('---')) {
         // Split with NO limit and rejoin the tail: split('---', 3) DISCARDS any
@@ -4095,6 +4104,7 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
         // clearNoteProcessingFlag / parseMeetingMarkdown's split/slice(2).join.
         const parts = raw.split('---');
         if (parts.length >= 3) {
+          frontmatterParsed = true;
           const fmText = parts[1];
           body = parts.slice(2).join('---');
           const lines = fmText.split('\n');
@@ -4193,10 +4203,12 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       }
 
       // A content edit only reaches `body` inside the frontmatter block above.
-      // If we get here with structural updates and nothing recorded, the note
-      // had no parsable frontmatter and the edit was silently dropped - report
-      // that instead of returning success over a file we did not change.
-      if (structural && changed.length === 0) {
+      // If we get here having been asked for one while that block was skipped,
+      // the note had no parsable frontmatter and the edit was silently dropped
+      // - report that instead of returning success over a file we did not
+      // change. This covers My notes as well as the generated sections: it is
+      // the autosaving editor, so it is the one that loses text unprompted.
+      if (bodyEdit && !frontmatterParsed) {
         return { success: false, error: 'Note has no readable frontmatter; refusing to edit it.' };
       }
 

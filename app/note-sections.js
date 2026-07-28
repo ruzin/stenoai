@@ -1,8 +1,13 @@
 // Pure, section-scoped transforms over the BODY of a meeting note (.md) -
 // everything after the closing frontmatter '---'. Every function replaces
-// exactly one '## ' section and leaves every other byte untouched. This is the
-// same contract upsertUserNotesSection (main.js) already proves for User Notes;
-// this module generalises it so the note editor can patch the other sections.
+// exactly one '## ' section and leaves the CONTENT of every other section
+// intact, with one deliberate exception: joinSections trims the tail of the
+// whole body, so trailing whitespace on the last line of the LAST section is
+// dropped even when that section was not the one edited. That trim is what
+// stops blank lines accreting across repeated edits, and it costs nothing -
+// both parsers trim each line on the way in. This is the same contract
+// upsertUserNotesSection (main.js) already proves for User Notes; this module
+// generalises it so the note editor can patch the other sections.
 //
 // The canonical order is the one simple_recorder.py writes: the model's
 // markdown (Summary, Key Topics, Key Points, Action Items), then Transcript,
@@ -73,6 +78,11 @@ function sectionLines(content) {
   return ['', ...String(content).split('\n'), ''];
 }
 
+// Replace (or insert, or with empty content remove) exactly one '## ' section.
+// Every other section keeps its heading, its position and its text; the one
+// thing not preserved is trailing whitespace at the very end of the body, which
+// joinSections trims (see above). Say it precisely rather than promising
+// byte-for-byte identity the trim does not deliver.
 function setSection(body, heading, content) {
   const blocks = splitSections(body);
   const trimmed = String(content ?? '').replace(/\s+$/, '');

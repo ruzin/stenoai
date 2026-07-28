@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const {
+  setSection,
   setSummary,
   setKeyPoints,
   setActionItems,
@@ -92,6 +93,27 @@ test('repeated edits do not accrete blank lines', () => {
   out = setSummary(out, 'Two.');
   out = setSummary(out, 'Three.');
   assert.strictEqual(/\n{3,}/.test(out), false);
+});
+
+// The one place "every other section is left alone" is not literally true, so
+// it is pinned here rather than only described in prose. joinSections trims the
+// tail of the WHOLE joined body before restoring the final newline, so trailing
+// whitespace on the last line of the LAST section disappears even when that
+// section was not the one edited. Keep it: it is what stops blank lines
+// accreting across repeated edits, and both parsers trim each line anyway, so
+// nothing downstream can tell. If this test starts failing because the trim was
+// removed, check the accretion test above before "fixing" it.
+test('the tail trim reaches the last section, so trailing whitespace there is not preserved', () => {
+  const body = '## Summary\nold\n## Transcript\nkeep   \n';
+  const out = setSection(body, 'Summary', 'new');
+  assert.strictEqual(out, '## Summary\n\nnew\n\n## Transcript\nkeep\n');
+  assert.strictEqual(out.includes('keep   '), false);
+
+  // Everything before the final line is preserved exactly, trailing whitespace
+  // included - the trim is a tail trim, not a per-line one.
+  const midBody = '## Summary\nold\n## Transcript\nkeep   \nlast\n';
+  const midOut = setSection(midBody, 'Summary', 'new');
+  assert.ok(midOut.includes('keep   \nlast\n'), 'inner trailing whitespace must survive');
 });
 
 test('containsStructuralLine catches a heading a user could paste into a field', () => {

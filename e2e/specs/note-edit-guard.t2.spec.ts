@@ -154,8 +154,13 @@ test('a note with no readable frontmatter is refused, not silently accepted', as
   // falls straight through it: every section writer is skipped and the file is
   // rewritten byte-identically. Reporting success there is the dangerous
   // answer - the editor closes, the user believes the correction is saved, and
-  // it is nowhere. This is the whole reason the `changed.length === 0` guard
-  // exists, and nothing pinned it.
+  // it is nowhere. This is the whole reason the frontmatter guard exists, and
+  // nothing pinned it.
+  //
+  // My notes (`user_notes`) is written by the very same branch, so it is the
+  // same bug with the same consequence - and it is the one that fires without
+  // any user intent, because the My-notes editor autosaves. The guard has to
+  // cover EVERY body field, not just the generated ones.
   const outputDir = path.join(userDataDir, 'output');
   mkdirSync(outputDir, { recursive: true });
 
@@ -165,27 +170,40 @@ test('a note with no readable frontmatter is refused, not silently accepted', as
     ['nofm', '## Summary\n\nThe team agreed to ship on Friday.\n'],
     ['openfm', '---\ntitle: "Unclosed"\n\n## Summary\n\nThe team agreed to ship on Friday.\n'],
   ];
+  // Every patch shape that reaches the note BODY: the four generated sections
+  // and the user's own notes.
+  const bodyPatches: Array<[string, Record<string, unknown>]> = [
+    ['summary', { summary: 'An edit that must not be reported as saved' }],
+    ['user_notes', { user_notes: 'A note that must not be reported as saved' }],
+    ['key_points', { key_points: ['Never written'] }],
+    ['action_items', { action_items: ['Never written'] }],
+    ['discussion_areas', { discussion_areas: [{ title: 'Never', analysis: 'written' }] }],
+  ];
 
   const { page } = await launchApp();
   for (const [stem, body] of cases) {
     const summaryPath = path.join(outputDir, `${stem}_summary.md`);
-    writeFileSync(summaryPath, body, 'utf-8');
 
-    const res = await page.evaluate(
-      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
-      [summaryPath, { summary: 'An edit that must not be reported as saved' }] as const,
-    );
-    expect(res, `expected refusal for ${stem}`).toMatchObject({
-      success: false,
-      error: 'Note has no readable frontmatter; refusing to edit it.',
-    });
-    // And the file really is untouched - the refusal is not a rollback message
-    // over a partial write.
-    expect(readFileSync(summaryPath, 'utf8')).toBe(body);
+    for (const [label, patch] of bodyPatches) {
+      writeFileSync(summaryPath, body, 'utf-8');
+      const res = await page.evaluate(
+        ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+        [summaryPath, patch] as const,
+      );
+      expect(res, `expected refusal for ${stem} / ${label}`).toMatchObject({
+        success: false,
+        error: 'Note has no readable frontmatter; refusing to edit it.',
+      });
+      // And the file really is untouched - the refusal is not a rollback message
+      // over a partial write.
+      expect(readFileSync(summaryPath, 'utf8'), `${stem} / ${label} rewrote the file`).toBe(body);
+    }
   }
 
-  // Control: the very same patch on a well-formed note succeeds and lands. The
-  // refusal above is about the note's frontmatter, not about the patch.
+  // Control: the very same patches on a well-formed note succeed and land. The
+  // refusal above is about the note's frontmatter, not about the patch - and in
+  // particular a notes-only save, which records no edited field, must NOT be
+  // caught by the guard.
   const goodPath = path.join(outputDir, 'goodfm_summary.md');
   writeFileSync(goodPath, NOTE, 'utf-8');
   const ok = await page.evaluate(
@@ -196,6 +214,27 @@ test('a note with no readable frontmatter is refused, not silently accepted', as
   expect(readFileSync(goodPath, 'utf8')).toContain(
     'An edit that must not be reported as saved',
   );
+
+  const okNotes = await page.evaluate(
+    ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+    [goodPath, { user_notes: 'A note that really is saved' }] as const,
+  );
+  expect(okNotes.success).toBe(true);
+  expect(okNotes.edited_fields).toEqual([]);
+  expect(readFileSync(goodPath, 'utf8')).toContain(
+    '## User Notes\n\nA note that really is saved\n',
+  );
+
+  // A title-only rename touches no body section at all, so it stays outside the
+  // guard even on a note whose frontmatter cannot be read: there is nothing to
+  // silently drop, and the existing rewrite is a no-op either way.
+  const nofmPath = path.join(outputDir, 'nofm_summary.md');
+  writeFileSync(nofmPath, cases[0][1], 'utf-8');
+  const renamed = await page.evaluate(
+    ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+    [nofmPath, { name: 'Renamed' }] as const,
+  );
+  expect(renamed.success).toBe(true);
 });
 
 test('the heading gate does not reject legitimate text that merely contains a hash', async ({
