@@ -275,6 +275,10 @@ function DetailContent({
   // it; they're registered once per meeting, so they read it through a ref
   // rather than re-subscribing on every keystroke's re-render.
   const [editing, setEditing] = React.useState(false);
+  // Lifted out of the editor so the paths that would unmount it can ask whether
+  // there is anything to lose before they do.
+  const [noteDirty, setNoteDirty] = React.useState(false);
+  const [confirmLeaveEdit, setConfirmLeaveEdit] = React.useState(false);
   const updateMeeting = useUpdateMeeting();
   const editingRef = React.useRef(editing);
   // Layout effect, not a render-time assignment: it still lands before the
@@ -634,19 +638,33 @@ function DetailContent({
   };
 
   const summary = meeting.summary?.trim();
-  // Seeded from what the read-only note actually shows, reasoning stripped —
-  // editing the summary must not resurrect a <think> block the UI hides.
+  // Seeded from what the read-only note actually shows, reasoning stripped.
+  // Editing the summary must not resurrect a <think> block the UI hides.
   const noteDraft: NoteDraft = {
     summary: summary ? stripReasoning(summary) : '',
     keyPoints: meeting.key_points ?? [],
     actionItems: asStringArray(meeting.action_items),
     discussionAreas: asDiscussionAreas(meeting.discussion_areas),
   };
+  const closeEditor = () => {
+    setEditing(false);
+    setNoteDirty(false);
+  };
   // A rejected mutation (main refuses a forged heading, or the write fails)
   // propagates to the editor, which keeps edit mode and the typing.
   const saveNoteEdits = async (patch: UpdateMeetingPatch) => {
     await updateMeeting.mutateAsync({ summaryFile, patch });
-    setEditing(false);
+    closeEditor();
+  };
+  // The in-view back button is the one exit from an open editor this view owns.
+  // The sidebar and the command palette still unmount it without asking; that
+  // needs a router-level unsaved-changes hook, tracked separately.
+  const leaveDetail = () => {
+    if (editing && noteDirty) {
+      setConfirmLeaveEdit(true);
+      return;
+    }
+    navigate('/');
   };
   // Same "is there a note here at all" test the PDF export uses, plus the two
   // states that are about to rewrite the note anyway.
@@ -760,7 +778,7 @@ function DetailContent({
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => navigate('/')}
+            onClick={leaveDetail}
             aria-label="Back to home"
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12.5px] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
             style={{ color: 'var(--fg-2)' }}
@@ -770,8 +788,8 @@ function DetailContent({
           </button>
           <div className="flex items-center gap-1">
             {/* Edit the generated note (D9). Only for the Standard structured
-                note — a template report is generated output with no section
-                grammar to patch — and only while nothing else is rewriting it. */}
+                note (a template report is generated output with no section
+                grammar to patch) and only while nothing else is rewriting it. */}
             {tab === 'summary' && !editing && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -832,7 +850,7 @@ function DetailContent({
                     // Disable while a recording is live on THIS note — same
                     // reason the floating CTA hides: don't summarise a
                     // still-growing transcript out from under the recording.
-                    // Also off while the note editor is open — a regenerate
+                    // Also off while the note editor is open: a regenerate
                     // would discard the edit being typed.
                     disabled={
                       reprocess.isPending ||
@@ -1154,7 +1172,10 @@ function DetailContent({
               <Button
                 className="mt-1"
                 onClick={startReprocess}
-                disabled={reprocess.isPending || streamPhase !== 'idle'}
+                // This banner renders above the editor rather than being
+                // replaced by it, so it needs the same editing lock as the
+                // header's Generate-notes button.
+                disabled={reprocess.isPending || streamPhase !== 'idle' || editing}
               >
                 Generate notes
               </Button>
@@ -1164,7 +1185,8 @@ function DetailContent({
             <NoteEditor
               value={noteDraft}
               onSave={saveNoteEdits}
-              onCancel={() => setEditing(false)}
+              onCancel={closeEditor}
+              onDirtyChange={setNoteDirty}
             />
           ) : streamPhase !== 'idle' ? (
             <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
@@ -1372,6 +1394,21 @@ function DetailContent({
         onConfirm={() => {
           setRetranscribeOpen(false);
           startRetranscribe();
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmLeaveEdit}
+        onOpenChange={setConfirmLeaveEdit}
+        title="Discard your note edits?"
+        description="Your changes to this note haven't been saved yet. Leaving now discards them."
+        confirmLabel="Discard and leave"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={() => {
+          setConfirmLeaveEdit(false);
+          closeEditor();
+          navigate('/');
         }}
       />
     </article>

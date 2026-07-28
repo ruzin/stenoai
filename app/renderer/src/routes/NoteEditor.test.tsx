@@ -16,6 +16,31 @@ describe('NoteEditor', () => {
     expect(screen.getByDisplayValue('Budget approved')).toBeTruthy();
   });
 
+  // getByDisplayValue and getByLabelText both match a <textarea>, so every other
+  // test in this file passes if a list row regresses to one. It must not: a
+  // newline in a key point or action item silently truncates the entry on the
+  // next write (renderBulletList keeps only the first line), which is why the
+  // rows are single-line inputs and the line-break guard exists at all.
+  it('renders list rows as single-line inputs', () => {
+    render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByLabelText('Key point 1').tagName).toBe('INPUT');
+    expect(screen.getByLabelText('Action item 1').tagName).toBe('INPUT');
+    expect(screen.getByLabelText('Topic 1 title').tagName).toBe('INPUT');
+  });
+
+  // The measure belongs to the editor body, once. Expressed per field it was
+  // `64ch` against three different font sizes, which resolved to three
+  // different pixel widths and three visibly ragged right edges.
+  it('does not set a per-field measure', () => {
+    render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
+    for (const label of ['Key point 1', 'Action item 1', 'Topic 1 title', 'Topic 1 notes']) {
+      expect((screen.getByLabelText(label) as HTMLElement).style.maxWidth).toBe('');
+    }
+    expect((screen.getByDisplayValue('We agreed the budget.') as HTMLElement).style.maxWidth).toBe(
+      ''
+    );
+  });
+
   it('keeps Save disabled until something changes', () => {
     render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
     const save = screen.getByRole('button', { name: /save/i }) as HTMLButtonElement;
@@ -49,6 +74,54 @@ describe('NoteEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
     expect(onSave).not.toHaveBeenCalled();
     expect(screen.getByText(/heading/i)).toBeTruthy();
+  });
+
+  // The Save button is pinned, so the reason it refused has to be pinned with
+  // it. As a sibling below the bar it scrolled away on exactly the long notes
+  // where the user cannot see both at once.
+  it('shows the error inside the sticky action bar', () => {
+    render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.change(screen.getByDisplayValue('We agreed the budget.'), {
+      target: { value: 'ok\n## Transcript' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    const alert = screen.getByRole('alert');
+    const bar = alert.closest('.sticky');
+    expect(bar).not.toBeNull();
+    expect(bar?.contains(screen.getByRole('button', { name: /save/i }))).toBe(true);
+  });
+
+  it('names the row a rejected value is in and marks that row', () => {
+    const onSave = vi.fn();
+    render(<NoteEditor value={DRAFT} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Key point 1'), { target: { value: '# forged' } });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toMatch(/key point 1/i);
+    expect(screen.getByLabelText('Key point 1').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText('Action item 1').getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it('retires the rejection once the row is retyped', () => {
+    render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Key point 1'), { target: { value: '# forged' } });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    expect(screen.queryByRole('alert')).not.toBeNull();
+    fireEvent.change(screen.getByLabelText('Key point 1'), { target: { value: 'Budget signed' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByLabelText('Key point 1').getAttribute('aria-invalid')).toBeNull();
+  });
+
+  it('reports whether there is anything to lose', () => {
+    const onDirtyChange = vi.fn();
+    render(
+      <NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} onDirtyChange={onDirtyChange} />
+    );
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    fireEvent.change(screen.getByDisplayValue('We agreed the budget.'), {
+      target: { value: 'We agreed the Q3 budget.' },
+    });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
   });
 
   it('removes a list row', async () => {
@@ -162,13 +235,38 @@ describe('validateNotePatch', () => {
   });
 
   it('rejects a markdown heading in any field', () => {
-    expect(validateNotePatch({ summary: 'ok\n## Transcript' })).toMatch(/heading/i);
-    expect(validateNotePatch({ key_points: ['### forged'] })).toMatch(/heading/i);
-    expect(validateNotePatch({ action_items: ['ok', '  # forged'] })).toMatch(/heading/i);
-    expect(validateNotePatch({ discussion_areas: [{ title: '# forged' }] })).toMatch(/heading/i);
+    expect(validateNotePatch({ summary: 'ok\n## Transcript' })?.message).toMatch(/heading/i);
+    expect(validateNotePatch({ key_points: ['### forged'] })?.message).toMatch(/heading/i);
+    expect(validateNotePatch({ action_items: ['ok', '  # forged'] })?.message).toMatch(/heading/i);
+    expect(validateNotePatch({ discussion_areas: [{ title: '# forged' }] })?.message).toMatch(
+      /heading/i
+    );
     expect(
       validateNotePatch({ discussion_areas: [{ title: 'ok', analysis: 'a\n#### forged' }] })
+        ?.message
     ).toMatch(/heading/i);
+  });
+
+  // A single message for the whole patch left the one user who can hit this
+  // (a legacy .json note whose key_points already contain a newline) unable to
+  // save and unable to tell which row to retype.
+  it('locates the offending field', () => {
+    expect(validateNotePatch({ summary: '# forged' })).toMatchObject({
+      section: 'summary',
+      index: null,
+      fieldLabel: 'The summary',
+    });
+    expect(validateNotePatch({ action_items: ['ok', '  # forged'] })).toMatchObject({
+      section: 'action_items',
+      index: 1,
+      fieldLabel: 'Action item 2',
+    });
+    expect(validateNotePatch({ action_items: ['ok', '  # forged'] })?.message).toMatch(
+      /action item 2/i
+    );
+    expect(
+      validateNotePatch({ discussion_areas: [{ title: 'ok' }, { title: 'x', analysis: '# f' }] })
+    ).toMatchObject({ section: 'discussion_areas', index: 1, part: 'analysis' });
   });
 
   it('does not mistake a hash that is not a heading for one', () => {
@@ -177,15 +275,19 @@ describe('validateNotePatch', () => {
   });
 
   it('rejects a line break in a list entry, which renderBulletList would truncate', () => {
-    expect(validateNotePatch({ key_points: ['line one\nline two'] })).toMatch(/line break/i);
-    expect(validateNotePatch({ action_items: ['line one\r\nline two'] })).toMatch(/line break/i);
+    expect(validateNotePatch({ key_points: ['line one\nline two'] })?.message).toMatch(
+      /line break/i
+    );
+    expect(validateNotePatch({ action_items: ['line one\r\nline two'] })?.message).toMatch(
+      /line break/i
+    );
   });
 
   it('rejects a line break in a topic title, which would slide into the analysis', () => {
-    expect(validateNotePatch({ discussion_areas: [{ title: 'Budget\nreview' }] })).toMatch(
+    expect(validateNotePatch({ discussion_areas: [{ title: 'Budget\nreview' }] })?.message).toMatch(
       /line break/i
     );
-    expect(validateNotePatch({ discussion_areas: [{ title: 'Budget\rreview' }] })).toMatch(
+    expect(validateNotePatch({ discussion_areas: [{ title: 'Budget\rreview' }] })?.message).toMatch(
       /line break/i
     );
   });

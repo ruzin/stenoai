@@ -20,14 +20,20 @@ interface NoteEditorProps {
   /** Rejects on a failed write; the editor stays open and shows the reason. */
   onSave: (patch: UpdateMeetingPatch) => Promise<void>;
   onCancel: () => void;
+  /**
+   * Reports whether there is anything to lose. The host uses it to decide
+   * whether leaving the view needs a confirmation. Must be referentially
+   * stable (a `useState` setter is).
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
  * Mirrors `STRUCTURAL_LINE` in app/note-sections.js. A value that starts a line
  * with `#`..`######` would forge a section heading and re-partition the note on
  * the next parse, so main rejects it. Checking it here too turns a round-trip
- * failure into an inline message next to the field the user is looking at —
- * main stays the authority, this is only the faster answer.
+ * failure into an inline message next to the field the user is looking at.
+ * Main stays the authority, this is only the faster answer.
  */
 const STRUCTURAL_LINE = /^\s*#{1,6}\s/m;
 
@@ -41,37 +47,120 @@ const STRUCTURAL_LINE = /^\s*#{1,6}\s/m;
  */
 const LINE_BREAK = /[\r\n]/;
 
-const HEADING_ERROR = "A note field can't contain a markdown heading.";
-const LINE_BREAK_ERROR = "A key point, action item or topic title can't contain a line break.";
+export type NoteSection = 'summary' | 'key_points' | 'action_items' | 'discussion_areas';
 
 /**
- * Client-side mirror of the main-process gate. Returns the message to show, or
+ * A rejected field, located precisely enough to point at the row that has to be
+ * retyped. `index` is the row's position in the patch (so, among the non-blank
+ * rows); the editor maps it back to its own draft index before highlighting.
+ */
+export interface NotePatchProblem {
+  section: NoteSection;
+  /** Row within the section, or null for the summary. */
+  index: number | null;
+  /** Which half of a discussion area is at fault. */
+  part?: 'title' | 'analysis';
+  /** The row's own name, as the editor labels it. */
+  fieldLabel: string;
+  /** Ready to show: names the field and says what is wrong with it. */
+  message: string;
+}
+
+interface CandidateField {
+  section: NoteSection;
+  index: number | null;
+  part?: 'title' | 'analysis';
+  label: string;
+  value: string;
+  /** Single-line fields additionally refuse a line break. */
+  singleLine: boolean;
+}
+
+function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
+  const fields: CandidateField[] = [];
+
+  if (typeof patch.summary === 'string') {
+    fields.push({
+      section: 'summary',
+      index: null,
+      label: 'The summary',
+      value: patch.summary,
+      singleLine: false,
+    });
+  }
+  (patch.key_points ?? []).forEach((value, index) => {
+    fields.push({
+      section: 'key_points',
+      index,
+      label: `Key point ${index + 1}`,
+      value,
+      singleLine: true,
+    });
+  });
+  (patch.action_items ?? []).forEach((value, index) => {
+    fields.push({
+      section: 'action_items',
+      index,
+      label: `Action item ${index + 1}`,
+      value,
+      singleLine: true,
+    });
+  });
+  (patch.discussion_areas ?? []).forEach((area, index) => {
+    fields.push({
+      section: 'discussion_areas',
+      index,
+      part: 'title',
+      label: `Topic ${index + 1} title`,
+      value: area.title,
+      singleLine: true,
+    });
+    if (typeof area.analysis === 'string') {
+      fields.push({
+        section: 'discussion_areas',
+        index,
+        part: 'analysis',
+        label: `Topic ${index + 1} notes`,
+        value: area.analysis,
+        singleLine: false,
+      });
+    }
+  });
+
+  return fields;
+}
+
+function problemFor(field: CandidateField, reason: string): NotePatchProblem {
+  return {
+    section: field.section,
+    index: field.index,
+    part: field.part,
+    fieldLabel: field.label,
+    message: `${field.label} ${reason}`,
+  };
+}
+
+/**
+ * Client-side mirror of the main-process gate. Returns the offending field, or
  * null when the patch is safe to send. Exported because the single-line inputs
  * make the line-break case unreachable through the UI (browsers and jsdom strip
  * CR/LF from `input[type=text]`) while it remains perfectly reachable from a
  * note that already has one on disk.
  */
-export function validateNotePatch(patch: UpdateMeetingPatch): string | null {
-  const everyField: string[] = [];
-  const singleLineFields: string[] = [];
-
-  if (typeof patch.summary === 'string') everyField.push(patch.summary);
-  for (const entry of patch.key_points ?? []) {
-    everyField.push(entry);
-    singleLineFields.push(entry);
+export function validateNotePatch(patch: UpdateMeetingPatch): NotePatchProblem | null {
+  const fields = candidateFields(patch);
+  // Headings first, across every field: they are the case main also refuses, so
+  // a patch carrying both should report the one that would fail the write.
+  for (const field of fields) {
+    if (STRUCTURAL_LINE.test(field.value)) {
+      return problemFor(field, "can't contain a markdown heading.");
+    }
   }
-  for (const entry of patch.action_items ?? []) {
-    everyField.push(entry);
-    singleLineFields.push(entry);
+  for (const field of fields) {
+    if (field.singleLine && LINE_BREAK.test(field.value)) {
+      return problemFor(field, "can't contain a line break.");
+    }
   }
-  for (const area of patch.discussion_areas ?? []) {
-    everyField.push(area.title);
-    singleLineFields.push(area.title);
-    if (typeof area.analysis === 'string') everyField.push(area.analysis);
-  }
-
-  if (everyField.some((field) => STRUCTURAL_LINE.test(field))) return HEADING_ERROR;
-  if (singleLineFields.some((field) => LINE_BREAK.test(field))) return LINE_BREAK_ERROR;
   return null;
 }
 
@@ -122,19 +211,86 @@ function buildPatch(base: NormalizedDraft, next: NormalizedDraft): UpdateMeeting
   return patch;
 }
 
+type DraftLocation =
+  | { kind: 'summary' }
+  | { kind: 'keyPoints' | 'actionItems'; index: number }
+  | { kind: 'discussionAreas'; index: number; part: 'title' | 'analysis' };
+
+/** The draft index of the nth non-blank entry, or -1 if there is no such row. */
+function nthNonBlank(entries: string[], wanted: number): number {
+  let seen = -1;
+  for (let i = 0; i < entries.length; i += 1) {
+    if (entries[i].trim() === '') continue;
+    seen += 1;
+    if (seen === wanted) return i;
+  }
+  return -1;
+}
+
+/**
+ * The patch is built from the normalized draft, which has the blank rows
+ * dropped, so a patch index is not a draft index once the user has added an
+ * empty row above the offending one. Count back to the row the user can see.
+ */
+function locateInDraft(draft: NoteDraft, problem: NotePatchProblem): DraftLocation | null {
+  if (problem.section === 'summary') return { kind: 'summary' };
+  if (problem.index === null) return null;
+
+  if (problem.section === 'key_points') {
+    const index = nthNonBlank(draft.keyPoints, problem.index);
+    return index < 0 ? null : { kind: 'keyPoints', index };
+  }
+  if (problem.section === 'action_items') {
+    const index = nthNonBlank(draft.actionItems, problem.index);
+    return index < 0 ? null : { kind: 'actionItems', index };
+  }
+  const index = nthNonBlank(
+    draft.discussionAreas.map((area) => area.title),
+    problem.index
+  );
+  return index < 0 ? null : { kind: 'discussionAreas', index, part: problem.part ?? 'title' };
+}
+
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return message.trim() || 'The note could not be saved.';
 }
 
 /**
+ * One measure for the whole editor body, and one gutter to the right of it for
+ * the per-row remove buttons.
+ *
+ * Deliberately NOT `ch` per field: `ch` is font-relative, so the same `64ch` on
+ * a 15.5px summary, a 14.5px input and a 14px topic body resolves to three
+ * different pixel widths, and once the fields have borders those three right
+ * edges read as ragged. (The read-only note can use `ch` per element precisely
+ * because nothing there is boxed.) The padding-right reserves the gutter inside
+ * the wrapper, and each row cancels it again with a negative margin, so a
+ * window narrower than the measure shrinks everything together instead of
+ * pushing the rows out of their container.
+ */
+const EDITOR_BODY_STYLE = {
+  '--note-measure': '35rem',
+  '--note-gutter': '2.25rem',
+  width: '100%',
+  maxWidth: 'calc(var(--note-measure) + var(--note-gutter))',
+  paddingRight: 'var(--note-gutter)',
+} as React.CSSProperties;
+
+/** A field plus its remove button, with the field ending on the shared measure. */
+const ROW_STYLE: React.CSSProperties = {
+  gridTemplateColumns: 'minmax(0, 1fr) var(--note-gutter)',
+  marginRight: 'calc(-1 * var(--note-gutter))',
+};
+
+/**
  * The generated note, editable (decision D9). The read-only note is a document;
  * this is that same document with its sections opened up, reached through one
  * explicit "Edit" affordance and left again through Save or Cancel. Nothing is
- * written until Save, and a failed write keeps the editor — and the typing —
+ * written until Save, and a failed write keeps the editor, and the typing,
  * exactly where it was.
  */
-export function NoteEditor({ value, onSave, onCancel }: NoteEditorProps) {
+export function NoteEditor({ value, onSave, onCancel, onDirtyChange }: NoteEditorProps) {
   // Snapshot both the working copy and the comparison baseline once, at open.
   // A background refetch of the meeting must not silently redefine "changed"
   // underneath an open editor, and the prop is never mutated.
@@ -145,7 +301,8 @@ export function NoteEditor({ value, onSave, onCancel }: NoteEditorProps) {
     discussionAreas: value.discussionAreas.map((area) => ({ ...area })),
   }));
   const [baseline] = React.useState<NormalizedDraft>(() => normalize(value));
-  const [error, setError] = React.useState<string | null>(null);
+  const [problem, setProblem] = React.useState<NotePatchProblem | null>(null);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
   const mounted = React.useRef(true);
@@ -159,27 +316,49 @@ export function NoteEditor({ value, onSave, onCancel }: NoteEditorProps) {
   const patch = React.useMemo(() => buildPatch(baseline, normalize(draft)), [baseline, draft]);
   const dirty = Object.keys(patch).length > 0;
 
+  React.useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  // Every edit goes through here so that any keystroke retires the previous
+  // verdict: a highlight left on a row the user has since fixed is worse than
+  // no highlight at all. A save rejection does not touch the draft, so its
+  // message stays until the user does something about it.
+  const applyEdit = (updater: (prev: NoteDraft) => NoteDraft) => {
+    setProblem(null);
+    setSaveError(null);
+    setDraft(updater);
+  };
+
+  const invalid = React.useMemo(
+    () => (problem ? locateInDraft(draft, problem) : null),
+    [problem, draft]
+  );
+  const message = problem?.message ?? saveError;
+
   const ids = React.useId();
   const summaryId = `${ids}-summary`;
 
   const setList = (key: 'keyPoints' | 'actionItems', next: string[]) =>
-    setDraft((prev) => ({ ...prev, [key]: next }));
+    applyEdit((prev) => ({ ...prev, [key]: next }));
 
   const handleSave = () => {
     if (!dirty || saving) return;
-    const problem = validateNotePatch(patch);
-    if (problem) {
-      setError(problem);
+    const found = validateNotePatch(patch);
+    if (found) {
+      setProblem(found);
+      setSaveError(null);
       return;
     }
-    setError(null);
+    setProblem(null);
+    setSaveError(null);
     setSaving(true);
     let pending: Promise<void>;
     try {
       pending = Promise.resolve(onSave(patch));
     } catch (thrown) {
       setSaving(false);
-      setError(errorMessage(thrown));
+      setSaveError(errorMessage(thrown));
       return;
     }
     void pending.then(
@@ -189,133 +368,146 @@ export function NoteEditor({ value, onSave, onCancel }: NoteEditorProps) {
       (rejection: unknown) => {
         if (!mounted.current) return;
         setSaving(false);
-        setError(errorMessage(rejection));
+        setSaveError(errorMessage(rejection));
       }
     );
   };
 
   return (
     <div className="flex flex-col gap-9" data-testid="note-editor">
+      {/* The alert lives INSIDE the sticky bar: the Save button that produced it
+          stays pinned, so on a long note the reason must stay pinned with it. */}
       <div
-        className="sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 px-2 py-2.5"
+        className="sticky top-0 z-10 -mx-2 flex flex-col gap-2 px-2 py-2.5"
         style={{
           background: 'var(--surface-translucent)',
           backdropFilter: 'saturate(180%) blur(12px)',
           borderBottom: '1px solid var(--border-subtle)',
         }}
       >
-        <span className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-          Editing note
-        </span>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
+            Editing note
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
         </div>
+        {message && (
+          <p role="alert" className="text-[13px] leading-[1.5]" style={{ color: 'var(--danger)' }}>
+            {message}
+          </p>
+        )}
       </div>
 
-      {error && (
-        <p
-          role="alert"
-          className="text-[13.5px] leading-[1.55]"
-          style={{ color: 'var(--danger)', maxWidth: '64ch', marginTop: '-24px' }}
-        >
-          {error}
-        </p>
-      )}
+      <div className="flex flex-col gap-9" style={EDITOR_BODY_STYLE}>
+        <section className="flex flex-col gap-3">
+          <FieldLabel htmlFor={summaryId}>Summary</FieldLabel>
+          <GrowingTextarea
+            id={summaryId}
+            value={draft.summary}
+            onChange={(next) => applyEdit((prev) => ({ ...prev, summary: next }))}
+            placeholder="Write the summary…"
+            minHeight={110}
+            fontSize={15.5}
+            invalid={invalid?.kind === 'summary'}
+          />
+        </section>
 
-      <section className="flex flex-col gap-3">
-        <FieldLabel htmlFor={summaryId}>Summary</FieldLabel>
-        <GrowingTextarea
-          id={summaryId}
-          value={draft.summary}
-          onChange={(next) => setDraft((prev) => ({ ...prev, summary: next }))}
-          placeholder="Write the summary…"
-          minHeight={110}
-          fontSize={15.5}
-        />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <FieldLabel>Key topics</FieldLabel>
-        <div className="flex flex-col gap-5">
-          {draft.discussionAreas.map((area, i) => (
-            <div key={i} className="flex flex-col gap-2">
-              <div className="flex items-start gap-2">
-                <RowInput
-                  aria-label={`Topic ${i + 1} title`}
-                  value={area.title}
+        <section className="flex flex-col gap-3">
+          <FieldLabel>Key topics</FieldLabel>
+          <div className="flex flex-col gap-5">
+            {draft.discussionAreas.map((area, i) => (
+              <div key={i} className="flex flex-col gap-2">
+                <Row>
+                  <RowInput
+                    aria-label={`Topic ${i + 1} title`}
+                    value={area.title}
+                    onChange={(next) =>
+                      applyEdit((prev) => ({
+                        ...prev,
+                        discussionAreas: prev.discussionAreas.map((a, j) =>
+                          j === i ? { ...a, title: next } : a
+                        ),
+                      }))
+                    }
+                    placeholder="Topic"
+                    weight={600}
+                    invalid={
+                      invalid?.kind === 'discussionAreas' &&
+                      invalid.index === i &&
+                      invalid.part === 'title'
+                    }
+                  />
+                  <RemoveButton
+                    label={`Remove topic ${i + 1}`}
+                    onClick={() =>
+                      applyEdit((prev) => ({
+                        ...prev,
+                        discussionAreas: prev.discussionAreas.filter((_, j) => j !== i),
+                      }))
+                    }
+                  />
+                </Row>
+                <GrowingTextarea
+                  aria-label={`Topic ${i + 1} notes`}
+                  value={area.analysis ?? ''}
                   onChange={(next) =>
-                    setDraft((prev) => ({
+                    applyEdit((prev) => ({
                       ...prev,
                       discussionAreas: prev.discussionAreas.map((a, j) =>
-                        j === i ? { ...a, title: next } : a
+                        j === i ? { ...a, analysis: next } : a
                       ),
                     }))
                   }
-                  placeholder="Topic"
-                  weight={600}
-                />
-                <RemoveButton
-                  label={`Remove topic ${i + 1}`}
-                  onClick={() =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      discussionAreas: prev.discussionAreas.filter((_, j) => j !== i),
-                    }))
+                  placeholder="What was discussed…"
+                  minHeight={64}
+                  fontSize={14}
+                  invalid={
+                    invalid?.kind === 'discussionAreas' &&
+                    invalid.index === i &&
+                    invalid.part === 'analysis'
                   }
                 />
               </div>
-              <GrowingTextarea
-                aria-label={`Topic ${i + 1} notes`}
-                value={area.analysis ?? ''}
-                onChange={(next) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    discussionAreas: prev.discussionAreas.map((a, j) =>
-                      j === i ? { ...a, analysis: next } : a
-                    ),
-                  }))
-                }
-                placeholder="What was discussed…"
-                minHeight={64}
-                fontSize={14}
-                className="mr-9"
-              />
-            </div>
-          ))}
-          <AddButton
-            label="Add topic"
-            onClick={() =>
-              setDraft((prev) => ({
-                ...prev,
-                discussionAreas: [...prev.discussionAreas, { title: '', analysis: '' }],
-              }))
-            }
-          />
-        </div>
-      </section>
+            ))}
+            <AddButton
+              label="Add topic"
+              onClick={() =>
+                applyEdit((prev) => ({
+                  ...prev,
+                  discussionAreas: [...prev.discussionAreas, { title: '', analysis: '' }],
+                }))
+              }
+            />
+          </div>
+        </section>
 
-      <ListSection
-        title="Key points"
-        entryLabel="Key point"
-        addLabel="Add key point"
-        placeholder="A point worth remembering"
-        entries={draft.keyPoints}
-        onChange={(next) => setList('keyPoints', next)}
-      />
+        <ListSection
+          title="Key points"
+          entryLabel="Key point"
+          addLabel="Add key point"
+          placeholder="A point worth remembering"
+          entries={draft.keyPoints}
+          invalidIndex={invalid?.kind === 'keyPoints' ? invalid.index : null}
+          onChange={(next) => setList('keyPoints', next)}
+        />
 
-      <ListSection
-        title="Action items"
-        entryLabel="Action item"
-        addLabel="Add action item"
-        placeholder="Who does what"
-        entries={draft.actionItems}
-        onChange={(next) => setList('actionItems', next)}
-      />
+        <ListSection
+          title="Action items"
+          entryLabel="Action item"
+          addLabel="Add action item"
+          placeholder="Who does what"
+          entries={draft.actionItems}
+          invalidIndex={invalid?.kind === 'actionItems' ? invalid.index : null}
+          onChange={(next) => setList('actionItems', next)}
+        />
+      </div>
     </div>
   );
 }
@@ -350,10 +542,10 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.R
 const FIELD_CLASS =
   'w-full rounded-lg px-2.5 py-2 outline-none transition-shadow focus:ring-2 focus:ring-[color:var(--focus-ring)]';
 
-function fieldStyle(fontSize: number, weight = 400): React.CSSProperties {
+function fieldStyle(fontSize: number, weight = 400, invalid = false): React.CSSProperties {
   return {
     background: 'var(--surface-raised)',
-    border: '1px solid var(--border-subtle)',
+    border: `1px solid ${invalid ? 'var(--danger)' : 'var(--border-subtle)'}`,
     color: 'var(--fg-1)',
     fontFamily: 'var(--font-sans)',
     fontSize,
@@ -362,18 +554,29 @@ function fieldStyle(fontSize: number, weight = 400): React.CSSProperties {
   };
 }
 
-/** Single-line by construction — see LINE_BREAK above for why this is not a textarea. */
+/** Field + remove button, laid out so the field ends on the shared measure. */
+function Row({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid items-center gap-0" style={ROW_STYLE}>
+      {children}
+    </div>
+  );
+}
+
+/** Single-line by construction, see LINE_BREAK above for why this is not a textarea. */
 function RowInput({
   value,
   onChange,
   placeholder,
   weight,
+  invalid,
   ...rest
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
   weight?: number;
+  invalid?: boolean;
   'aria-label': string;
 }) {
   return (
@@ -383,9 +586,10 @@ function RowInput({
       value={value}
       placeholder={placeholder}
       spellCheck
+      aria-invalid={invalid || undefined}
       onChange={(e) => onChange(e.target.value)}
       className={FIELD_CLASS}
-      style={{ ...fieldStyle(14.5, weight), maxWidth: '64ch' }}
+      style={fieldStyle(14.5, weight, invalid)}
     />
   );
 }
@@ -397,7 +601,7 @@ function GrowingTextarea({
   placeholder,
   minHeight,
   fontSize,
-  className,
+  invalid,
   ...rest
 }: {
   value: string;
@@ -405,7 +609,7 @@ function GrowingTextarea({
   placeholder?: string;
   minHeight: number;
   fontSize: number;
-  className?: string;
+  invalid?: boolean;
   id?: string;
   'aria-label'?: string;
 }) {
@@ -426,9 +630,10 @@ function GrowingTextarea({
       placeholder={placeholder}
       spellCheck
       rows={2}
+      aria-invalid={invalid || undefined}
       onChange={(e) => onChange(e.target.value)}
-      className={`${FIELD_CLASS} resize-none ${className ?? ''}`}
-      style={{ ...fieldStyle(fontSize), minHeight, maxWidth: '64ch' }}
+      className={`${FIELD_CLASS} resize-none`}
+      style={{ ...fieldStyle(fontSize, 400, invalid), minHeight }}
     />
   );
 }
@@ -440,7 +645,7 @@ function RemoveButton({ label, onClick }: { label: string; onClick: () => void }
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)]"
+      className="inline-flex size-7 shrink-0 items-center justify-center justify-self-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--focus-ring)]"
       style={{ color: 'var(--fg-2)' }}
     >
       <X className="size-[14px]" />
@@ -468,6 +673,7 @@ function ListSection({
   addLabel,
   placeholder,
   entries,
+  invalidIndex,
   onChange,
 }: {
   title: string;
@@ -475,6 +681,7 @@ function ListSection({
   addLabel: string;
   placeholder: string;
   entries: string[];
+  invalidIndex: number | null;
   onChange: (next: string[]) => void;
 }) {
   return (
@@ -482,18 +689,19 @@ function ListSection({
       <FieldLabel>{title}</FieldLabel>
       <div className="flex flex-col gap-2">
         {entries.map((entry, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <Row key={i}>
             <RowInput
               aria-label={`${entryLabel} ${i + 1}`}
               value={entry}
               placeholder={placeholder}
+              invalid={invalidIndex === i}
               onChange={(next) => onChange(entries.map((e, j) => (j === i ? next : e)))}
             />
             <RemoveButton
               label={`Remove ${entryLabel.toLowerCase()} ${i + 1}`}
               onClick={() => onChange(entries.filter((_, j) => j !== i))}
             />
-          </div>
+          </Row>
         ))}
         <AddButton label={addLabel} onClick={() => onChange([...entries, ''])} />
       </div>

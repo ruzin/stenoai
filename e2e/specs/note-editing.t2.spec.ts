@@ -3,7 +3,7 @@ import { writeMeetingMarkdown } from '../fixtures/user-config';
 import { readFileSync } from 'fs';
 
 /**
- * T2 — editing a generated note (D9). Drives the REAL app end to end: open a
+ * T2: editing a generated note (D9). Drives the REAL app end to end: open a
  * seeded markdown note, click the Edit affordance, retype the summary and an
  * action item, Save, then close the app and relaunch it against the same user
  * data dir.
@@ -93,6 +93,43 @@ test('an edited note is written to the .md and survives a relaunch', async ({
   await second.page.getByText('Budget Review').first().click();
   await expect(second.page.getByTestId('tab-summary-content')).toContainText('Q3 budget');
   await expect(second.page.getByText(NEW_ACTION)).toBeVisible();
+});
+
+test('leaving the view with unsaved edits asks first', async ({ launchApp, userDataDir }) => {
+  const file = writeMeetingMarkdown(userDataDir, 'leaving', {
+    name: 'Leaving Note',
+    summaryMarkdown: SUMMARY_MARKDOWN,
+    transcript: 'Nothing to see here.',
+  });
+
+  const { page } = await launchApp();
+  await page.getByText('Leaving Note').first().click();
+  await page.getByRole('button', { name: 'Edit note' }).click();
+
+  const back = page.getByRole('button', { name: 'Back to home' });
+
+  // Nothing typed yet: there is nothing to lose, so no dialog.
+  await back.click();
+  await expect(page.getByTestId('meeting-detail')).toHaveCount(0);
+
+  await page.getByText('Leaving Note').first().click();
+  await page.getByRole('button', { name: 'Edit note' }).click();
+  await page.getByRole('textbox', { name: 'Summary', exact: true }).fill('Typed but not saved.');
+
+  // Now one click on Home has to ask rather than discard silently.
+  await back.click();
+  await expect(page.locator('[data-confirm-dialog]')).toBeVisible();
+  await page.getByRole('button', { name: 'Keep editing' }).click();
+  await expect(page.getByTestId('note-editor')).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Summary', exact: true })).toHaveValue(
+    'Typed but not saved.'
+  );
+
+  // Confirming leaves, and the unsaved draft was never written.
+  await back.click();
+  await page.getByRole('button', { name: 'Discard and leave' }).click();
+  await expect(page.getByTestId('meeting-detail')).toHaveCount(0);
+  expect(readFileSync(file, 'utf8')).not.toContain('Typed but not saved.');
 });
 
 test('a heading typed into a field is refused before it reaches the note', async ({
