@@ -34,6 +34,7 @@ import {
   useGenerateReport,
   useSetActiveReport,
   useDeleteReport,
+  useUpdateMeeting,
   useUpdateUserNotes,
   meetingsKeys,
 } from '@/hooks/useMeetings';
@@ -63,7 +64,7 @@ import {
   useCreateFolder,
 } from '@/hooks/useFolders';
 import { useActiveMeeting } from '@/lib/askBarContext';
-import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
+import { ipc, type Meeting, type Report, type Template, type UpdateMeetingPatch } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { buildNotesCopyText, type StructuredNoteSections } from '@/lib/notesCopy';
 import { buildNotesHtml, hasNotesContent } from '@/lib/notesPdf';
@@ -74,6 +75,7 @@ import { stripReasoning } from '@/lib/markdown';
 import { pendingTitleRegens, streamCache, type StreamPhase } from '@/lib/meetingDetailState';
 import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
 import { useRecording } from '@/hooks/useRecording';
+import { NoteEditor, type NoteDraft } from './NoteEditor';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 
@@ -268,6 +270,20 @@ function DetailContent({
   const [reprocessFailed, setReprocessFailed] = React.useState(false);
   const qc = useQueryClient();
 
+  // Note editing (D9): the generated note is a document until the user asks to
+  // edit it. Declared up here because the streaming listeners below have to see
+  // it; they're registered once per meeting, so they read it through a ref
+  // rather than re-subscribing on every keystroke's re-render.
+  const [editing, setEditing] = React.useState(false);
+  const updateMeeting = useUpdateMeeting();
+  const editingRef = React.useRef(editing);
+  // Layout effect, not a render-time assignment: it still lands before the
+  // renderer yields to the next task, so no IPC chunk can observe a stale
+  // value, and it keeps the ref out of the render path.
+  React.useLayoutEffect(() => {
+    editingRef.current = editing;
+  }, [editing]);
+
   // Report switch: null = the structured Standard summary, otherwise the id of
   // a generated report in meeting.reports. Seeded from the meeting's persisted
   // active_report so reopening a note lands on whatever was last viewed.
@@ -299,6 +315,11 @@ function DetailContent({
     const sessionName = info.name;
     const offChunk = ipc().on.summaryChunk((e) => {
       if (e.summaryFile !== summaryFile) return;
+      // A regenerate that finishes while the user is editing must not swap the
+      // note out from under them. Holding the stream is the conservative choice:
+      // the regenerated note is still on disk and appears as soon as they leave
+      // edit mode.
+      if (editingRef.current) return;
       // Promote from idle too (not just analyzing): an instant-stop note's
       // first-ever summary streams in with no prior reprocess to seed
       // 'analyzing', so without idle→generating the StreamingView (gated on
@@ -613,6 +634,24 @@ function DetailContent({
   };
 
   const summary = meeting.summary?.trim();
+  // Seeded from what the read-only note actually shows, reasoning stripped —
+  // editing the summary must not resurrect a <think> block the UI hides.
+  const noteDraft: NoteDraft = {
+    summary: summary ? stripReasoning(summary) : '',
+    keyPoints: meeting.key_points ?? [],
+    actionItems: asStringArray(meeting.action_items),
+    discussionAreas: asDiscussionAreas(meeting.discussion_areas),
+  };
+  // A rejected mutation (main refuses a forged heading, or the write fails)
+  // propagates to the editor, which keeps edit mode and the typing.
+  const saveNoteEdits = async (patch: UpdateMeetingPatch) => {
+    await updateMeeting.mutateAsync({ summaryFile, patch });
+    setEditing(false);
+  };
+  // Same "is there a note here at all" test the PDF export uses, plus the two
+  // states that are about to rewrite the note anyway.
+  const canEditNote =
+    canExportNotesPdf && !activeReport && streamPhase === 'idle' && !reprocess.isPending;
   const participants = asStringArray(meeting.participants);
   const keyPoints = meeting.key_points ?? [];
   const actionItems = asStringArray(meeting.action_items);
@@ -730,6 +769,23 @@ function DetailContent({
             Home
           </button>
           <div className="flex items-center gap-1">
+            {/* Edit the generated note (D9). Only for the Standard structured
+                note — a template report is generated output with no section
+                grammar to patch — and only while nothing else is rewriting it. */}
+            {tab === 'summary' && !editing && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ActionIconButton
+                    label="Edit note"
+                    onClick={() => setEditing(true)}
+                    disabled={!canEditNote}
+                  >
+                    <PencilLine className="size-[13px]" />
+                  </ActionIconButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Edit note</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 {/* Disabled while a summary/report stream is on screen — the
@@ -776,7 +832,14 @@ function DetailContent({
                     // Disable while a recording is live on THIS note — same
                     // reason the floating CTA hides: don't summarise a
                     // still-growing transcript out from under the recording.
-                    disabled={reprocess.isPending || streamPhase !== 'idle' || isRecordingThisNote}
+                    // Also off while the note editor is open — a regenerate
+                    // would discard the edit being typed.
+                    disabled={
+                      reprocess.isPending ||
+                      streamPhase !== 'idle' ||
+                      isRecordingThisNote ||
+                      editing
+                    }
                   >
                     <RefreshCw
                       className={cn(
@@ -1064,6 +1127,7 @@ function DetailContent({
         onDeleteReport={onDeleteReport}
         onGenerate={onGenerateReport}
         generating={generateReport.isPending}
+        disabled={editing}
       />
 
       {tab === 'summary' && (
@@ -1096,7 +1160,13 @@ function DetailContent({
               </Button>
             </section>
           )}
-          {streamPhase !== 'idle' ? (
+          {editing ? (
+            <NoteEditor
+              value={noteDraft}
+              onSave={saveNoteEdits}
+              onCancel={() => setEditing(false)}
+            />
+          ) : streamPhase !== 'idle' ? (
             <StreamingView text={streamText} phase={streamPhase} chunkProgress={chunkProgress} />
           ) : activeReport ? (
             <section
@@ -1335,6 +1405,7 @@ function NoteViewToggle({
   onDeleteReport,
   onGenerate,
   generating,
+  disabled = false,
 }: {
   tab: 'summary' | 'notes';
   onTab: (t: 'summary' | 'notes') => void;
@@ -1346,6 +1417,9 @@ function NoteViewToggle({
   onDeleteReport: (reportId: string) => void;
   onGenerate: (templateId: string) => void;
   generating: boolean;
+  /** Locked while the note editor is open: every path out of this control
+   *  (switching view, generating a report) would drop unsaved edits. */
+  disabled?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<Report | null>(null);
@@ -1373,7 +1447,7 @@ function NoteViewToggle({
         role="tablist"
         aria-label="Note view"
         className="inline-flex items-stretch overflow-hidden rounded-full"
-        style={{ border: '1px solid var(--border-subtle)' }}
+        style={{ border: '1px solid var(--border-subtle)', opacity: disabled ? 0.5 : 1 }}
       >
         {/* Left — My notes */}
         <button
@@ -1382,6 +1456,7 @@ function NoteViewToggle({
           aria-selected={notesActive}
           data-testid="tab-notes"
           onClick={() => onTab('notes')}
+          disabled={disabled}
           className="inline-flex items-center gap-1.5 px-3 py-1 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           style={{
             background: notesActive ? 'var(--surface-active)' : 'transparent',
@@ -1416,6 +1491,7 @@ function NoteViewToggle({
                 aria-selected={summaryActive}
                 data-testid="tab-summary"
                 onClick={() => onTab('summary')}
+                disabled={disabled}
                 className="inline-flex items-center py-1 pl-3 pr-1.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 style={{ color: summaryActive ? 'var(--fg-1)' : 'var(--fg-2)' }}
               >
@@ -1426,6 +1502,7 @@ function NoteViewToggle({
                   type="button"
                   aria-label="Choose view or template"
                   data-testid="note-view-menu-trigger"
+                  disabled={disabled}
                   className="inline-flex items-center py-1 pl-0.5 pr-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring hover:text-[color:var(--fg-1)]"
                   style={{ color: 'var(--fg-2)' }}
                 >
