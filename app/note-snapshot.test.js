@@ -9,6 +9,7 @@ const {
   readSnapshot,
   captureSnapshot,
   markEdited,
+  editedFieldNames,
 } = require('./note-snapshot');
 
 function tmpNote() {
@@ -100,4 +101,77 @@ test('captureSnapshot still throws for a malformed note path', () => {
 
 test('markEdited still throws for a malformed note path', () => {
   assert.throws(() => markEdited('/x/not-a-note.txt', ['summary']), /_summary\.md/);
+});
+
+// editedFieldNames is what get-meeting hands the renderer, so it is the input
+// to the regenerate guard. Every "nothing was edited" shape has to come back as
+// the SAME empty array: a guard that fires on an unedited note trains the user
+// to click through it, which costs exactly the edits it exists to protect.
+test('editedFieldNames returns [] when there is no sidecar', () => {
+  assert.deepStrictEqual(editedFieldNames(tmpNote()), []);
+});
+
+test('editedFieldNames returns [] for a freshly captured (unedited) snapshot', () => {
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  assert.deepStrictEqual(editedFieldNames(note), []);
+});
+
+test('editedFieldNames returns [] for a corrupt sidecar', () => {
+  const note = tmpNote();
+  fs.writeFileSync(noteSnapshotPath(note), '{ not json', 'utf8');
+  assert.deepStrictEqual(editedFieldNames(note), []);
+});
+
+test('editedFieldNames returns [] for a malformed note path instead of throwing', () => {
+  assert.deepStrictEqual(editedFieldNames('/x/not-a-note.txt'), []);
+});
+
+test('editedFieldNames reports the sections markEdited recorded', () => {
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  markEdited(note, ['summary', 'action_items']);
+  assert.deepStrictEqual(editedFieldNames(note).sort(), ['action_items', 'summary']);
+});
+
+// The sidecar is a file on disk, so its edited_fields can be anything. It ends
+// up rendered in a dialog and must not carry arbitrary text there, and a
+// non-array must not make the guard throw on the way to the renderer.
+test('editedFieldNames drops entries that are not plain field keys', () => {
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  const file = noteSnapshotPath(note);
+  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  snapshot.edited_fields = [
+    'summary',
+    'summary',
+    42,
+    null,
+    { key: 'summary' },
+    '<img src=x onerror=alert(1)>',
+    'a'.repeat(200),
+    'action_items',
+  ];
+  fs.writeFileSync(file, JSON.stringify(snapshot), 'utf8');
+  assert.deepStrictEqual(editedFieldNames(note).sort(), ['action_items', 'summary']);
+});
+
+test('editedFieldNames returns [] when edited_fields is not an array', () => {
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  const file = noteSnapshotPath(note);
+  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  snapshot.edited_fields = 'summary';
+  fs.writeFileSync(file, JSON.stringify(snapshot), 'utf8');
+  assert.deepStrictEqual(editedFieldNames(note), []);
+});
+
+test('editedFieldNames caps a pathological sidecar rather than passing it through', () => {
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  const file = noteSnapshotPath(note);
+  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  snapshot.edited_fields = Array.from({ length: 5000 }, (_, i) => `field_${i}`);
+  fs.writeFileSync(file, JSON.stringify(snapshot), 'utf8');
+  assert.strictEqual(editedFieldNames(note).length, 8);
 });

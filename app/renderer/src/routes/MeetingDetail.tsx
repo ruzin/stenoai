@@ -87,6 +87,49 @@ const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 // of truth that keeps them aligned.
 const EXPORT_CANCELED_ERROR = 'canceled';
 
+// The note-snapshot sidecar records which sections were edited by their storage
+// keys (`action_items`). A confirm dialog has to name them the way the note
+// editor does, in the order the note lays them out, so the user recognises what
+// is about to be replaced.
+const SECTION_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ['summary', 'Summary'],
+  ['discussion_areas', 'Key topics'],
+  ['key_points', 'Key points'],
+  ['action_items', 'Action items'],
+  ['participants', 'Participants'],
+];
+
+/** `action_items` -> `Action items`, for a key this version has no label for.
+ *  A newer app version can record a section this one doesn't know about; naming
+ *  it readably is better than printing a raw key, and far better than declining
+ *  to warn at all. */
+function humaniseFieldKey(field: string): string {
+  const words = field.replace(/_/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : field;
+}
+
+/** The human names of the note sections the user has edited, in the order the
+ *  note shows them (not the order the sidecar accumulated them). Empty for
+ *  every "nothing was edited" shape (absent, null, empty, or not an array),
+ *  because a confirm on a note with no edits to lose is worse than none. */
+export function describeEditedSections(editedFields: string[] | undefined | null): string[] {
+  if (!Array.isArray(editedFields) || editedFields.length === 0) return [];
+  const known = SECTION_LABELS.filter(([key]) => editedFields.includes(key)).map(
+    ([, label]) => label
+  );
+  const knownKeys = new Set(SECTION_LABELS.map(([key]) => key));
+  const unknown = editedFields
+    .filter((f) => typeof f === 'string' && !knownKeys.has(f))
+    .map(humaniseFieldKey);
+  return [...known, ...[...new Set(unknown)]];
+}
+
+/** "Summary", "Summary and Action items", "Summary, Key points and Action items". */
+function formatSectionList(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 interface MeetingDetailProps {
   summaryFile: string;
 }
@@ -449,23 +492,41 @@ function DetailContent({
     );
   };
 
-  const startReprocess = () => {
-    // Synchronous re-entrancy guard (#313 review): the floating dock button's
-    // disabled state arrives one commit late (published via effect to the
-    // reprocess bridge), so a fast double-click there could fire two
-    // overlapping `reprocess` jobs for the same file — main.js deliberately
-    // allows concurrent jobs across files and has no same-file dedupe.
-    // streamCache is a module-level Map written synchronously below, so it
-    // can't lag the way state/props can.
+  // Which sections of this note the user has edited since it was generated, as
+  // main read them from the `_original.json` sidecar. Every path that rebuilds
+  // the note replaces these, so each one asks first. Empty whenever there is
+  // nothing to lose (no sidecar, an unreadable one, or an unedited note), which
+  // is what keeps the confirm off notes it would only teach people to dismiss.
+  const editedSections = React.useMemo(
+    () => describeEditedSections(meeting.edited_fields),
+    [meeting.edited_fields]
+  );
+  const hasNoteEdits = editedSections.length > 0;
+  const editedSectionsText = formatSectionList(editedSections);
+  const [confirmRegenerate, setConfirmRegenerate] = React.useState(false);
+
+  // Synchronous re-entrancy guard (#313 review): the floating dock button's
+  // disabled state arrives one commit late (published via effect to the
+  // reprocess bridge), so a fast double-click there could fire two
+  // overlapping `reprocess` jobs for the same file — main.js deliberately
+  // allows concurrent jobs across files and has no same-file dedupe.
+  // streamCache is a module-level Map written synchronously by the starters
+  // below, so it can't lag the way state/props can.
+  const rebuildInFlight = () => {
     const cached = streamCache.get(summaryFile);
-    if (
+    return (
       reprocess.isPending ||
       streamPhase !== 'idle' ||
       cached?.phase === 'analyzing' ||
       cached?.phase === 'generating'
-    ) {
-      return;
-    }
+    );
+  };
+
+  const runReprocess = () => {
+    // Re-checked here and not only at the entry points: the confirm dialog puts
+    // an arbitrary amount of user time between the click and this call, and a
+    // background job for this note can start in that window.
+    if (rebuildInFlight()) return;
     setStreamText('');
     setStreamPhase('analyzing');
     setChunkProgress(null);
@@ -490,23 +551,30 @@ function DetailContent({
     );
   };
 
+  // The single entry point for "rebuild this note from the transcript". The
+  // header icon, the retry banner and the floating GenerateNotesBar all come
+  // through here, so the guard lives here rather than on each click handler:
+  // one of those three is not even in this component's tree.
+  const startReprocess = () => {
+    if (rebuildInFlight()) return;
+    if (hasNoteEdits) {
+      setConfirmRegenerate(true);
+      return;
+    }
+    runReprocess();
+  };
+
   // Re-transcribe (#266): re-run ASR on the source recording with the current
   // settings, then re-summarise. Reuses the SAME streaming UI as reprocess —
   // the backend drives summary-chunk/-complete keyed by summaryFile — so we only
   // swap which mutation fires. Transcription is silent (no CHUNK), so the view
   // stays in "analyzing" until summarisation streams, matching reprocess's
   // pre-first-chunk state. Mirrors startReprocess's re-entrancy guard + onError.
+  // It rewrites the note too, so it discards edits exactly like a reprocess:
+  // its existing confirm below carries the warning instead of stacking a second
+  // dialog on top of it.
   const startRetranscribe = () => {
-    const cached = streamCache.get(summaryFile);
-    if (
-      retranscribe.isPending ||
-      reprocess.isPending ||
-      streamPhase !== 'idle' ||
-      cached?.phase === 'analyzing' ||
-      cached?.phase === 'generating'
-    ) {
-      return;
-    }
+    if (retranscribe.isPending || rebuildInFlight()) return;
     setStreamText('');
     setStreamPhase('analyzing');
     setChunkProgress(null);
@@ -1388,12 +1456,32 @@ function DetailContent({
         open={retranscribeOpen}
         onOpenChange={setRetranscribeOpen}
         title="Re-transcribe this recording?"
-        description="This re-runs transcription with your current transcription settings, replacing the transcript and regenerating the summary."
+        description={
+          'This re-runs transcription with your current transcription settings, replacing the transcript and regenerating the summary.' +
+          (hasNoteEdits ? ` Your edits to ${editedSectionsText} are replaced.` : '')
+        }
         confirmLabel="Re-transcribe"
+        destructive={hasNoteEdits}
         isPending={retranscribe.isPending}
         onConfirm={() => {
           setRetranscribeOpen(false);
           startRetranscribe();
+        }}
+      />
+
+      {/* Every rebuild path funnels through startReprocess, so this one dialog
+          covers the header CTA, the retry banner and the floating bar. */}
+      <ConfirmDialog
+        open={confirmRegenerate}
+        onOpenChange={setConfirmRegenerate}
+        title="Regenerate notes and replace your edits?"
+        description={`You edited ${editedSectionsText} on this note. Generating notes again rewrites it from the transcript, so those edits are replaced.`}
+        confirmLabel="Regenerate notes"
+        cancelLabel="Keep my edits"
+        destructive
+        onConfirm={() => {
+          setConfirmRegenerate(false);
+          runReprocess();
         }}
       />
 

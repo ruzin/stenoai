@@ -113,4 +113,39 @@ function markEdited(summaryPath, changedFields) {
   return snapshot;
 }
 
-module.exports = { noteSnapshotPath, readSnapshot, captureSnapshot, markEdited, SNAPSHOT_VERSION };
+// A field key the writers above could plausibly have recorded: lowercase ASCII
+// with underscores. The sidecar is an ordinary file on disk, and its
+// edited_fields ends up named in a confirm dialog, so anything that is not
+// shaped like a key is dropped rather than rendered.
+const FIELD_KEY = /^[a-z][a-z0-9_]{0,31}$/;
+// A sane sidecar lists at most the five snapshotted sections. The cap is a
+// bound on a corrupt or hostile file, not a semantic limit.
+const MAX_EDITED_FIELDS = 8;
+
+// The sanitized edited_fields for one note, for the renderer's regenerate
+// guard. Never throws and always returns an array: "no sidecar", "corrupt
+// sidecar", "malformed path" and "never edited" must all reach the UI as the
+// same empty list, so the guard cannot fire on a note that has no edits to
+// lose. This is a reader, and it keeps readSnapshot's never-throws contract
+// rather than relaxing it.
+function editedFieldNames(summaryPath) {
+  const snapshot = readSnapshot(summaryPath);
+  if (!snapshot || !Array.isArray(snapshot.edited_fields)) return [];
+  const seen = [];
+  for (const field of snapshot.edited_fields) {
+    if (typeof field !== 'string' || !FIELD_KEY.test(field)) continue;
+    if (seen.includes(field)) continue;
+    seen.push(field);
+    if (seen.length >= MAX_EDITED_FIELDS) break;
+  }
+  return seen;
+}
+
+module.exports = {
+  noteSnapshotPath,
+  readSnapshot,
+  captureSnapshot,
+  markEdited,
+  editedFieldNames,
+  SNAPSHOT_VERSION,
+};

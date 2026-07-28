@@ -64,6 +64,12 @@ export interface Meeting {
   notes?: string;
   reports?: Report[];
   active_report?: string;
+  /** Sections of this note the user has edited since it was generated, read by
+   *  main from the `_original.json` sidecar (`editedFieldNames`). Always an
+   *  array when it comes from `get-meeting`; optional because the renderer also
+   *  builds synthetic Meeting objects for the live recording. Drives the
+   *  confirm before a regenerate replaces those sections. */
+  edited_fields?: string[];
   /** Synthetic flag set by the renderer for the in-progress recording. Never sent by backend. */
   is_recording?: boolean;
   /** Synthetic flag set by the renderer when a recording is in the processing pipeline (post-stop, pre-summary). */

@@ -70,7 +70,7 @@ const {
   containsStructuralLine,
 } = require('./note-sections');
 const { writeFileAtomicSync } = require('./atomic-write');
-const { readSnapshot, captureSnapshot, markEdited } = require('./note-snapshot');
+const { readSnapshot, captureSnapshot, markEdited, editedFieldNames } = require('./note-snapshot');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -2779,11 +2779,17 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
       // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
       const mdMeeting = parseMeetingMarkdown(content, realResolved);
       const mdSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
-      return { success: true, meeting: { ...mdMeeting, reports: mdSidecar.reports, active_report: mdSidecar.active_report } };
+      // edited_fields comes LAST in every spread so it is always main's own
+      // reading of the sidecar, never a value that happened to be parsed out of
+      // the note file. It drives the regenerate guard, so a note that cannot
+      // supply one has to arrive as an empty list rather than as undefined -
+      // editedFieldNames guarantees that for a missing, corrupt or
+      // wrong-versioned sidecar alike.
+      return { success: true, meeting: { ...mdMeeting, reports: mdSidecar.reports, active_report: mdSidecar.active_report, edited_fields: editedFieldNames(realResolved) } };
     }
     const jsonMeeting = JSON.parse(content);
     const jsonSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
-    return { success: true, meeting: { ...jsonMeeting, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report } };
+    return { success: true, meeting: { ...jsonMeeting, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report, edited_fields: editedFieldNames(realResolved) } };
   } catch (error) {
     return { success: false, error: error.message };
   }
