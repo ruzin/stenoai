@@ -101,6 +101,13 @@ test('an edited note reports its edited sections to the renderer', async ({
   ]);
   const onDisk = JSON.parse(readFileSync(sidecarPath, 'utf8'));
   expect(onDisk.edited_fields.slice().sort()).toEqual(['action_items', 'summary']);
+  // The sidecar is the diff base a later regenerate would warn against
+  // discarding - it has to hold the PRE-edit values, not the edited ones, and
+  // be marked as captured at the moment of a first edit (not at generation,
+  // since this note predates the sidecar and was snapshotted lazily by main).
+  expect(onDisk.original.summary).toBe('The team agreed to ship on Friday.');
+  expect(onDisk.original.action_items).toEqual(['Alice pings the vendor']);
+  expect(onDisk.capture).toBe('first_edit');
 });
 
 test('a note that was never edited reports no edited sections', async ({

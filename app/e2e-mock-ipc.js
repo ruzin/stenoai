@@ -181,6 +181,14 @@ function install({ ipcMain }) {
   // note file; the T1 seeds are consts, so we overlay here instead.
   const meetingOverlay = {};
 
+  // Every update-meeting call, verbatim, so a T1 spec can assert the bridge
+  // was invoked exactly once with exactly the fields it expects (note-edit.t1).
+  // Read via ElectronApplication.evaluate (the main process), not through
+  // window.stenoai in the page: contextBridge's exposed API is read-only from
+  // the renderer's world, so monkey-patching window.stenoai.meetings.update in
+  // page.evaluate silently no-ops instead of recording anything.
+  global.__stenoaiE2eUpdateMeetingCalls = [];
+
   // In-flight soft-deletes (#234), id → the deleted meeting. Mirrors main's
   // pendingDelete map just far enough for undo to hand the row back.
   const pendingDeletes = {};
@@ -403,13 +411,35 @@ function install({ ipcMain }) {
     // permissive default hand the toast an undefined array to map over.
     'list-pending-deletes': async () => ({ success: true, pending: [] }),
 
-    // My notes autosave: persist the overlay so a follow-up get-meeting sees
-    // the edit (mirrors the real update-meeting body-section upsert).
+    // My notes autosave AND the note editor (D9) share this one handler, like
+    // the real update-meeting IPC. `user_notes` overlays the My notes tab; the
+    // four structural note fields overlay the Standard note AND accumulate
+    // into `edited_fields`, mirroring app/note-snapshot.js's markEdited so the
+    // regenerate guard (which reads meeting.edited_fields) sees the same shape
+    // under mock IPC that it would from the real sidecar.
     'update-meeting': async (_event, summaryFile, patch) => {
+      global.__stenoaiE2eUpdateMeetingCalls.push({ summaryFile, patch });
       if (patch && typeof patch.user_notes === 'string') {
         meetingOverlay[summaryFile] = {
           ...(meetingOverlay[summaryFile] || {}),
           user_notes: patch.user_notes,
+        };
+      }
+      const changed = [];
+      for (const key of ['summary', 'key_points', 'action_items', 'discussion_areas']) {
+        if (patch && patch[key] !== undefined) {
+          meetingOverlay[summaryFile] = {
+            ...(meetingOverlay[summaryFile] || {}),
+            [key]: patch[key],
+          };
+          changed.push(key);
+        }
+      }
+      if (changed.length) {
+        const existing = meetingOverlay[summaryFile]?.edited_fields || [];
+        meetingOverlay[summaryFile] = {
+          ...(meetingOverlay[summaryFile] || {}),
+          edited_fields: [...new Set([...existing, ...changed])],
         };
       }
       return { success: true, message: 'ok' };

@@ -41,6 +41,22 @@ const SUMMARY_MARKDOWN = [
 const NEW_SUMMARY = 'The team reviewed the Q3 budget and agreed to proceed on Friday.';
 const NEW_ACTION = 'Anna sends the revised draft';
 
+/**
+ * The body of one `## Heading` section, up to (not including) the next
+ * top-level heading or EOF. Used to prove an edit rewrites only its own
+ * section: the note-sections writers replace a section by locating its start
+ * and end the same way, so this is an independent re-derivation, not a call
+ * into the code under test.
+ */
+function section(raw: string, heading: string): string {
+  const marker = `## ${heading}`;
+  const start = raw.indexOf(marker);
+  if (start === -1) return '';
+  const rest = raw.slice(start + marker.length);
+  const next = rest.search(/\n## /);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 test('an edited note is written to the .md and survives a relaunch', async ({
   launchApp,
   userDataDir,
@@ -50,6 +66,7 @@ test('an edited note is written to the .md and survives a relaunch', async ({
     summaryMarkdown: SUMMARY_MARKDOWN,
     transcript: 'We looked at the numbers and agreed.',
   });
+  const before = readFileSync(file, 'utf8');
 
   const first = await launchApp();
   const page = first.page;
@@ -85,6 +102,13 @@ test('an edited note is written to the .md and survives a relaunch', async ({
   expect(raw).toContain('### Budget');
   expect(raw).toContain('## Transcript');
   expect(raw).not.toContain('Anna sends the draft\n');
+  // The transcript section belongs to no writer this edit touched - its
+  // CONTENT must come back identical, not merely "still present". trimEnd on
+  // both sides accounts for the one documented, intentional side effect of
+  // every section rewrite (note-sections.js's joinSections re-normalizes the
+  // whole body to exactly one trailing newline on every save) - anything
+  // beyond that trailing whitespace would be a real corruption.
+  expect(section(raw, 'Transcript').trimEnd()).toBe(section(before, 'Transcript').trimEnd());
 
   await first.app.close();
 
