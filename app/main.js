@@ -3972,14 +3972,33 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
           (area.analysis === undefined || area.analysis === null || typeof area.analysis === 'string'),
       );
 
+    // A bullet-list entry is ONE line by construction: renderBulletList writes
+    // "- <entry>", and both parsers keep only lines that start with "- "
+    // (app/main.js:2639/2647, and the Python mirror). A second line in an entry
+    // is therefore dropped on the next read, and the save after that rewrites
+    // the section from the parsed array and deletes it from the file too. The
+    // renderer is where such a string first becomes reachable, so refuse it
+    // here rather than joining or truncating it behind the user's back.
+    const LINE_BREAK = /[\r\n]/;
+
     if (updates.summary !== undefined && typeof updates.summary !== 'string') {
       return { success: false, error: 'summary must be a string.' };
     }
-    if (updates.key_points !== undefined && !isStringArray(updates.key_points)) {
-      return { success: false, error: 'key_points must be an array of strings.' };
+    if (updates.key_points !== undefined) {
+      if (!isStringArray(updates.key_points)) {
+        return { success: false, error: 'key_points must be an array of strings.' };
+      }
+      if (updates.key_points.some((item) => LINE_BREAK.test(item))) {
+        return { success: false, error: 'A key point may not contain a line break.' };
+      }
     }
-    if (updates.action_items !== undefined && !isStringArray(updates.action_items)) {
-      return { success: false, error: 'action_items must be an array of strings.' };
+    if (updates.action_items !== undefined) {
+      if (!isStringArray(updates.action_items)) {
+        return { success: false, error: 'action_items must be an array of strings.' };
+      }
+      if (updates.action_items.some((item) => LINE_BREAK.test(item))) {
+        return { success: false, error: 'An action item may not contain a line break.' };
+      }
     }
     if (updates.discussion_areas !== undefined && !isDiscussionAreaList(updates.discussion_areas)) {
       return {
@@ -3991,6 +4010,18 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
     // The renderer is untrusted: a field containing a '## ' line would forge a
     // section boundary and silently rewrite the note's structure for every
     // consumer (both parsers, the clipboard export, the PDF export, org share).
+    //
+    // Scan the NORMALIZED text, because that is the grammar the parsers
+    // actually split on: both of them run normalizeMarkdownForParsing (and its
+    // Python mirror) BEFORE the '## ' split, which breaks a reasoning close-tag
+    // away from a heading glued to it - so "b</think>## Summary" is a legal
+    // mid-line string at write time and a real heading at read time. Anchoring
+    // on '^' alone would let that through, and the forged heading would then
+    // win the parser's last-occurrence rule and blank the real section. This is
+    // not only an attack: the normalizer exists precisely because models emit
+    // that shape, so a user pasting model output hits it by accident. Tying the
+    // gate to the parser's own normalizer keeps the two from drifting apart.
+    // Reject, never strip: silently rewriting the user's text is worse.
     const textCandidates = [
       updates.summary,
       ...(Array.isArray(updates.key_points) ? updates.key_points : []),
@@ -3999,7 +4030,7 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
         ? updates.discussion_areas.flatMap((area) => [area && area.title, area && area.analysis])
         : []),
     ].filter((value) => typeof value === 'string');
-    if (textCandidates.some(containsStructuralLine)) {
+    if (textCandidates.some((value) => containsStructuralLine(normalizeMarkdownForParsing(value)))) {
       return { success: false, error: 'A note field may not contain a markdown heading.' };
     }
 

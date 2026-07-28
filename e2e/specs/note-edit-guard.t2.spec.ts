@@ -1,0 +1,189 @@
+import { test, expect } from '../fixtures/electron';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
+import path from 'path';
+
+/**
+ * T2 - the input gate on update-meeting's note content fields, driven through
+ * the REAL preload bridge against the REAL handler (main.js), asserting the
+ * note file on disk.
+ *
+ * The gate exists because the renderer is untrusted and because both parsers
+ * (parseMeetingMarkdown here, _parse_meeting_markdown in simple_recorder.py)
+ * read a note by splitting on `## ` AFTER normalizeMarkdownForParsing has
+ * broken a reasoning close-tag away from a heading glued to it. So a value like
+ * `b</think>## Summary` is a harmless mid-line string when it is written and a
+ * real section boundary when it is read - and the forged heading, being the
+ * last occurrence, wins the parsers' last-one-wins rule and blanks the real
+ * section everywhere the note is consumed (detail page, clipboard, PDF, org
+ * share). Worse, it is unrecoverable through the UI: the section writers match
+ * `line.startsWith('## ')` and cannot see a mid-line heading, so every later
+ * edit writes the real section while the parser keeps reading the forged one.
+ *
+ * Not adversarial-only: the normalizer exists because reasoning models emit
+ * exactly that shape, so pasting model output into a note is enough to hit it.
+ *
+ * The other half of the gate is line breaks inside a bullet entry, which the
+ * parsers drop (they keep only lines starting with `- `) and the next save then
+ * deletes from the file.
+ *
+ * Model-free: a seeded note plus the note IPCs, no ASR and no Ollama.
+ */
+
+const NOTE = [
+  '---',
+  'title: "Guarded Note"',
+  'date: "2026-07-12T10:00:00"',
+  'duration_seconds: 600',
+  'language: "en"',
+  'is_diarised: false',
+  '---',
+  '',
+  '## Summary',
+  '',
+  'The team agreed to ship on Friday.',
+  '',
+  '## Key Topics',
+  '',
+  '### Billing',
+  '',
+  'The migration is blocked on the vendor.',
+  '',
+  '## Key Points',
+  '',
+  '- Ship Friday',
+  '',
+  '## Action Items',
+  '',
+  '- Alice pings the vendor',
+  '',
+  '## Transcript',
+  '',
+  'Alice: we ship Friday.',
+  '',
+].join('\n');
+
+test('update-meeting rejects a forged section boundary in every content field', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  test.setTimeout(60_000);
+  const outputDir = path.join(userDataDir, 'output');
+  mkdirSync(outputDir, { recursive: true });
+  const summaryPath = path.join(outputDir, 'guarded_summary.md');
+  writeFileSync(summaryPath, NOTE, 'utf-8');
+
+  const { page } = await launchApp();
+  const update = (patch: Record<string, unknown>) =>
+    page.evaluate(
+      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+      [summaryPath, patch] as const,
+    );
+
+  // Every field that reaches a section writer, each carrying a heading that is
+  // mid-line as written and a real heading once normalized.
+  const forged = 'b</think>## Summary';
+  const patches: Array<Record<string, unknown>> = [
+    { summary: forged },
+    { key_points: [forged] },
+    { action_items: [forged] },
+    { discussion_areas: [{ title: forged, analysis: 'ok' }] },
+    { discussion_areas: [{ title: 'ok', analysis: forged }] },
+    // The normalizer's whole tag set, case-insensitively.
+    { summary: 'x</thinking>## Transcript' },
+    { summary: 'x</REASONING>   ### Topic' },
+    { summary: 'x</thought>\n## Summary' },
+    // A plain leading heading still has to be caught (the original gate).
+    { summary: '## Summary\nforged' },
+  ];
+
+  for (const patch of patches) {
+    const res = await update(patch);
+    expect(res, `expected rejection for ${JSON.stringify(patch)}`).toMatchObject({
+      success: false,
+      error: 'A note field may not contain a markdown heading.',
+    });
+    // Nothing was written: the gate runs before the note is read or written.
+    expect(readFileSync(summaryPath, 'utf8')).toBe(NOTE);
+  }
+});
+
+test('update-meeting rejects a line break inside a key point or action item', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  test.setTimeout(60_000);
+  const outputDir = path.join(userDataDir, 'output');
+  mkdirSync(outputDir, { recursive: true });
+  const summaryPath = path.join(outputDir, 'bullets_summary.md');
+  writeFileSync(summaryPath, NOTE, 'utf-8');
+
+  const { page } = await launchApp();
+  const update = (patch: Record<string, unknown>) =>
+    page.evaluate(
+      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+      [summaryPath, patch] as const,
+    );
+
+  const r1 = await update({ key_points: ['line one\nline two'] });
+  expect(r1).toMatchObject({ success: false, error: 'A key point may not contain a line break.' });
+  expect(readFileSync(summaryPath, 'utf8')).toBe(NOTE);
+
+  const r2 = await update({ action_items: ['do this\r\nand that'] });
+  expect(r2).toMatchObject({
+    success: false,
+    error: 'An action item may not contain a line break.',
+  });
+  expect(readFileSync(summaryPath, 'utf8')).toBe(NOTE);
+
+  // A multi-line SUMMARY is legitimate - the section carries prose, and the
+  // parser returns the whole block. Only bullet entries are single-line.
+  const r3 = await update({ summary: 'First paragraph.\n\nSecond paragraph.' });
+  expect(r3.success).toBe(true);
+  expect(readFileSync(summaryPath, 'utf8')).toContain(
+    '## Summary\n\nFirst paragraph.\n\nSecond paragraph.\n',
+  );
+});
+
+test('the heading gate does not reject legitimate text that merely contains a hash', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  test.setTimeout(60_000);
+  const outputDir = path.join(userDataDir, 'output');
+  mkdirSync(outputDir, { recursive: true });
+  const summaryPath = path.join(outputDir, 'hashes_summary.md');
+  writeFileSync(summaryPath, NOTE, 'utf-8');
+
+  const { page } = await launchApp();
+  const update = (patch: Record<string, unknown>) =>
+    page.evaluate(
+      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+      [summaryPath, patch] as const,
+    );
+
+  // None of these is a heading to either the writers or the parsers: no space
+  // after the hashes, a hash mid-line, or a hash inside a word.
+  const legit = 'Ported ##Foo to C# and tagged it #hashtag; issue #42 is next.';
+  const res = await update({
+    summary: legit,
+    key_points: [legit],
+    action_items: [legit],
+    discussion_areas: [{ title: 'C# migration', analysis: legit }],
+  });
+  expect(res.success).toBe(true);
+
+  const md = readFileSync(summaryPath, 'utf8');
+  expect(md).toContain(`## Summary\n\n${legit}\n`);
+  expect(md).toContain(`- ${legit}`);
+  expect(md).toContain('### C# migration');
+  // The note still has exactly the sections it started with.
+  expect(md.match(/^## /gm)?.length).toBe(5);
+
+  // And the parser agrees, so nothing was smuggled into a new section.
+  const parsed = await page.evaluate(async (f) => {
+    const r = await window.stenoai.meetings.get(f as string);
+    return r.success ? r.meeting : { error: r.error };
+  }, summaryPath);
+  expect(parsed.summary).toBe(legit);
+  expect(parsed.key_points).toEqual([legit]);
+});
