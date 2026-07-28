@@ -62,6 +62,15 @@ const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { userNotesFilePath } = require('./notes-file');
+const {
+  setSummary,
+  setKeyPoints,
+  setActionItems,
+  setDiscussionAreas,
+  containsStructuralLine,
+} = require('./note-sections');
+const { writeFileAtomicSync } = require('./atomic-write');
+const { readSnapshot, captureSnapshot, markEdited } = require('./note-snapshot');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -3921,6 +3930,12 @@ function upsertUserNotesSection(body, notes) {
 }
 
 ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
+  // Which note content fields this call rewrote. Declared at handler scope, not
+  // inside the markdown branch, so the single write site further down can record
+  // the edit without guessing whether the variable exists. Only the markdown
+  // branch fills it: the legacy .json format has no snapshot sidecar and keeps
+  // its previous behaviour, so it always reports an empty list.
+  const changed = [];
   try {
     // Security: the renderer is untrusted, so containment-check the summary path
     // (symlink-safe, output/ only) and operate exclusively on the canonical
@@ -3930,6 +3945,63 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       return { success: false, error: validated.error };
     }
     const { realPath } = validated;
+
+    if (!updates || typeof updates !== 'object') {
+      return { success: false, error: 'Invalid update payload' };
+    }
+
+    // Type-check the note content fields before anything is read or written.
+    // The section writers coerce with String(), so a wrong-typed value would
+    // not fail loudly - it would land in the note as "[object Object]", and a
+    // nested one would slip a forged heading past the structural scan below,
+    // which can only inspect strings: key_points: [['## Transcript']] holds no
+    // string to scan yet stringifies straight back into a heading. Rejecting
+    // the whole payload is both safer and kinder than writing a mangled note.
+    const isStringArray = (value) =>
+      Array.isArray(value) && value.every((item) => typeof item === 'string');
+    // `analysis` may be absent (or null, which is how an empty analysis can
+    // come back through a JSON round trip); a title is what makes a topic.
+    const isDiscussionAreaList = (value) =>
+      Array.isArray(value) &&
+      value.every(
+        (area) =>
+          area !== null &&
+          typeof area === 'object' &&
+          !Array.isArray(area) &&
+          typeof area.title === 'string' &&
+          (area.analysis === undefined || area.analysis === null || typeof area.analysis === 'string'),
+      );
+
+    if (updates.summary !== undefined && typeof updates.summary !== 'string') {
+      return { success: false, error: 'summary must be a string.' };
+    }
+    if (updates.key_points !== undefined && !isStringArray(updates.key_points)) {
+      return { success: false, error: 'key_points must be an array of strings.' };
+    }
+    if (updates.action_items !== undefined && !isStringArray(updates.action_items)) {
+      return { success: false, error: 'action_items must be an array of strings.' };
+    }
+    if (updates.discussion_areas !== undefined && !isDiscussionAreaList(updates.discussion_areas)) {
+      return {
+        success: false,
+        error: 'discussion_areas must be an array of { title, analysis } objects.',
+      };
+    }
+
+    // The renderer is untrusted: a field containing a '## ' line would forge a
+    // section boundary and silently rewrite the note's structure for every
+    // consumer (both parsers, the clipboard export, the PDF export, org share).
+    const textCandidates = [
+      updates.summary,
+      ...(Array.isArray(updates.key_points) ? updates.key_points : []),
+      ...(Array.isArray(updates.action_items) ? updates.action_items : []),
+      ...(Array.isArray(updates.discussion_areas)
+        ? updates.discussion_areas.flatMap((area) => [area && area.title, area && area.analysis])
+        : []),
+    ].filter((value) => typeof value === 'string');
+    if (textCandidates.some(containsStructuralLine)) {
+      return { success: false, error: 'A note field may not contain a markdown heading.' };
+    }
 
     // Read existing data
     if (!fs.existsSync(realPath)) {
@@ -3967,6 +4039,15 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       let updatedAt = new Date().toISOString();
       let body = raw;
       let updatedRaw = raw;
+
+      // Does this call touch the note's generated content (as opposed to only
+      // its title or the user's own notes)? Drives the snapshot capture and the
+      // missing-frontmatter guard below.
+      const structural =
+        updates.summary !== undefined ||
+        updates.key_points !== undefined ||
+        updates.action_items !== undefined ||
+        updates.discussion_areas !== undefined;
 
       if (raw.startsWith('---')) {
         // Split with NO limit and rejoin the tail: split('---', 3) DISCARDS any
@@ -4020,11 +4101,81 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
           if (updates.user_notes !== undefined) {
             body = upsertUserNotesSection(body, updates.user_notes);
           }
+
+          // Snapshot BEFORE the first structural edit. For a note that predates
+          // this feature the current content is the model's own output, because
+          // the note has never been editable - so a lazy capture here is still
+          // an accurate original.
+          if (structural && !readSnapshot(realPath)) {
+            try {
+              const before = parseMeetingMarkdown(raw, realPath);
+              captureSnapshot(
+                realPath,
+                {
+                  summary: before.summary,
+                  key_points: before.key_points,
+                  action_items: before.action_items,
+                  discussion_areas: before.discussion_areas,
+                  participants: before.participants,
+                },
+                'first_edit',
+              );
+            } catch (snapshotError) {
+              // note-snapshot's writes throw by design (a path it cannot derive
+              // a sidecar from must not be written to). That contract protects
+              // the note, and it must not also cost the user their edit: the
+              // sidecar is a diff base for later learning, the edit is the
+              // product. Log it and save anyway. The cost is that this note has
+              // no original to compare against, so a later regenerate cannot
+              // warn that it is about to discard edits (see the regenerate
+              // guard) - worth surfacing in the log, not worth refusing a save
+              // that would otherwise succeed.
+              console.error('Note snapshot capture failed (saving anyway):', snapshotError);
+            }
+          }
+
+          if (updates.summary !== undefined) {
+            body = setSummary(body, updates.summary);
+            changed.push('summary');
+          }
+          if (updates.discussion_areas !== undefined) {
+            body = setDiscussionAreas(body, updates.discussion_areas);
+            changed.push('discussion_areas');
+          }
+          if (updates.key_points !== undefined) {
+            body = setKeyPoints(body, updates.key_points);
+            changed.push('key_points');
+          }
+          if (updates.action_items !== undefined) {
+            body = setActionItems(body, updates.action_items);
+            changed.push('action_items');
+          }
+
           updatedRaw = `---${newLines.join('\n')}---${body}`;
         }
       }
 
-      fs.writeFileSync(realPath, updatedRaw, 'utf8');
+      // A content edit only reaches `body` inside the frontmatter block above.
+      // If we get here with structural updates and nothing recorded, the note
+      // had no parsable frontmatter and the edit was silently dropped - report
+      // that instead of returning success over a file we did not change.
+      if (structural && changed.length === 0) {
+        return { success: false, error: 'Note has no readable frontmatter; refusing to edit it.' };
+      }
+
+      // Atomic: a crash or a full disk mid-write must not leave a truncated
+      // note behind, and this write can now carry the summary itself.
+      writeFileAtomicSync(realPath, updatedRaw);
+      if (changed.length) {
+        try {
+          markEdited(realPath, changed);
+        } catch (snapshotError) {
+          // Same trade as the capture above: the note is already saved, so a
+          // sidecar bookkeeping failure must not turn a successful save into a
+          // reported failure.
+          console.error('Note snapshot update failed (note was saved):', snapshotError);
+        }
+      }
 
       data = {
         session_info: {
@@ -4063,7 +4214,10 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
 
     return {
       success: true,
-      message: 'Meeting updated successfully'
+      message: 'Meeting updated successfully',
+      // Markdown notes only: which generated sections this call rewrote. Empty
+      // for a title/notes-only save and for the legacy .json format.
+      edited_fields: changed,
     };
   } catch (error) {
     console.error('Update meeting error:', error);
