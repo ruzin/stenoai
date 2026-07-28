@@ -8,6 +8,35 @@ const { writeFileAtomicSync } = require('./atomic-write');
 // could tell a correction from the text it replaced.
 const SNAPSHOT_VERSION = 1;
 
+// WHO MAY OVERWRITE <stem>_original.json. Two processes write this file with
+// deliberately OPPOSITE rules; this is the single place that definition lives,
+// and simple_recorder.py's _write_original_snapshot docstring points here.
+//
+//   * Python, after WRITING THE NOTE (_write_original_snapshot, called from the
+//     pipeline and from reprocess): overwrites unconditionally. It has just
+//     replaced the note's entire generated content, so any snapshot on disk now
+//     describes text that no longer exists. Keeping it would leave a diff base
+//     that is wrong about every field, which is worse than none - and its
+//     edited_fields would go on claiming edits the regenerate already discarded,
+//     so the regenerate confirm would fire forever on a note with nothing left
+//     to lose.
+//
+//   * JS (captureSnapshot, below): never overwrites. It only ever LAZILY
+//     captures a note it did not generate, so an existing file is by definition
+//     something it did not write and cannot interpret - possibly a newer
+//     version's format. Replacing it with a version-1 snapshot would destroy
+//     data this process does not understand.
+//
+// The rule in one line: only the writer that just (re)generated the note's
+// content may replace its snapshot. Everyone else defers.
+//
+// Known consequence, accepted: downgrading the app and then regenerating a note
+// replaces a future-version sidecar, because the Python writer cannot check a
+// version it has never heard of. That costs a diff base for one note and no
+// note content; guarding it properly needs a forward-compatible version
+// negotiation in both writers, which is not worth building before a version 2
+// exists.
+
 function noteSnapshotPath(summaryPath) {
   const str = String(summaryPath);
   // String.replace returns its input unchanged when the pattern does not
@@ -62,9 +91,26 @@ function captureSnapshot(summaryPath, fields, capture) {
   // get silently replaced with a version-1 snapshot, destroying whatever the
   // newer format held. So: file exists -> never write, return whatever
   // readSnapshot makes of it (the valid snapshot, or null if unreadable).
-  // Only a genuinely absent file is safe to create.
+  // Only a genuinely absent file is safe to create. See "WHO MAY OVERWRITE"
+  // at the top of this file for why Python's writer is allowed to do the
+  // opposite.
   if (fs.existsSync(file)) {
-    return readSnapshot(summaryPath);
+    const existing = readSnapshot(summaryPath);
+    if (!existing) {
+      // The file is there but unusable (corrupt JSON, or a version we don't
+      // know). We decline to write, so this note has no diff base and never
+      // gets one: markEdited below will find nothing, edited_fields stays
+      // empty forever, and the regenerate confirm can never fire for it again.
+      // Neither this nor markEdited throws, so update-meeting's two
+      // console.error handlers never see it - without this line the whole
+      // failure is silent. Recovering (distinguishing corrupt from
+      // newer-version and rewriting the corrupt case) is a separate change.
+      console.warn(
+        `Note snapshot: existing sidecar is unreadable, leaving it alone. ` +
+          `This note keeps no record of its edits: ${file}`,
+      );
+    }
+    return existing;
   }
   const snapshot = {
     version: SNAPSHOT_VERSION,
@@ -84,19 +130,33 @@ function captureSnapshot(summaryPath, fields, capture) {
   return snapshot;
 }
 
-// Read-modify-write with no locking or compare-and-swap: this is safe only
-// because every caller today runs synchronously inside the single Electron
-// main process, so two calls can never interleave. That assumption breaks
-// the day the Python side also writes this sidecar (a later task in this
-// plan) - two processes racing this read-modify-write could each read the
-// same on-disk snapshot, and whichever writes second silently discards the
-// other's edited_fields/edited_at update, with no error and no way to tell
-// afterwards that data was lost. A future cross-process caller must not
-// discover this by losing an edit; it needs either to funnel writes back
-// through the main process (keeping the single-writer property) or to add
-// real concurrency control (a file lock, or a compare-and-swap on version /
-// edited_at before writing) - not attempted here because nothing today
-// exercises the concurrent path.
+// Read-modify-write with no locking and no compare-and-swap. There is no
+// single-writer property to lean on: simple_recorder.py's
+// _write_original_snapshot writes this same file from the backend process
+// (after a pipeline run and after every reprocess), so two processes really can
+// touch it. What makes the missing lock tolerable is which interleavings are
+// reachable, not that none are:
+//
+//   * JS vs JS: impossible. Every JS caller runs synchronously inside the one
+//     Electron main process.
+//   * JS vs Python, on the SAME note: the only ways to start a rebuild while an
+//     editor is open now go through startReprocess (MeetingDetail.tsx), whose
+//     rebuildInFlight() refuses while `editing` is true, and the note is busy
+//     for the duration of a rebuild (isSummaryBusy). So a Save cannot normally
+//     land in the middle of a regenerate.
+//   * What that gate does NOT close: a save arriving through the IPC while a
+//     rebuild started BEFORE the editor opened is still running (a background
+//     regenerate, or a second window). Then Python's unconditional overwrite
+//     and this read-modify-write race, and last-writer-wins silently discards
+//     the loser's edited_fields/edited_at. The cost is the confirm not firing
+//     on a later regenerate, never note content - both writers only ever
+//     rewrite this sidecar, never the note.
+//
+// A caller that widens the concurrent path must not discover this by losing an
+// edit. Closing it properly means either funnelling every write through the
+// main process or adding real concurrency control (a file lock, or a
+// compare-and-swap on version / edited_at) - not attempted here because the
+// reachable window is narrow and costs only the diff base.
 function markEdited(summaryPath, changedFields) {
   // noteSnapshotPath is called directly (not only via readSnapshot below) so
   // a malformed summaryPath throws here, before anything else runs. readSnapshot
@@ -105,7 +165,18 @@ function markEdited(summaryPath, changedFields) {
   // bug instead of surfacing it - the opposite of the intended asymmetry.
   const file = noteSnapshotPath(summaryPath);
   const snapshot = readSnapshot(summaryPath);
-  if (!snapshot) return null;
+  if (!snapshot) {
+    // No usable snapshot: either captureSnapshot never got to write one, or the
+    // file on disk is corrupt / from a newer version. Either way this edit goes
+    // unrecorded and the regenerate confirm will not fire for it. Returning
+    // null silently is what made that invisible; the caller's catch cannot see
+    // it because nothing throws here.
+    console.warn(
+      `Note snapshot: no usable sidecar, so this edit is not recorded and a ` +
+        `later regenerate will not warn about it: ${file}`,
+    );
+    return null;
+  }
   const merged = new Set([...(snapshot.edited_fields || []), ...(changedFields || [])]);
   snapshot.edited_fields = [...merged];
   snapshot.edited_at = new Date().toISOString();

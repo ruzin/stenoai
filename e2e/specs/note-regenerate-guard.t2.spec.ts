@@ -1,4 +1,6 @@
 import { test, expect } from '../fixtures/electron';
+import { writeUserConfig } from '../fixtures/user-config';
+import { startMockOllama } from '../fixtures/mock-ollama';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import path from 'path';
 
@@ -143,6 +145,91 @@ test('a note that was never edited reports no edited sections', async ({
     return r.success ? r.meeting : { error: r.error };
   }, summaryPath);
   expect(meeting.edited_fields).toEqual([]);
+});
+
+/**
+ * The other half of the guard's life cycle. Firing is only half a working
+ * confirm: it also has to STOP firing once the thing it warns about is gone.
+ * A regenerate discards the edits (the user confirmed it, or there was nothing
+ * open to protect), so the note is unedited again and the next regenerate must
+ * go through in silence. Without the reset the dialog would appear on every
+ * later regenerate forever, and a warning that always appears is one people
+ * learn to click through - which costs exactly the edits it exists to protect.
+ *
+ * Driven through the REAL reprocess against the capturing mock Ollama (the
+ * `summarize-contract.t2` pattern): no ASR, no real model, but the actual
+ * `_write_original_snapshot` call that performs the reset.
+ */
+test('a regenerate clears the edits, so the next one does not warn', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  test.setTimeout(90_000);
+  const { summaryPath, sidecarPath } = seedNote(userDataDir, 'relooped');
+  writeUserConfig(userDataDir, { ai_provider: 'local' });
+
+  const ollama = await startMockOllama({
+    chatReply: [
+      '## Summary',
+      'A freshly generated summary.',
+      '',
+      '## Key Points',
+      '- Ship Friday',
+      '',
+      '## Action Items',
+      '- Alice pings the vendor',
+      '',
+    ].join('\n'),
+  });
+  try {
+    const { page } = await launchApp();
+    const editedFields = () =>
+      page.evaluate(async (file) => {
+        const r = await window.stenoai.meetings.get(file as string);
+        return r.success ? r.meeting.edited_fields : { error: r.error };
+      }, summaryPath);
+
+    // 1. Edit it. The guard now has something to warn about.
+    const saved = await page.evaluate(
+      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+      [summaryPath, { summary: 'A correction the user typed.' }] as const,
+    );
+    expect(saved).toMatchObject({ success: true });
+    expect(await editedFields()).toEqual(['summary']);
+
+    // 2. Regenerate. This is the run that discards the correction.
+    const res = await page.evaluate(
+      (f) => window.stenoai.meetings.reprocess(f as string, false, 'Quarterly Review'),
+      summaryPath,
+    );
+    expect(res.success).toBe(true);
+    await expect
+      .poll(() => readFileSync(summaryPath, 'utf8'), { timeout: 60_000 })
+      .toContain('A freshly generated summary.');
+
+    // 3. The record of the edit is gone, so the NEXT regenerate would not
+    //    prompt: `edited_fields` is the only input the confirm fires on, and
+    //    the renderer only ever sees it through this call.
+    await expect.poll(() => editedFields(), { timeout: 30_000 }).toEqual([]);
+    const onDisk = JSON.parse(readFileSync(sidecarPath, 'utf8'));
+    expect(onDisk.edited_fields).toEqual([]);
+    expect(onDisk.edited_at).toBeNull();
+    // And the diff base moved on with the note: the snapshot describes the text
+    // that is in the file now, not the pre-edit text it replaced.
+    expect(onDisk.original.summary).toBe('A freshly generated summary.');
+
+    // 4. A fresh edit re-arms it, so the reset is a reset and not a fuse that
+    //    can only blow once.
+    expect(
+      await page.evaluate(
+        ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+        [summaryPath, { summary: 'Corrected again.' }] as const,
+      ),
+    ).toMatchObject({ success: true });
+    expect(await editedFields()).toEqual(['summary']);
+  } finally {
+    await ollama.close();
+  }
 });
 
 test('a corrupt sidecar reports no edited sections instead of failing the note', async ({

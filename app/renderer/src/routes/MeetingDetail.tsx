@@ -508,13 +508,24 @@ function DetailContent({
   // Synchronous re-entrancy guard (#313 review): the floating dock button's
   // disabled state arrives one commit late (published via effect to the
   // reprocess bridge), so a fast double-click there could fire two
-  // overlapping `reprocess` jobs for the same file — main.js deliberately
+  // overlapping `reprocess` jobs for the same file - main.js deliberately
   // allows concurrent jobs across files and has no same-file dedupe.
   // streamCache is a module-level Map written synchronously by the starters
   // below, so it can't lag the way state/props can.
+  //
+  // `editing` belongs here rather than on each click handler because the two
+  // rebuild paths that are NOT this component's own buttons (the floating
+  // GenerateNotesBar, which calls the published `start`, and the re-transcribe
+  // menu item) would otherwise slip through. With an open editor the stream is
+  // suppressed (editingRef), so a rebuild started here is invisible: Python
+  // rewrites the note, and the next Save patches the FRESH note with the
+  // PRE-regeneration draft, silently replacing content the user never saw. The
+  // #249 standard-backup does not rescue that - it holds the note as it was
+  // BEFORE the regenerate, not the generated text that was just overwritten.
   const rebuildInFlight = () => {
     const cached = streamCache.get(summaryFile);
     return (
+      editing ||
       reprocess.isPending ||
       streamPhase !== 'idle' ||
       cached?.phase === 'analyzing' ||
@@ -1000,7 +1011,14 @@ function DetailContent({
                       reprocess.isPending ||
                       retranscribe.isPending ||
                       streamPhase !== 'idle' ||
-                      isRecordingThisNote
+                      isRecordingThisNote ||
+                      // A re-transcribe rewrites the note exactly like a
+                      // regenerate, so it gets the same editing lock as the two
+                      // Generate-notes CTAs (startRetranscribe's own
+                      // rebuildInFlight check is the authority; this only stops
+                      // the confirm dialog from opening over an editor it can
+                      // no longer act on).
+                      editing
                     }
                   >
                     <Mic className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
@@ -1458,7 +1476,13 @@ function DetailContent({
         title="Re-transcribe this recording?"
         description={
           'This re-runs transcription with your current transcription settings, replacing the transcript and regenerating the summary.' +
-          (hasNoteEdits ? ` Your edits to ${editedSectionsText} are replaced.` : '')
+          // #249: reprocess (which --retranscribe runs through) snapshots the
+          // current note as a switchable report before overwriting it, so the
+          // edited version is one click away in the note view menu rather than
+          // gone. Say so - it is both more reassuring and more accurate.
+          (hasNoteEdits
+            ? ` Your edits to ${editedSectionsText} are replaced, but the edited version is kept in the note view menu.`
+            : '')
         }
         confirmLabel="Re-transcribe"
         destructive={hasNoteEdits}
@@ -1475,7 +1499,7 @@ function DetailContent({
         open={confirmRegenerate}
         onOpenChange={setConfirmRegenerate}
         title="Regenerate notes and replace your edits?"
-        description={`You edited ${editedSectionsText} on this note. Generating notes again rewrites it from the transcript, so those edits are replaced.`}
+        description={`You edited ${editedSectionsText} on this note. Generating notes again rewrites it from the transcript, so those edits are replaced - the edited version is kept in the note view menu.`}
         confirmLabel="Regenerate notes"
         cancelLabel="Keep my edits"
         destructive

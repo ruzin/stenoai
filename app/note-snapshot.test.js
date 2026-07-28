@@ -91,6 +91,45 @@ test('markEdited on a note with no snapshot is a no-op that does not throw', () 
   assert.strictEqual(fs.existsSync(noteSnapshotPath(note)), false);
 });
 
+// Both declines below are silent by construction: neither function throws, so
+// update-meeting's two catch blocks never fire and the user's note keeps saving
+// while its edit bookkeeping is quietly dead. The log line is the only trace,
+// which is exactly why it is worth pinning.
+test('captureSnapshot warns when it declines to write over an unreadable sidecar', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const note = tmpNote();
+  fs.writeFileSync(noteSnapshotPath(note), '{ not json', 'utf8');
+  assert.strictEqual(captureSnapshot(note, FIELDS, 'first_edit'), null);
+  assert.strictEqual(warn.mock.callCount(), 1);
+  assert.match(warn.mock.calls[0].arguments[0], /unreadable/);
+  assert.match(warn.mock.calls[0].arguments[0], /Weekly_Sync_original\.json/);
+});
+
+test('captureSnapshot does not warn when the existing sidecar is perfectly usable', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  assert.ok(captureSnapshot(note, FIELDS, 'first_edit'));
+  assert.strictEqual(warn.mock.callCount(), 0);
+});
+
+test('markEdited warns when there is no usable snapshot to record the edit in', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const note = tmpNote();
+  fs.writeFileSync(noteSnapshotPath(note), JSON.stringify({ version: 999 }), 'utf8');
+  assert.strictEqual(markEdited(note, ['summary']), null);
+  assert.strictEqual(warn.mock.callCount(), 1);
+  assert.match(warn.mock.calls[0].arguments[0], /not recorded/);
+});
+
+test('markEdited does not warn on the ordinary path', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const note = tmpNote();
+  captureSnapshot(note, FIELDS, 'generation');
+  assert.ok(markEdited(note, ['summary']));
+  assert.strictEqual(warn.mock.callCount(), 0);
+});
+
 test('readSnapshot returns null for a malformed note path instead of throwing', () => {
   assert.strictEqual(readSnapshot('/x/not-a-note.txt'), null);
 });

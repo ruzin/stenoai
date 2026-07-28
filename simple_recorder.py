@@ -846,12 +846,19 @@ def _write_original_snapshot(summary_path) -> None:
     before a regenerate discards user corrections, and it is best-effort: a
     failure here must never fail a pipeline run that produced a good note.
 
+    This writer OVERWRITES an existing sidecar unconditionally, while the JS
+    writer (app/note-snapshot.js captureSnapshot) never does. That is one rule,
+    not two conventions: only the writer that just (re)generated the note's
+    content may replace its snapshot. The rule, the reasoning and its accepted
+    downgrade consequence are written down once, in the "WHO MAY OVERWRITE"
+    block at the top of app/note-snapshot.js.
+
     Reads the note back from disk and parses it with `_parse_meeting_markdown`
     (the mirror of app/main.js's parseMeetingMarkdown) rather than reusing a
     streamed-markdown parse: `_parse_streamed_markdown` collapses whitespace
     differently (joins the summary with spaces, strips each topic line), so
     snapshotting its output would disagree with what the note editor itself
-    reads back from this same file — a spurious diff on every unedited note.
+    reads back from this same file - a spurious diff on every unedited note.
     Parsing the just-written file is what makes the two agree by construction.
     """
     try:
@@ -862,7 +869,7 @@ def _write_original_snapshot(summary_path) -> None:
         # noteSnapshotPath. An unanchored str.replace() would silently derive
         # the wrong sidecar path for a summary file that doesn't end in
         # "_summary.md" (e.g. reprocess called on a bare ".md" file) and the
-        # write below would then land on — and destroy — the note itself
+        # write below would then land on - and destroy - the note itself
         # instead of a sidecar next to it. Raise here instead: the except
         # below turns it into a logged warning, never a note-destroying write.
         if not str_path.endswith(suffix):
@@ -889,7 +896,7 @@ def _write_original_snapshot(summary_path) -> None:
         }
         # Atomic write (tempfile + os.replace): a plain write_text() truncates
         # first, and a crash mid-write leaves a torn JSON file. That's worse
-        # than a transient bad read here — readSnapshot (app/note-snapshot.js)
+        # than a transient bad read here - readSnapshot (app/note-snapshot.js)
         # treats unparseable JSON as "absent", but captureSnapshot refuses to
         # overwrite a FILE that already exists, so a torn sidecar permanently
         # loses this note's diff base and silences the regenerate warning for
@@ -3696,7 +3703,7 @@ def chat_global_streaming(question, folder):
 
     # Most-recent first so the model weights newer context higher when token
     # budget is tight. Each block is kept compact (title + summary +
-    # participants + key points + action items) — full transcripts would blow
+    # participants + key points + action items) - full transcripts would blow
     # even a 200k window.
     def sort_key(item):
         _, data = item
@@ -3725,10 +3732,17 @@ def chat_global_streaming(question, folder):
             block.append(summary)
         if participants:
             block.append("Participants:\n" + "\n".join(f"- {_single_line(p)}" for p in participants))
+        # _single_line on every list entry, for the same reason as the
+        # single-meeting builder (_build_meeting_chat_context_parts): a key
+        # point or action item that carries its own newlines would otherwise
+        # render as several lines here, and one of them can look like a forged
+        # "Action items:" label or a "## " block header for the NEXT meeting.
+        # The entries are editable in the note editor, so this is reachable
+        # without any adversary.
         if key_points:
-            block.append("Key points:\n" + "\n".join(f"- {p}" for p in key_points))
+            block.append("Key points:\n" + "\n".join(f"- {_single_line(p)}" for p in key_points))
         if action_items:
-            block.append("Action items:\n" + "\n".join(f"- {a}" for a in action_items))
+            block.append("Action items:\n" + "\n".join(f"- {_single_line(a)}" for a in action_items))
         block_text = "\n".join(block)
         # +5 accounts for the "\n\n---\n\n" separator added later.
         if used_chars + len(block_text) + 5 > CORPUS_CHAR_BUDGET:

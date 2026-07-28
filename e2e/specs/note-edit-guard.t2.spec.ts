@@ -144,6 +144,60 @@ test('update-meeting rejects a line break inside a key point or action item', as
   );
 });
 
+test('a note with no readable frontmatter is refused, not silently accepted', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  test.setTimeout(60_000);
+  // A content edit only ever reaches the note body inside update-meeting's
+  // frontmatter branch. A .md file without a parseable `---` block therefore
+  // falls straight through it: every section writer is skipped and the file is
+  // rewritten byte-identically. Reporting success there is the dangerous
+  // answer - the editor closes, the user believes the correction is saved, and
+  // it is nowhere. This is the whole reason the `changed.length === 0` guard
+  // exists, and nothing pinned it.
+  const outputDir = path.join(userDataDir, 'output');
+  mkdirSync(outputDir, { recursive: true });
+
+  // Two shapes of "no readable frontmatter": no delimiter at all, and an
+  // opening `---` whose block is never closed (a truncated / hand-edited note).
+  const cases: Array<[string, string]> = [
+    ['nofm', '## Summary\n\nThe team agreed to ship on Friday.\n'],
+    ['openfm', '---\ntitle: "Unclosed"\n\n## Summary\n\nThe team agreed to ship on Friday.\n'],
+  ];
+
+  const { page } = await launchApp();
+  for (const [stem, body] of cases) {
+    const summaryPath = path.join(outputDir, `${stem}_summary.md`);
+    writeFileSync(summaryPath, body, 'utf-8');
+
+    const res = await page.evaluate(
+      ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+      [summaryPath, { summary: 'An edit that must not be reported as saved' }] as const,
+    );
+    expect(res, `expected refusal for ${stem}`).toMatchObject({
+      success: false,
+      error: 'Note has no readable frontmatter; refusing to edit it.',
+    });
+    // And the file really is untouched - the refusal is not a rollback message
+    // over a partial write.
+    expect(readFileSync(summaryPath, 'utf8')).toBe(body);
+  }
+
+  // Control: the very same patch on a well-formed note succeeds and lands. The
+  // refusal above is about the note's frontmatter, not about the patch.
+  const goodPath = path.join(outputDir, 'goodfm_summary.md');
+  writeFileSync(goodPath, NOTE, 'utf-8');
+  const ok = await page.evaluate(
+    ([f, p]) => window.stenoai.meetings.update(f as string, p as object),
+    [goodPath, { summary: 'An edit that must not be reported as saved' }] as const,
+  );
+  expect(ok.success).toBe(true);
+  expect(readFileSync(goodPath, 'utf8')).toContain(
+    'An edit that must not be reported as saved',
+  );
+});
+
 test('the heading gate does not reject legitimate text that merely contains a hash', async ({
   launchApp,
   userDataDir,

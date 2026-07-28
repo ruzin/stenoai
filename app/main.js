@@ -4339,8 +4339,9 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
 
     // --- Enumerate the ANCILLARY file set (unlinked only at commit), bound to
     // this note's STEM ONLY (never the renderer-supplied transcript_file /
-    // audio_file): the <stem>_reports.json sidecar and the stem-derived
-    // transcript + recording(s). Only the SUMMARY file itself is hidden.
+    // audio_file): the <stem>_reports.json and <stem>_original.json sidecars and
+    // the stem-derived transcript + recording(s). Only the SUMMARY file itself
+    // is hidden.
     //
     // Deliberately EXCLUDED: `<safeName>_notes.txt`. That draft-notes file is
     // named from the renderer-controlled session title, NOT the stem, so two
@@ -4348,18 +4349,27 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
     // permanently unlink another note's draft. It isn't safely bindable to this
     // note's identity, so we leave it orphaned (the fail-safe direction).
     const ancillaryCandidates = [];
-    // Reports sidecar: <stem>_summary.{md,json} -> <stem>_reports.json.
-    {
+    // Stem-derived sidecars: <stem>_summary.{md,json} -> <stem>_<suffix>.
+    //   _reports.json  - generated template reports (#249 backups included).
+    //   _original.json - the model's own output for this note (app/note-snapshot.js
+    //     and simple_recorder.py's _write_original_snapshot). It holds summary,
+    //     key_points, action_items, discussion_areas AND participants, i.e. the
+    //     substance of the meeting and who was in it. Leaving it behind would
+    //     mean a committed delete still leaves a readable copy of the meeting on
+    //     disk, with no UI that ever shows it - a privacy regression against the
+    //     local-first promise, not just untidiness. Same "unlinked only at
+    //     commit" semantics as the rest: an undo must restore a COMPLETE note.
+    for (const sidecarSuffix of ['_reports.json', '_original.json']) {
       let sidecarBase = null;
       for (const suf of ['_summary.md', '_summary.json']) {
         if (summaryBase.endsWith(suf)) {
-          sidecarBase = summaryBase.slice(0, -suf.length) + '_reports.json';
+          sidecarBase = summaryBase.slice(0, -suf.length) + sidecarSuffix;
           break;
         }
       }
       if (!sidecarBase) {
         const ext = path.extname(summaryBase);
-        sidecarBase = summaryBase.slice(0, summaryBase.length - ext.length) + '_reports.json';
+        sidecarBase = summaryBase.slice(0, summaryBase.length - ext.length) + sidecarSuffix;
       }
       ancillaryCandidates.push(path.join(outputDir, sidecarBase));
     }

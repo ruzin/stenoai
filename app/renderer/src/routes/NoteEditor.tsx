@@ -62,7 +62,18 @@ export interface NotePatchProblem {
   part?: 'title' | 'analysis';
   /** The row's own name, as the editor labels it. */
   fieldLabel: string;
-  /** Ready to show: names the field and says what is wrong with it. */
+  /**
+   * What is wrong, as a sentence tail ("can't contain a line break."). Kept
+   * separate from `fieldLabel` so the component can re-label the message with
+   * the DRAFT row number, which is the one the user can see.
+   */
+  reason: string;
+  /**
+   * Ready to show: names the field and says what is wrong with it. Numbered
+   * from the PATCH, so use it only where there is no draft to locate the row
+   * in (validateNotePatch's own callers and tests); the editor rebuilds it
+   * from the draft index instead.
+   */
   message: string;
 }
 
@@ -76,6 +87,24 @@ interface CandidateField {
   singleLine: boolean;
 }
 
+/**
+ * How the editor names one row, given a POSITION. The same function serves the
+ * patch (where validation happens) and the draft (where the user is looking);
+ * those two positions differ as soon as a blank row precedes the offending one,
+ * which is exactly why the label has to be rebuildable from either.
+ */
+function labelFor(
+  section: NoteSection,
+  index: number | null,
+  part?: 'title' | 'analysis',
+): string {
+  if (section === 'summary') return 'The summary';
+  const n = (index ?? 0) + 1;
+  if (section === 'key_points') return `Key point ${n}`;
+  if (section === 'action_items') return `Action item ${n}`;
+  return part === 'analysis' ? `Topic ${n} notes` : `Topic ${n} title`;
+}
+
 function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
   const fields: CandidateField[] = [];
 
@@ -83,7 +112,7 @@ function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
     fields.push({
       section: 'summary',
       index: null,
-      label: 'The summary',
+      label: labelFor('summary', null),
       value: patch.summary,
       singleLine: false,
     });
@@ -92,7 +121,7 @@ function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
     fields.push({
       section: 'key_points',
       index,
-      label: `Key point ${index + 1}`,
+      label: labelFor('key_points', index),
       value,
       singleLine: true,
     });
@@ -101,7 +130,7 @@ function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
     fields.push({
       section: 'action_items',
       index,
-      label: `Action item ${index + 1}`,
+      label: labelFor('action_items', index),
       value,
       singleLine: true,
     });
@@ -111,7 +140,7 @@ function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
       section: 'discussion_areas',
       index,
       part: 'title',
-      label: `Topic ${index + 1} title`,
+      label: labelFor('discussion_areas', index, 'title'),
       value: area.title,
       singleLine: true,
     });
@@ -120,7 +149,7 @@ function candidateFields(patch: UpdateMeetingPatch): CandidateField[] {
         section: 'discussion_areas',
         index,
         part: 'analysis',
-        label: `Topic ${index + 1} notes`,
+        label: labelFor('discussion_areas', index, 'analysis'),
         value: area.analysis,
         singleLine: false,
       });
@@ -136,6 +165,7 @@ function problemFor(field: CandidateField, reason: string): NotePatchProblem {
     index: field.index,
     part: field.part,
     fieldLabel: field.label,
+    reason,
     message: `${field.label} ${reason}`,
   };
 }
@@ -334,7 +364,18 @@ export function NoteEditor({ value, onSave, onCancel, onDirtyChange }: NoteEdito
     () => (problem ? locateInDraft(draft, problem) : null),
     [problem, draft]
   );
-  const message = problem?.message ?? saveError;
+  // Number the row the way the user counts it. `problem.index` is a PATCH
+  // index, which skips blank rows, so on a draft with a blank row above the
+  // offending one the sentence would say "Key point 2" while the highlight sat
+  // on the third field - the two disagreeing is worse than not naming the row
+  // at all. The highlight is always right, so the label follows it. Falls back
+  // to the patch-numbered label only when the row can no longer be located.
+  const message = React.useMemo(() => {
+    if (!problem) return saveError;
+    if (!invalid) return problem.message;
+    const draftIndex = 'index' in invalid ? invalid.index : null;
+    return `${labelFor(problem.section, draftIndex, problem.part)} ${problem.reason}`;
+  }, [problem, invalid, saveError]);
 
   const ids = React.useId();
   const summaryId = `${ids}-summary`;

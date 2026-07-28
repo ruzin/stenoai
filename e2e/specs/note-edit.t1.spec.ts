@@ -36,12 +36,20 @@ const ORIGINAL_SUMMARY = 'The team agreed to ship on Friday; Bob owns the releas
 const NEW_SUMMARY = 'The team agreed to ship on Friday, with Bob owning the release notes and QA.';
 
 type UpdateMeetingCall = { summaryFile: string; patch: Record<string, unknown> };
+type ReprocessCall = { summaryFile: string };
 
 const updateCalls = (app: ElectronApplication): Promise<UpdateMeetingCall[]> =>
   app.evaluate(
     () =>
       (global as unknown as { __stenoaiE2eUpdateMeetingCalls: UpdateMeetingCall[] })
         .__stenoaiE2eUpdateMeetingCalls,
+  );
+
+const reprocessCalls = (app: ElectronApplication): Promise<ReprocessCall[]> =>
+  app.evaluate(
+    () =>
+      (global as unknown as { __stenoaiE2eReprocessCalls: ReprocessCall[] })
+        .__stenoaiE2eReprocessCalls,
   );
 
 async function openNote(page: Page) {
@@ -144,4 +152,69 @@ test('the regenerate confirm appears once the note carries a real edit', async (
   await page.getByRole('button', { name: 'Keep my edits' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByTestId('tab-summary-content')).toContainText(NEW_SUMMARY);
+});
+
+/**
+ * The floating GenerateNotesBar is the one rebuild trigger that is NOT in
+ * MeetingDetail's own tree: the detail publishes `startReprocess` into
+ * reprocessBridgeStore and the bar calls it. The bar's only gate of its own is
+ * `disabled={streaming}`, so with the editor open (streaming false) there is
+ * nothing between the click and the published callback - which is exactly why
+ * this needs the confirm/lock to live in `startReprocess`, not on a button.
+ *
+ * Left ungated it is not an edge case: a continued note carries `notes_stale`
+ * plus a summary, so the bar and the Edit button are on screen together. And a
+ * note edited for the FIRST time has `edited_fields: []` until it is saved, so
+ * the regenerate confirm would not appear either - the rebuild would run
+ * unannounced, its stream suppressed by the open editor, and the next Save
+ * would write the pre-regeneration draft over the note Python had just
+ * regenerated.
+ *
+ * The evidence is the IPC, not the UI: with the editor open the streaming view
+ * is deliberately suppressed, so "nothing visibly happened" proves nothing.
+ */
+test("the floating bar's published start does nothing while the editor is open", async ({
+  launchApp,
+}) => {
+  const { app, page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_STALE_NOTE: '1' },
+  });
+  await page.evaluate(() => {
+    window.location.hash = `#/meetings/${encodeURIComponent('stale_summary.md')}`;
+  });
+
+  const dock = page.getByTestId('generate-notes-dock-button');
+  await expect(dock).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit note' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit note' }).click();
+  await expect(page.getByTestId('note-editor')).toBeVisible();
+  const summaryField = page.getByRole('textbox', { name: 'Summary', exact: true });
+  await summaryField.fill('A draft the user has not saved yet.');
+
+  // Still ENABLED: the click really does reach the published callback, so a
+  // no-op below can only come from the gate inside it, not from a swallowed
+  // click on a disabled control.
+  await expect(dock).toBeEnabled();
+  await dock.click();
+
+  // No rebuild was started, no confirm was shown (this note has never been
+  // edited before, so `edited_fields` is empty and the confirm could not fire),
+  // and the draft is untouched.
+  expect(await reprocessCalls(app)).toHaveLength(0);
+  await expect(page.locator('[data-confirm-dialog]')).toHaveCount(0);
+  await expect(page.getByTestId('note-editor')).toBeVisible();
+  await expect(summaryField).toHaveValue('A draft the user has not saved yet.');
+
+  // ... and the wiring really is live: leave the editor and the SAME button
+  // starts the rebuild. Without this the test would also pass against a bar
+  // that never called anything.
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByTestId('note-editor')).toHaveCount(0);
+  await dock.click();
+  await expect
+    .poll(async () => (await reprocessCalls(app)).length)
+    .toBe(1);
+  expect((await reprocessCalls(app))[0].summaryFile).toBe('stale_summary.md');
 });

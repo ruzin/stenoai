@@ -102,6 +102,26 @@ describe('NoteEditor', () => {
     expect(screen.getByLabelText('Action item 1').getAttribute('aria-invalid')).toBeNull();
   });
 
+  // The patch drops blank rows, so its indices stop matching the draft's the
+  // moment there is one. The message used to be numbered from the patch and the
+  // highlight from the draft, so they pointed at different rows and the
+  // sentence sent the user to a field that was fine.
+  it('numbers the row the user sees, not the row in the patch', () => {
+    render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
+    // Row 1 blank, row 2 (added) carries the rejected value: the patch sees one
+    // entry at index 0, the draft has it at index 1.
+    fireEvent.change(screen.getByLabelText('Key point 1'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /add key point/i }));
+    fireEvent.change(screen.getByLabelText('Key point 2'), { target: { value: '# forged' } });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(screen.getByRole('alert').textContent).toMatch(/key point 2/i);
+    expect(screen.getByRole('alert').textContent).not.toMatch(/key point 1/i);
+    // The highlight was always right; the sentence now agrees with it.
+    expect(screen.getByLabelText('Key point 2').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText('Key point 1').getAttribute('aria-invalid')).toBeNull();
+  });
+
   it('retires the rejection once the row is retyped', () => {
     render(<NoteEditor value={DRAFT} onSave={vi.fn()} onCancel={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Key point 1'), { target: { value: '# forged' } });

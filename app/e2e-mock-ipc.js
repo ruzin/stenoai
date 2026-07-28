@@ -189,6 +189,12 @@ function install({ ipcMain }) {
   // page.evaluate silently no-ops instead of recording anything.
   global.__stenoaiE2eUpdateMeetingCalls = [];
 
+  // Every reprocess-meeting call, same recording trick and the same reason. A
+  // spec that has to prove a rebuild did NOT start cannot assert on the UI
+  // (with the editor open the streaming view is suppressed on purpose), so the
+  // only honest evidence is that the IPC was never reached.
+  global.__stenoaiE2eReprocessCalls = [];
+
   // In-flight soft-deletes (#234), id → the deleted meeting. Mirrors main's
   // pendingDelete map just far enough for undo to hand the row back.
   const pendingDeletes = {};
@@ -417,6 +423,14 @@ function install({ ipcMain }) {
     // into `edited_fields`, mirroring app/note-snapshot.js's markEdited so the
     // regenerate guard (which reads meeting.edited_fields) sees the same shape
     // under mock IPC that it would from the real sidecar.
+    // Recorded, then answered exactly the way the permissive unknown-channel
+    // default did (`{ success: true }`, no events): the renderer stays in its
+    // "analyzing" state, which is what the floating-bar T1 already relies on.
+    'reprocess-meeting': async (_event, summaryFile, regenerateTitle, sessionName) => {
+      global.__stenoaiE2eReprocessCalls.push({ summaryFile, regenerateTitle, sessionName });
+      return { success: true };
+    },
+
     'update-meeting': async (_event, summaryFile, patch) => {
       global.__stenoaiE2eUpdateMeetingCalls.push({ summaryFile, patch });
       if (patch && typeof patch.user_notes === 'string') {
