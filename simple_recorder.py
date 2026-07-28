@@ -784,9 +784,6 @@ Summary output language: {config.get_language_name(output_language)}
                 print(f"TITLE:{session_name}", flush=True)
                 print(f"Auto-generated title: {session_name}")
 
-        # Step 4: Parse streamed markdown into structured JSON
-        parsed = self._parse_streamed_markdown(streamed_md)
-
         # Step 5: Save as .md (primary format for new meetings)
         summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
         processed_at = datetime.now().isoformat()
@@ -812,7 +809,7 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('')
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
-        _write_original_snapshot(summary_path, parsed)
+        _write_original_snapshot(summary_path)
 
         # Clean up
         from src.config import get_config
@@ -841,16 +838,39 @@ Summary output language: {config.get_language_name(output_language)}
         }
 
 
-def _write_original_snapshot(summary_path, parsed) -> None:
+def _write_original_snapshot(summary_path) -> None:
     """Persist the model's own output next to a freshly written note.
 
     The note file is rebuilt from scratch by reprocess, so the snapshot cannot
     live inside it. It is the diff base the note editor needs in order to warn
     before a regenerate discards user corrections, and it is best-effort: a
     failure here must never fail a pipeline run that produced a good note.
+
+    Reads the note back from disk and parses it with `_parse_meeting_markdown`
+    (the mirror of app/main.js's parseMeetingMarkdown) rather than reusing a
+    streamed-markdown parse: `_parse_streamed_markdown` collapses whitespace
+    differently (joins the summary with spaces, strips each topic line), so
+    snapshotting its output would disagree with what the note editor itself
+    reads back from this same file — a spurious diff on every unedited note.
+    Parsing the just-written file is what makes the two agree by construction.
     """
     try:
-        snapshot_path = Path(str(summary_path).replace('_summary.md', '_original.json'))
+        summary_path = Path(summary_path)
+        str_path = str(summary_path)
+        suffix = '_summary.md'
+        # Anchored on the end of the path, matching app/note-snapshot.js's
+        # noteSnapshotPath. An unanchored str.replace() would silently derive
+        # the wrong sidecar path for a summary file that doesn't end in
+        # "_summary.md" (e.g. reprocess called on a bare ".md" file) and the
+        # write below would then land on — and destroy — the note itself
+        # instead of a sidecar next to it. Raise here instead: the except
+        # below turns it into a logged warning, never a note-destroying write.
+        if not str_path.endswith(suffix):
+            raise ValueError(
+                f"expected a path ending in '{suffix}', got: {str_path}"
+            )
+        snapshot_path = Path(str_path[: -len(suffix)] + '_original.json')
+        parsed = _parse_meeting_markdown(summary_path)
         payload = {
             'version': 1,
             'captured_at': datetime.now().isoformat(),
@@ -867,7 +887,14 @@ def _write_original_snapshot(summary_path, parsed) -> None:
             'edited_fields': [],
             'edited_at': None,
         }
-        snapshot_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+        # Atomic write (tempfile + os.replace): a plain write_text() truncates
+        # first, and a crash mid-write leaves a torn JSON file. That's worse
+        # than a transient bad read here — readSnapshot (app/note-snapshot.js)
+        # treats unparseable JSON as "absent", but captureSnapshot refuses to
+        # overwrite a FILE that already exists, so a torn sidecar permanently
+        # loses this note's diff base and silences the regenerate warning for
+        # it forever.
+        _atomic_write_json(snapshot_path, payload)
     except Exception as exc:
         logger.warning(f"Could not write original snapshot for {summary_path}: {exc}")
 
@@ -1367,9 +1394,6 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         audio_path = Path(audio_file)
         summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
 
-        # Parse the streamed markdown for title generation
-        parsed = MeetingPipeline._parse_streamed_markdown(streamed_md)
-
         # Save as .md only (primary format for new meetings)
         summary_path = summary_path.with_suffix('.md')
         processed_at = datetime.now().isoformat()
@@ -1403,7 +1427,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             md_lines.append('')
             md_lines.append(notes_text)
         summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
-        _write_original_snapshot(summary_path, parsed)
+        _write_original_snapshot(summary_path)
 
         # Clean up audio. When we fell back to the live transcript the batch
         # transcription was empty/failed, so KEEP the audio regardless of the
@@ -3133,11 +3157,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
                 md_lines.append('')
                 md_lines.append(notes_text)
             summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
-            # The .md rebuild above writes the raw streamed markdown rather than
-            # structured fields, so parse it here (mirrors the JSON branch below)
-            # to get the dict the snapshot needs.
-            parsed = recorder._parse_streamed_markdown(streamed_md)
-            _write_original_snapshot(summary_path, parsed)
+            _write_original_snapshot(summary_path)
         else:
             # JSON format: parse streamed markdown into structured fields
             parsed = recorder._parse_streamed_markdown(streamed_md)
