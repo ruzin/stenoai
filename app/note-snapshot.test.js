@@ -89,3 +89,15 @@ test('markEdited on a note with no snapshot is a no-op that does not throw', () 
   assert.strictEqual(markEdited(note, ['summary']), null);
   assert.strictEqual(fs.existsSync(noteSnapshotPath(note)), false);
 });
+
+test('readSnapshot returns null for a malformed note path instead of throwing', () => {
+  assert.strictEqual(readSnapshot('/x/not-a-note.txt'), null);
+});
+
+test('captureSnapshot still throws for a malformed note path', () => {
+  assert.throws(() => captureSnapshot('/x/not-a-note.txt', FIELDS, 'generation'), /_summary\.md/);
+});
+
+test('markEdited still throws for a malformed note path', () => {
+  assert.throws(() => markEdited('/x/not-a-note.txt', ['summary']), /_summary\.md/);
+});

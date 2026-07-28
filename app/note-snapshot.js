@@ -21,17 +21,26 @@ function noteSnapshotPath(summaryPath) {
   return str.replace(/_summary\.md$/, '_original.json');
 }
 
+// Reads never throw; writes fail loudly. This asymmetry is deliberate, not an
+// oversight: a read backs "open this note", which must never fail because of
+// its sidecar, while a write backs "create/update this sidecar", where
+// silently swallowing a malformed path risks the write landing on the note
+// itself (see noteSnapshotPath). Do not "fix" this back into symmetry -
+// noteSnapshotPath is called inside the try below (not before it) precisely
+// so a malformed summaryPath is caught here and returns null, exactly like a
+// missing or corrupt sidecar file.
 function readSnapshot(summaryPath) {
-  const file = noteSnapshotPath(summaryPath);
   try {
+    const file = noteSnapshotPath(summaryPath);
     if (!fs.existsSync(file)) return null;
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
     // A snapshot from a future version is not ours to interpret.
     if (!parsed || parsed.version !== SNAPSHOT_VERSION) return null;
     return parsed;
   } catch (_) {
-    // A corrupt sidecar must never break opening a note. It reads as absent,
-    // which costs the learning signal for this note and nothing else.
+    // A corrupt sidecar, an unreadable file, or a malformed summaryPath must
+    // never break opening a note. All read as absent, which costs the
+    // learning signal for this note and nothing else.
     return null;
   }
 }
@@ -89,12 +98,18 @@ function captureSnapshot(summaryPath, fields, capture) {
 // edited_at before writing) - not attempted here because nothing today
 // exercises the concurrent path.
 function markEdited(summaryPath, changedFields) {
+  // noteSnapshotPath is called directly (not only via readSnapshot below) so
+  // a malformed summaryPath throws here, before anything else runs. readSnapshot
+  // catches that same throw internally and would otherwise turn it into a
+  // silent null, which would make this write-path function swallow a caller
+  // bug instead of surfacing it - the opposite of the intended asymmetry.
+  const file = noteSnapshotPath(summaryPath);
   const snapshot = readSnapshot(summaryPath);
   if (!snapshot) return null;
   const merged = new Set([...(snapshot.edited_fields || []), ...(changedFields || [])]);
   snapshot.edited_fields = [...merged];
   snapshot.edited_at = new Date().toISOString();
-  writeFileAtomicSync(noteSnapshotPath(summaryPath), JSON.stringify(snapshot, null, 2));
+  writeFileAtomicSync(file, JSON.stringify(snapshot, null, 2));
   return snapshot;
 }
 
