@@ -76,17 +76,40 @@ function sectionLines(content) {
 function setSection(body, heading, content) {
   const blocks = splitSections(body);
   const trimmed = String(content ?? '').replace(/\s+$/, '');
-  const at = blocks.findIndex(
-    (b) => b.heading !== null && b.heading.toLowerCase() === heading.toLowerCase(),
-  );
+  const matches = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    if (blocks[i].heading !== null && blocks[i].heading.toLowerCase() === heading.toLowerCase()) {
+      matches.push(i);
+    }
+  }
 
-  if (at !== -1) {
-    // An empty value removes the section, matching upsertUserNotesSection.
+  if (matches.length > 0) {
     if (!trimmed) {
-      blocks.splice(at, 1);
+      // An empty value removes the section, matching upsertUserNotesSection.
+      // Remove EVERY matching block, not just the last: parseMeetingMarkdown
+      // (main.js) walks the body and keeps overwriting sections[currentSection]
+      // as it goes, so it would still read a stale earlier duplicate as the
+      // section's content if we left one behind - resurrecting text the user
+      // just cleared. Splice from the highest index down so earlier removals
+      // don't shift the indices still queued for removal.
+      for (let i = matches.length - 1; i >= 0; i -= 1) {
+        blocks.splice(matches[i], 1);
+      }
       return joinSections(blocks);
     }
-    blocks[at].lines = sectionLines(trimmed);
+    // parseMeetingMarkdown's parse loop keeps overwriting
+    // sections[currentSection] on every '## ' heading it walks past, so when a
+    // heading repeats, the LAST occurrence is the one that survives into the
+    // parsed sections object - not the first. Write the edit at that same
+    // last position, then drop every earlier duplicate, so a later read
+    // through the parser sees exactly the value just written here. Do not
+    // "simplify" this to first-wins; that reintroduces the drift class
+    // that bit #346 and #313.
+    const last = matches[matches.length - 1];
+    blocks[last].lines = sectionLines(trimmed);
+    for (let i = matches.length - 2; i >= 0; i -= 1) {
+      blocks.splice(matches[i], 1);
+    }
     return joinSections(blocks);
   }
 

@@ -101,3 +101,121 @@ test('containsStructuralLine catches a heading a user could paste into a field',
   assert.strictEqual(containsStructuralLine('a #hashtag is fine'), false);
   assert.strictEqual(containsStructuralLine('C# is fine'), false);
 });
+
+// Mirrors parseMeetingMarkdown's section-splitting loop (main.js:2607-2620): it
+// walks the body top to bottom and keeps overwriting sections[currentSection]
+// on every '## ' heading it sees, so a repeated heading resolves to the LAST
+// occurrence, not the first. Reimplemented here (rather than requiring
+// main.js, which boots the Electron main process) purely to prove
+// note-sections.js output stays parser-compatible on duplicate headings.
+function readSectionsLikeParser(body) {
+  const sections = {};
+  let currentSection = null;
+  let currentLines = [];
+  for (const line of body.split('\n')) {
+    if (line.startsWith('## ')) {
+      if (currentSection) sections[currentSection] = currentLines.join('\n').trim();
+      currentSection = line.slice(3).trim().toLowerCase();
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  if (currentSection) sections[currentSection] = currentLines.join('\n').trim();
+  return sections;
+}
+
+// A small local model repeating a '## Summary' heading is a realistic
+// streamed-markdown output, and is exactly the parser-drift class that has
+// bitten this project twice already (#346, #313).
+const DUP_SUMMARY_BODY = [
+  '',
+  '## Summary',
+  '',
+  'First summary.',
+  '',
+  '## Summary',
+  '',
+  'Second summary.',
+  '',
+  '## Key Points',
+  '',
+  '- Budget approved',
+  '',
+].join('\n');
+
+const DUP_ACTIONS_BODY = [
+  '',
+  '## Key Points',
+  '',
+  '- Budget approved',
+  '',
+  '## Action Items',
+  '',
+  '- First action',
+  '',
+  '## Action Items',
+  '',
+  '- Second action',
+  '',
+  '## Transcript',
+  '',
+  '[You] Hello.',
+  '',
+].join('\n');
+
+const DUP_SUMMARY_WITH_NEIGHBOR_BODY = [
+  '',
+  '## Summary',
+  '',
+  'First summary.',
+  '',
+  '## Key Points',
+  '',
+  '- Point between',
+  '',
+  '## Summary',
+  '',
+  'Second summary.',
+  '',
+  '## Transcript',
+  '',
+  '[You] Hello.',
+  '',
+].join('\n');
+
+test('a duplicate heading collapses to one, written at the LAST occurrence, matching parseMeetingMarkdown last-wins', () => {
+  const out = setSummary(DUP_SUMMARY_BODY, 'Third summary.');
+  const headingCount = (out.match(/^## Summary$/gm) || []).length;
+  assert.strictEqual(headingCount, 1);
+  assert.match(out, /## Summary\n\nThird summary\.\n/);
+  assert.strictEqual(out.includes('First summary.'), false);
+  assert.strictEqual(out.includes('Second summary.'), false);
+});
+
+test('clearing a duplicated section removes every occurrence, not just the last', () => {
+  const out = setActionItems(DUP_ACTIONS_BODY, []);
+  assert.strictEqual(out.includes('## Action Items'), false);
+  assert.strictEqual(out.includes('First action'), false);
+  assert.strictEqual(out.includes('Second action'), false);
+  assert.match(out, /## Key Points\n\n- Budget approved\n/);
+  assert.match(out, /## Transcript\n/);
+});
+
+test('a duplicate-heading edit is what the parser actually reads back', () => {
+  const out = setSummary(DUP_SUMMARY_BODY, 'Edited summary.');
+  const sections = readSectionsLikeParser(out);
+  assert.strictEqual(sections.summary, 'Edited summary.');
+});
+
+test('the surviving block keeps the LAST occurrence position relative to its neighbours', () => {
+  const out = setSummary(DUP_SUMMARY_WITH_NEIGHBOR_BODY, 'Edited summary.');
+  const summaryAt = out.indexOf('## Summary');
+  const keyPointsAt = out.indexOf('## Key Points');
+  const transcriptAt = out.indexOf('## Transcript');
+  assert.ok(
+    keyPointsAt < summaryAt,
+    'the surviving Summary must sit after Key Points, where the LAST occurrence was',
+  );
+  assert.ok(summaryAt < transcriptAt);
+});
