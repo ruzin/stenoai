@@ -33,6 +33,10 @@ test('noteSnapshotPath swaps the _summary.md suffix for _original.json', () => {
   );
 });
 
+test('noteSnapshotPath throws for a path that does not end in _summary.md', () => {
+  assert.throws(() => noteSnapshotPath('/x/Weekly_Sync.md'), /_summary\.md/);
+});
+
 test('readSnapshot returns null when no sidecar exists', () => {
   assert.strictEqual(readSnapshot(tmpNote()), null);
 });
@@ -55,6 +59,16 @@ test('captureSnapshot never overwrites an existing snapshot', () => {
   assert.strictEqual(readSnapshot(note).capture, 'generation');
 });
 
+test('captureSnapshot does not clobber a sidecar written by a newer version', () => {
+  const note = tmpNote();
+  const file = noteSnapshotPath(note);
+  const future = JSON.stringify({ version: 999, future: true }, null, 2);
+  fs.writeFileSync(file, future, 'utf8');
+  const result = captureSnapshot(note, FIELDS, 'generation');
+  assert.strictEqual(result, null);
+  assert.strictEqual(fs.readFileSync(file, 'utf8'), future);
+});
+
 test('markEdited accumulates field names without duplicates and stamps a time', () => {
   const note = tmpNote();
   captureSnapshot(note, FIELDS, 'generation');
@@ -73,4 +87,5 @@ test('a corrupt sidecar reads as null rather than throwing', () => {
 test('markEdited on a note with no snapshot is a no-op that does not throw', () => {
   const note = tmpNote();
   assert.strictEqual(markEdited(note, ['summary']), null);
+  assert.strictEqual(fs.existsSync(noteSnapshotPath(note)), false);
 });

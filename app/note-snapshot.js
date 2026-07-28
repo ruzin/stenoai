@@ -9,7 +9,16 @@ const { writeFileAtomicSync } = require('./atomic-write');
 const SNAPSHOT_VERSION = 1;
 
 function noteSnapshotPath(summaryPath) {
-  return String(summaryPath).replace(/_summary\.md$/, '_original.json');
+  const str = String(summaryPath);
+  // String.replace returns its input unchanged when the pattern does not
+  // match. Without this check, a caller bug that passes a path not ending in
+  // "_summary.md" would silently get that same path back, and the write
+  // functions below would then overwrite the note itself with snapshot JSON
+  // instead of writing a sidecar next to it. Fail loudly here instead.
+  if (!str.endsWith('_summary.md')) {
+    throw new Error(`noteSnapshotPath: expected a path ending in "_summary.md", got: ${str}`);
+  }
+  return str.replace(/_summary\.md$/, '_original.json');
 }
 
 function readSnapshot(summaryPath) {
@@ -33,8 +42,21 @@ function readSnapshot(summaryPath) {
 // never editable before this feature; later consumers should treat it as
 // slightly weaker evidence.
 function captureSnapshot(summaryPath, fields, capture) {
-  const existing = readSnapshot(summaryPath);
-  if (existing) return existing;
+  const file = noteSnapshotPath(summaryPath);
+  // Whether we may write depends on whether a sidecar FILE is already there,
+  // not on whether readSnapshot can make sense of it. readSnapshot returns
+  // null both for "nothing here" and for "something here we don't
+  // understand" (corrupt JSON, or a future version's format) - collapsing
+  // that distinction is correct for a reader, which just wants "no usable
+  // snapshot", but wrong for a writer. If we wrote whenever readSnapshot
+  // returned null, a sidecar from a newer app version would look absent and
+  // get silently replaced with a version-1 snapshot, destroying whatever the
+  // newer format held. So: file exists -> never write, return whatever
+  // readSnapshot makes of it (the valid snapshot, or null if unreadable).
+  // Only a genuinely absent file is safe to create.
+  if (fs.existsSync(file)) {
+    return readSnapshot(summaryPath);
+  }
   const snapshot = {
     version: SNAPSHOT_VERSION,
     captured_at: new Date().toISOString(),
@@ -49,10 +71,23 @@ function captureSnapshot(summaryPath, fields, capture) {
     edited_fields: [],
     edited_at: null,
   };
-  writeFileAtomicSync(noteSnapshotPath(summaryPath), JSON.stringify(snapshot, null, 2));
+  writeFileAtomicSync(file, JSON.stringify(snapshot, null, 2));
   return snapshot;
 }
 
+// Read-modify-write with no locking or compare-and-swap: this is safe only
+// because every caller today runs synchronously inside the single Electron
+// main process, so two calls can never interleave. That assumption breaks
+// the day the Python side also writes this sidecar (a later task in this
+// plan) - two processes racing this read-modify-write could each read the
+// same on-disk snapshot, and whichever writes second silently discards the
+// other's edited_fields/edited_at update, with no error and no way to tell
+// afterwards that data was lost. A future cross-process caller must not
+// discover this by losing an edit; it needs either to funnel writes back
+// through the main process (keeping the single-writer property) or to add
+// real concurrency control (a file lock, or a compare-and-swap on version /
+// edited_at before writing) - not attempted here because nothing today
+// exercises the concurrent path.
 function markEdited(summaryPath, changedFields) {
   const snapshot = readSnapshot(summaryPath);
   if (!snapshot) return null;
