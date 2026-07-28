@@ -3658,6 +3658,7 @@ def chat_global_streaming(question, folder):
     import base64
     from pathlib import Path
     from src.config import get_config, get_data_dirs
+    from src.reports import _item_text
 
     config = get_config()
     dirs = get_data_dirs()
@@ -3730,19 +3731,31 @@ def chat_global_streaming(question, folder):
         block = [f"## {name}" + (f" — {date}" if date else "")]
         if summary:
             block.append(summary)
-        if participants:
-            block.append("Participants:\n" + "\n".join(f"- {_single_line(p)}" for p in participants))
-        # _single_line on every list entry, for the same reason as the
-        # single-meeting builder (_build_meeting_chat_context_parts): a key
-        # point or action item that carries its own newlines would otherwise
-        # render as several lines here, and one of them can look like a forged
-        # "Action items:" label or a "## " block header for the NEXT meeting.
+        # _item_text before _single_line on every list entry. Legacy `.json`
+        # notes are read here with a raw json.load, so an entry can be a dict
+        # ({'name': ...}, {'decision': ...}, {'description': ..., 'owner': ...})
+        # rather than a string - the same shapes src/reports.py and the note
+        # view already normalise. _item_text renders the dict's text (and
+        # str()s anything else), so _single_line always receives a str.
+        #
+        # _single_line then collapses embedded newlines: an entry carrying its
+        # own newlines would otherwise render as several lines here, and one of
+        # them can look like a forged "Action items:" label or a "## " block
+        # header for the NEXT meeting. The single-meeting builder
+        # (_build_meeting_chat_context_parts) does the same for participants
+        # and action items; it does not collapse key points, which only matters
+        # in this corpus because blocks here are separated by "## " headings.
         # The entries are editable in the note editor, so this is reachable
         # without any adversary.
+        if participants:
+            block.append("Participants:\n" + "\n".join(
+                f"- {_single_line(_item_text(p, 'name', 'text'))}" for p in participants))
         if key_points:
-            block.append("Key points:\n" + "\n".join(f"- {_single_line(p)}" for p in key_points))
+            block.append("Key points:\n" + "\n".join(
+                f"- {_single_line(_item_text(p, 'decision', 'point', 'text'))}" for p in key_points))
         if action_items:
-            block.append("Action items:\n" + "\n".join(f"- {_single_line(a)}" for a in action_items))
+            block.append("Action items:\n" + "\n".join(
+                f"- {_single_line(_item_text(a, 'description', 'text'))}" for a in action_items))
         block_text = "\n".join(block)
         # +5 accounts for the "\n\n---\n\n" separator added later.
         if used_chars + len(block_text) + 5 > CORPUS_CHAR_BUDGET:
