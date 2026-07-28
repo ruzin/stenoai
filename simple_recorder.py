@@ -2797,6 +2797,17 @@ def _parse_meeting_markdown(md_path):
     }
 
 
+def _single_line(text: str) -> str:
+    """Collapse any run of whitespace (including newlines/carriage returns) in
+    a single participant name or action item down to one space, so one entry
+    can only ever render as one `- ` line. Without this, a value containing
+    its own blank line and text (e.g. "Alice\\n\\nACTION ITEMS:\\n- ...")
+    would land in the assembled context looking like a second, forged section
+    header rather than one list entry.
+    """
+    return ' '.join(text.split())
+
+
 def _build_meeting_chat_context_parts(meeting_data: dict) -> list[str]:
     """Assemble the labelled sections sent to the model for single-meeting
     chat (the `query` / `query-streaming` commands), in the same order the
@@ -2806,14 +2817,14 @@ def _build_meeting_chat_context_parts(meeting_data: dict) -> list[str]:
     parsed meeting_data dict.
 
     A section with nothing to say is omitted entirely rather than emitting
-    an empty heading — that would waste context on a local model's small
+    an empty heading - that would waste context on a local model's small
     window and invite it to invent content to fill the gap.
     """
     parts = []
     if meeting_data.get('summary'):
         parts.append(f"SUMMARY:\n{meeting_data['summary']}")
     if meeting_data.get('participants'):
-        names = '\n'.join(f"- {p}" for p in meeting_data['participants'])
+        names = '\n'.join(f"- {_single_line(p)}" for p in meeting_data['participants'])
         parts.append(f"PARTICIPANTS:\n{names}")
     if meeting_data.get('discussion_areas'):
         topics = '\n'.join(f"- {d['title']}: {d['analysis']}" for d in meeting_data['discussion_areas'])
@@ -2822,7 +2833,7 @@ def _build_meeting_chat_context_parts(meeting_data: dict) -> list[str]:
         points = '\n'.join(f"- {p}" for p in meeting_data['key_points'])
         parts.append(f"KEY POINTS:\n{points}")
     if meeting_data.get('action_items'):
-        items = '\n'.join(f"- {a}" for a in meeting_data['action_items'])
+        items = '\n'.join(f"- {_single_line(a)}" for a in meeting_data['action_items'])
         parts.append(f"ACTION ITEMS:\n{items}")
     if meeting_data.get('transcript'):
         parts.append(f"TRANSCRIPT:\n{meeting_data['transcript']}")
@@ -3713,7 +3724,7 @@ def chat_global_streaming(question, folder):
         if summary:
             block.append(summary)
         if participants:
-            block.append("Participants:\n" + "\n".join(f"- {p}" for p in participants))
+            block.append("Participants:\n" + "\n".join(f"- {_single_line(p)}" for p in participants))
         if key_points:
             block.append("Key points:\n" + "\n".join(f"- {p}" for p in key_points))
         if action_items:
