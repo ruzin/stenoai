@@ -26,15 +26,23 @@ test('writeFileAtomicSync creates a file that does not exist yet', () => {
   assert.strictEqual(fs.readFileSync(file, 'utf8'), 'hello');
 });
 
-test('a failed write leaves the original intact and removes the temp file', () => {
+test('a failed write leaves the original intact and removes the temp file', (t) => {
   const file = tmpFile('original');
   const dir = path.dirname(file);
   const before = fs.readdirSync(dir);
 
+  // Force the failure AFTER the temp file has genuinely been written to disk,
+  // by making the rename step itself throw. This is the real window the
+  // atomic-write guarantee protects: the temp file exists, the rename fails,
+  // and the catch block's cleanup must remove it without touching the
+  // original. Using node:test's built-in mock keeps this dependency-free and
+  // restores fs.renameSync automatically once the test ends.
+  t.mock.method(fs, 'renameSync', () => {
+    throw new Error('boom');
+  });
+
   assert.throws(() => {
-    // A directory cannot be written as file data; the write fails after the
-    // temp file has been created, which is exactly the window under test.
-    writeFileAtomicSync(file, { toString() { throw new Error('boom'); } });
+    writeFileAtomicSync(file, 'new');
   });
 
   assert.strictEqual(fs.readFileSync(file, 'utf8'), 'original');
