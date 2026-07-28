@@ -2797,6 +2797,38 @@ def _parse_meeting_markdown(md_path):
     }
 
 
+def _build_meeting_chat_context_parts(meeting_data: dict) -> list[str]:
+    """Assemble the labelled sections sent to the model for single-meeting
+    chat (the `query` / `query-streaming` commands), in the same order the
+    note itself lays them out: summary, participants, key topics, key
+    points, action items, transcript. Editing any of these sections in the
+    note editor changes what the chat sees, because both read from the same
+    parsed meeting_data dict.
+
+    A section with nothing to say is omitted entirely rather than emitting
+    an empty heading — that would waste context on a local model's small
+    window and invite it to invent content to fill the gap.
+    """
+    parts = []
+    if meeting_data.get('summary'):
+        parts.append(f"SUMMARY:\n{meeting_data['summary']}")
+    if meeting_data.get('participants'):
+        names = '\n'.join(f"- {p}" for p in meeting_data['participants'])
+        parts.append(f"PARTICIPANTS:\n{names}")
+    if meeting_data.get('discussion_areas'):
+        topics = '\n'.join(f"- {d['title']}: {d['analysis']}" for d in meeting_data['discussion_areas'])
+        parts.append(f"KEY TOPICS:\n{topics}")
+    if meeting_data.get('key_points'):
+        points = '\n'.join(f"- {p}" for p in meeting_data['key_points'])
+        parts.append(f"KEY POINTS:\n{points}")
+    if meeting_data.get('action_items'):
+        items = '\n'.join(f"- {a}" for a in meeting_data['action_items'])
+        parts.append(f"ACTION ITEMS:\n{items}")
+    if meeting_data.get('transcript'):
+        parts.append(f"TRANSCRIPT:\n{meeting_data['transcript']}")
+    return parts
+
+
 @cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
@@ -3446,19 +3478,10 @@ def query(transcript_file, question):
         try:
             meeting_data = _parse_meeting_markdown(transcript_path)
             raw_transcript = meeting_data.get('transcript', '')
-            # Build rich context: summary + key points + transcript
-            parts = []
-            if meeting_data.get('summary'):
-                parts.append(f"SUMMARY:\n{meeting_data['summary']}")
-            if meeting_data.get('discussion_areas'):
-                topics = '\n'.join(f"- {d['title']}: {d['analysis']}" for d in meeting_data['discussion_areas'])
-                parts.append(f"KEY TOPICS:\n{topics}")
-            if meeting_data.get('key_points'):
-                points = '\n'.join(f"- {p}" for p in meeting_data['key_points'])
-                parts.append(f"KEY POINTS:\n{points}")
-            if raw_transcript:
-                parts.append(f"TRANSCRIPT:\n{raw_transcript}")
-            transcript_text = '\n\n'.join(parts)
+            # Build rich context: summary + participants + key topics + key
+            # points + action items + transcript (see
+            # _build_meeting_chat_context_parts for the shared assembly logic).
+            transcript_text = '\n\n'.join(_build_meeting_chat_context_parts(meeting_data))
             detect_text = raw_transcript
             session_info = meeting_data.get("session_info", {})
         except Exception as e:
@@ -3544,18 +3567,10 @@ def query_streaming(transcript_file, question):
             return
         try:
             meeting_data = _parse_meeting_markdown(transcript_path)
-            parts = []
-            if meeting_data.get('summary'):
-                parts.append(f"SUMMARY:\n{meeting_data['summary']}")
-            if meeting_data.get('discussion_areas'):
-                topics = '\n'.join(f"- {d['title']}: {d['analysis']}" for d in meeting_data['discussion_areas'])
-                parts.append(f"KEY TOPICS:\n{topics}")
-            if meeting_data.get('key_points'):
-                points = '\n'.join(f"- {p}" for p in meeting_data['key_points'])
-                parts.append(f"KEY POINTS:\n{points}")
-            if meeting_data.get('transcript'):
-                parts.append(f"TRANSCRIPT:\n{meeting_data['transcript']}")
-            transcript_text = '\n\n'.join(parts)
+            # Same shared assembly as `query` (see
+            # _build_meeting_chat_context_parts): summary + participants + key
+            # topics + key points + action items + transcript.
+            transcript_text = '\n\n'.join(_build_meeting_chat_context_parts(meeting_data))
             detect_text = meeting_data.get('transcript', '')
             session_info = meeting_data.get("session_info", {})
         except Exception as e:
@@ -3612,9 +3627,9 @@ def _chat_corpus_char_budget(ai_provider: str, model: str) -> int:
 @click.option('--question', '-q', required=True, help='Question to ask across notes')
 @click.option('--folder', '-f', default=None, help='Folder ID to scope the corpus to (default: all notes)')
 def chat_global_streaming(question, folder):
-    """Cross-note chat: gather meeting title + summary + key points, feed as
-    context to the configured LLM, stream the answer. Optionally scope to a
-    single folder; default queries every note.
+    """Cross-note chat: gather meeting title + summary + participants + key
+    points + action items, feed as context to the configured LLM, stream the
+    answer. Optionally scope to a single folder; default queries every note.
 
     Works with every provider — cloud / org adapter / local / remote Ollama.
     The assembled corpus is capped to the active model's context window
@@ -3669,8 +3684,9 @@ def chat_global_streaming(question, folder):
         return
 
     # Most-recent first so the model weights newer context higher when token
-    # budget is tight. Each block is kept compact (title + summary + key
-    # points + action items) — full transcripts would blow even a 200k window.
+    # budget is tight. Each block is kept compact (title + summary +
+    # participants + key points + action items) — full transcripts would blow
+    # even a 200k window.
     def sort_key(item):
         _, data = item
         return data.get("session_info", {}).get("processed_at") or ""
@@ -3690,11 +3706,14 @@ def chat_global_streaming(question, folder):
         name = info.get("name") or "Untitled"
         date = (info.get("processed_at") or "")[:10]
         summary = (data.get("summary") or "").strip()
+        participants = data.get("participants") or []
         key_points = data.get("key_points") or []
         action_items = data.get("action_items") or []
         block = [f"## {name}" + (f" — {date}" if date else "")]
         if summary:
             block.append(summary)
+        if participants:
+            block.append("Participants:\n" + "\n".join(f"- {p}" for p in participants))
         if key_points:
             block.append("Key points:\n" + "\n".join(f"- {p}" for p in key_points))
         if action_items:
