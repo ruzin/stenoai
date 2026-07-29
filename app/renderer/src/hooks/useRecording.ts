@@ -8,7 +8,11 @@ import { useLiveDraftStore } from './liveDraftStore';
 import { navigate, routeFromHash } from '@/lib/router';
 import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
 import { streamCache } from '@/lib/meetingDetailState';
-import { classifyCompletionNotification, meetingAlreadyHasNotes } from '@/lib/completionNotification';
+import {
+  classifyCompletionNotification,
+  meetingAlreadyHasNotes,
+  completionRouteAction,
+} from '@/lib/completionNotification';
 import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
@@ -478,25 +482,36 @@ export function useRecordingProcessingEffects() {
       if (data.success && finishedSummaryFile) {
         const currentRoute = routeFromHash(window.location.hash);
         const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
-        if (currentRoute === '/meetings/processing') {
+        // #bug1 lets an auto-detected recording run with the window HIDDEN
+        // (tray-only), so "the route is this note" no longer implies the user
+        // is looking at it. Gate the suppress-when-already-here logic on real
+        // visibility, not route alone — otherwise the wrap-up flow suppresses
+        // every post-transcription prompt on the default (Parakeet) engine:
+        // stopRecording navigates to the note's own route (useRecording.ts
+        // instant-stop path), so a route-only guard would always match and
+        // never notify. (visibilityState is 'hidden' for a hidden/minimised
+        // window.)
+        const windowVisible =
+          typeof document !== 'undefined' && document.visibilityState === 'visible';
+        const action = completionRouteAction({
+          currentRoute,
+          finishedMeetingRoute,
+          processingRoute: '/meetings/processing',
+          windowVisible,
+        });
+        if (action === 'navigate') {
           // Watching it finish on the processing page → take them straight
           // into the now-ready note.
           navigate(finishedMeetingRoute);
-        } else if (currentRoute !== finishedMeetingRoute) {
-          // Anywhere else (Home, Chat, Settings, recording another note,
-          // a different meeting's detail page) → fire a native "Note
-          // ready" banner so the user knows their work-in-progress
-          // finished. Route comparison rather than window-focus check on
-          // purpose: it means a minimised Steno / alt-tabbed user who
-          // *was* sitting on this note's detail page still doesn't get a
-          // notification, because the route hasn't changed. They'll see
-          // the static summary the moment they come back.
-          //
-          // Clicking the banner navigates straight to this note (see the
-          // `navigate-to-meeting` listener below) — unlike the idle-route
-          // comparison above, a click is an explicit "take me there" from
-          // the user, so it doesn't have the back-to-back-recording
-          // interruption risk that auto-navigating here would.
+        } else if (action === 'notify') {
+          // A different route (Home, Chat, Settings, recording another note, a
+          // different meeting) OR this note's route but the window is
+          // hidden/minimised (tray-only after an auto-detected wrap-up) → fire a
+          // notification so the user learns their note finished. Clicking it
+          // navigates straight here (navigate-to-meeting listener below) — an
+          // explicit "take me there", so no back-to-back-recording interruption
+          // risk. When the window is visible AND already on this note, we skip
+          // it: the static summary is right there.
           const title =
             data.meetingData?.session_info.name?.trim() ||
             data.sessionName?.trim() ||

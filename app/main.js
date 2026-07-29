@@ -1511,6 +1511,15 @@ function createWindow(options = {}) {
       sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
+      // Audio capture is fully renderer-owned (getUserMedia + MediaRecorder on a
+      // 1s timeslice + a 1s silence-auto-stop interval, useSystemAudioCapture.ts).
+      // A recording can legitimately run while the window is HIDDEN — the close
+      // handler hides rather than quits, and #bug1 makes auto-detect start
+      // recording without ever showing the window. Chromium background-throttles
+      // timers/rAF in hidden windows by default, which would slow the capture
+      // timeslice and silence-auto-stop cadence. Disable it so capture behaves
+      // the same hidden as visible.
+      backgroundThrottling: false,
     },
     // Windows/Linux render the Electron application menu as an in-window menu
     // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
@@ -6670,14 +6679,19 @@ function showMeetingEndedNotification(appName) {
     body: appName,
     actions: [{ type: 'button', text: 'Wrap up' }],
   });
-  // "Wrap up" STOPS the recording (it had been auto-paused on mic-idle); the
-  // shared pipeline then transcribes and — only after that — prompts to
-  // generate notes / fires "Note ready". This notification deliberately no
-  // longer says "Summarise": there are no notes to summarise yet at meeting
-  // end, which is exactly the premature-prompt bug we're fixing. Both the
-  // action and a body tap wrap up (low stakes now — it only stops, it doesn't
-  // start AI processing), and neither steals focus (background, like
-  // requestAutoRecord).
+  // The explicit "Wrap up" ACTION STOPS the recording (it had been auto-paused
+  // on mic-idle); the shared pipeline then transcribes and — only after that —
+  // prompts to generate notes / fires "Note ready". This notification
+  // deliberately no longer says "Summarise": there are no notes to summarise
+  // yet at meeting end, which is exactly the premature-prompt bug we're fixing.
+  //
+  // A body tap does NOT commit — it just opens Steno so the user can decide
+  // (wrap up / resume / leave paused). Stopping is not low-stakes: it hands the
+  // recording to the pipeline (and, with auto-summarize on, summarises), so if
+  // mic-idle was a false positive and the meeting is still live, a stray body
+  // tap that committed would silently end the recording — and since wrap-up no
+  // longer shows the window, nothing would tell the user. Keeping the split
+  // (action commits, body opens) avoids that.
   //
   // Gating (deliberate): like the meeting-detected toast, this is an
   // auto-detect *lifecycle* prompt gated by the auto_detect_meetings toggle,
@@ -6686,7 +6700,13 @@ function showMeetingEndedNotification(appName) {
   // toasts is intentional so turning off result notifications doesn't strand a
   // paused auto-detected recording with no way to wrap it up.
   notif.on('action', (_evt, _index) => requestWrapUp());
-  notif.on('click', () => requestWrapUp());
+  notif.on('click', () => {
+    sendDebugLog('[auto-detect] Meeting ended notif body tapped — opening Steno (no commit)');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
   trackNotificationLifecycle(notif, 'meeting_ended');
   notif.show();
   return notif;

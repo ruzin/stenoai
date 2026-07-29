@@ -1,5 +1,45 @@
 import { describe, it, expect } from 'vitest';
-import { classifyCompletionNotification, meetingAlreadyHasNotes } from './completionNotification';
+import {
+  classifyCompletionNotification,
+  meetingAlreadyHasNotes,
+  completionRouteAction,
+} from './completionNotification';
+
+const NOTE = '/meetings/abc_summary.md';
+const PROCESSING = '/meetings/processing';
+const routeAction = (currentRoute: string, windowVisible: boolean) =>
+  completionRouteAction({
+    currentRoute,
+    finishedMeetingRoute: NOTE,
+    processingRoute: PROCESSING,
+    windowVisible,
+  });
+
+describe('completionRouteAction (#bug1/#bug3 visibility-aware guard)', () => {
+  it('BLOCKER case: on the note route but window HIDDEN → notify (wrap-up flow)', () => {
+    // stopRecording navigated to the note's route in a hidden tray-only window;
+    // a route-only guard suppressed the prompt — this is the fix.
+    expect(routeAction(NOTE, false)).toBe('notify');
+  });
+
+  it('on the note route AND visible → suppress (user sees the summary)', () => {
+    expect(routeAction(NOTE, true)).toBe('suppress');
+  });
+
+  it('on the processing page AND visible → navigate into the note', () => {
+    expect(routeAction(PROCESSING, true)).toBe('navigate');
+  });
+
+  it('on the processing page but HIDDEN → notify (not silently navigate)', () => {
+    expect(routeAction(PROCESSING, false)).toBe('notify');
+  });
+
+  it('on any other route → notify (visible or hidden)', () => {
+    expect(routeAction('/', true)).toBe('notify');
+    expect(routeAction('/chat', false)).toBe('notify');
+    expect(routeAction('/meetings/other_summary.md', true)).toBe('notify');
+  });
+});
 
 describe('classifyCompletionNotification (#bug2/#bug3)', () => {
   it('notes generated → note-ready (auto_summarize on / reprocess done)', () => {

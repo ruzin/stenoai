@@ -55,3 +55,31 @@ export function meetingAlreadyHasNotes(
   if (!meetingData) return false;
   return meetingData.session_info?.notes_generated !== false;
 }
+
+/**
+ * What to do when a job finishes, based on where the user is AND whether the
+ * window is actually visible (#bug1). The visibility gate matters because an
+ * auto-detected recording can run with the window HIDDEN (tray-only), and
+ * "Wrap up" navigates to the note's own route — so route alone would say "the
+ * user is looking at it" when the window is hidden and they aren't, suppressing
+ * the very prompt this feature exists to send.
+ *
+ * - `navigate`: user is watching the processing page (visible) → open the note.
+ * - `suppress`: user is already viewing this note (visible) → the static
+ *   summary is right there, a banner would be noise.
+ * - `notify`: anywhere else, OR this note's route but the window is
+ *   hidden/minimised → fire a notification.
+ */
+export type CompletionRouteAction = 'navigate' | 'notify' | 'suppress';
+
+export function completionRouteAction(input: {
+  currentRoute: string;
+  finishedMeetingRoute: string;
+  processingRoute: string;
+  windowVisible: boolean;
+}): CompletionRouteAction {
+  const { currentRoute, finishedMeetingRoute, processingRoute, windowVisible } = input;
+  if (currentRoute === processingRoute && windowVisible) return 'navigate';
+  if (currentRoute === finishedMeetingRoute && windowVisible) return 'suppress';
+  return 'notify';
+}
