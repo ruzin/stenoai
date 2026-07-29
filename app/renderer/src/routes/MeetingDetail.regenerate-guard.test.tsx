@@ -291,7 +291,16 @@ describe('the regenerate guard', () => {
     fireEvent.click(screen.getByRole('button', { name: /more options/i }));
     fireEvent.click(screen.getByTestId('retranscribe-action'));
     const box = dialog() as HTMLElement;
+    // Human section names, not the raw field keys the sidecar stores.
     expect(within(box).getByText(/Key topics/)).toBeTruthy();
+    expect(box.textContent).not.toContain('discussion_areas');
+    // The edited version's fate is stated once, not "replaced" and "kept" in
+    // the same breath, and it names the on-screen control (the menu next to
+    // the Summary switcher) rather than the data-testid.
+    expect(box.textContent).toContain(
+      'Your edited version stays available as "Standard" with a timestamp, in the menu next to Summary.'
+    );
+    expect(box.textContent).not.toContain('note view menu');
     expect(h.retranscribe.mutate).not.toHaveBeenCalled();
   });
 

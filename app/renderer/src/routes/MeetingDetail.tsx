@@ -1478,10 +1478,12 @@ function DetailContent({
           'This re-runs transcription with your current transcription settings, replacing the transcript and regenerating the summary.' +
           // #249: reprocess (which --retranscribe runs through) snapshots the
           // current note as a switchable report before overwriting it, so the
-          // edited version is one click away in the note view menu rather than
-          // gone. Say so - it is both more reassuring and more accurate.
+          // edited version is one click away in the menu next to Summary
+          // rather than gone. Say so plainly - not "replaced, but kept" in
+          // the same breath - and name where it lands by what's on screen
+          // (the Summary switcher), not the data-testid.
           (hasNoteEdits
-            ? ` Your edits to ${editedSectionsText} are replaced, but the edited version is kept in the note view menu.`
+            ? ` You edited ${editedSectionsText}. Your edited version stays available as "Standard" with a timestamp, in the menu next to Summary.`
             : '')
         }
         confirmLabel="Re-transcribe"
