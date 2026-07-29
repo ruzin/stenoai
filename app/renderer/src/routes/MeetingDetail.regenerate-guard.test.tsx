@@ -207,6 +207,13 @@ describe('the regenerate guard', () => {
     expect(within(box as HTMLElement).getByText(/Summary/)).toBeTruthy();
     expect(within(box as HTMLElement).getByText(/Action items/)).toBeTruthy();
     expect(box!.textContent).not.toContain('action_items');
+    // The edited version's fate is stated once, not "replaced" and "kept" in
+    // the same breath, and it names the on-screen control (the menu next to
+    // the Summary switcher) rather than the data-testid.
+    expect(box!.textContent).toContain(
+      'Your edited version stays available as "Standard" with a timestamp, in the menu next to Summary.'
+    );
+    expect(box!.textContent).not.toContain('note view menu');
   });
 
   test('confirming goes ahead with the rebuild', async () => {

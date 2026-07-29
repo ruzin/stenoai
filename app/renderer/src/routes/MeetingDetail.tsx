@@ -1499,7 +1499,19 @@ function DetailContent({
         open={confirmRegenerate}
         onOpenChange={setConfirmRegenerate}
         title="Regenerate notes and replace your edits?"
-        description={`You edited ${editedSectionsText} on this note. Generating notes again rewrites it from the transcript, so those edits are replaced - the edited version is kept in the note view menu.`}
+        // #249: reprocess snapshots the current note as a switchable report
+        // before overwriting it, so the edited version is one click away in
+        // the menu next to Summary rather than gone. Say so plainly - not
+        // "replaced, but kept" in the same breath - and name where it lands
+        // by what's on screen (the Summary/report switcher), not the
+        // data-testid.
+        description={
+          (hasNoteEdits ? `You edited ${editedSectionsText}. ` : '') +
+          'Regenerating rewrites this note from the transcript.' +
+          (hasNoteEdits
+            ? ' Your edited version stays available as "Standard" with a timestamp, in the menu next to Summary.'
+            : '')
+        }
         confirmLabel="Regenerate notes"
         cancelLabel="Keep my edits"
         destructive
