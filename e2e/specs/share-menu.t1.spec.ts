@@ -17,6 +17,12 @@ import path from 'path';
  *  - the clipboard is captured by replacing navigator.clipboard in-page.
  *  - STENOAI_E2E_EXPORT_PATH makes the export-transcript mock write its payload
  *    to disk, so what "Save notes as .md…" passed is observable byte for byte.
+ *  - STENOAI_E2E_SHARE_CAPABLE toggles the share-sheet capability, which is why
+ *    the renderer gates on an injected flag rather than navigator.platform:
+ *    both branches are reachable on any OS, including in CI on Ubuntu.
+ *  - STENOAI_E2E_SHARE_LOG collects one JSON line per share-note-file call, and
+ *    STENOAI_E2E_SHARE_DELAY_MS holds a call open so the pending state can be
+ *    observed without racing the clock.
  */
 
 const SUMMARY_FILE = 'epsilon_summary.json';
@@ -182,6 +188,131 @@ test('Save notes as .md passes markdown, not the running text Copy notes builds'
     expect(md).toContain('Alice, Bob');
     expect(md).not.toContain('SUMMARY');
     expect(md).not.toContain('PARTICIPANTS');
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+const SHARE_ENTRIES = [/Share notes as PDF/, /Share notes as \.md/, /Share transcript/];
+
+function shareCalls(logFile: string) {
+  try {
+    return readFileSync(logFile, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { kind: string; defaultFilename: string; payloadHead: string });
+  } catch {
+    return [];
+  }
+}
+
+test('the share entries are absent when no share sheet exists here', async ({ launchApp }) => {
+  // The branch that matters on Windows: Electron exports no ShareMenu there, so
+  // an entry that rendered anyway would reach a constructor that is undefined.
+  const { page } = await launchApp({ mockIpc: true, env: { STENOAI_E2E_SEED_MEETING: '1' } });
+  await openDetail(page);
+
+  const menu = await openShareMenu(page);
+  // The rest of the menu is unaffected - Windows keeps every non-sheet action.
+  await expect(menu.getByRole('button', { name: 'Copy notes' })).toBeVisible();
+  await expect(menu.getByRole('button', { name: /Save transcript as \.md/ })).toBeVisible();
+  for (const entry of SHARE_ENTRIES) {
+    await expect(menu.getByRole('button', { name: entry })).toHaveCount(0);
+  }
+});
+
+test('the share entries render when a share sheet exists, and pass the right file', async ({
+  launchApp,
+}) => {
+  const outDir = mkdtempSync(path.join(tmpdir(), 'steno-share-t1-'));
+  const logFile = path.join(outDir, 'share-calls.jsonl');
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_MEETING: '1',
+      STENOAI_E2E_SHARE_CAPABLE: '1',
+      STENOAI_E2E_SHARE_LOG: logFile,
+    },
+  });
+
+  try {
+    await openDetail(page);
+    const menu = await openShareMenu(page);
+    for (const entry of SHARE_ENTRIES) {
+      await expect(menu.getByRole('button', { name: entry })).toBeVisible();
+    }
+
+    // Notes as PDF hands over the same branded HTML the save path builds, under
+    // a dated .pdf name - the filename is what the recipient reads.
+    await menu.getByRole('button', { name: /Share notes as PDF/ }).click();
+    await expect.poll(() => shareCalls(logFile).length, { timeout: 10_000 }).toBe(1);
+    let call = shareCalls(logFile)[0];
+    expect(call.kind).toBe('pdf');
+    expect(call.defaultFilename).toMatch(/^\d{4}-\d{2}-\d{2}-epsilon-planning\.pdf$/);
+    expect(call.payloadHead).toContain('<!doctype html>');
+
+    // A share does not dismiss the menu (unlike a copy), so the next entry is
+    // clicked in the same open menu.
+    await expect(menu).toBeVisible();
+
+    // Transcript goes as text under the plain dated .md name.
+    await menu.getByRole('button', { name: /Share transcript/ }).click();
+    await expect.poll(() => shareCalls(logFile).length, { timeout: 10_000 }).toBe(2);
+    call = shareCalls(logFile)[1];
+    expect(call.kind).toBe('text');
+    expect(call.defaultFilename).toMatch(/^\d{4}-\d{2}-\d{2}-epsilon-planning\.md$/);
+    expect(call.payloadHead).toContain('# Epsilon Planning');
+
+    // Notes as .md carries the -notes suffix, so it cannot overwrite the
+    // transcript file that the entry above just wrote into the same directory.
+    await menu.getByRole('button', { name: /Share notes as \.md/ }).click();
+    await expect.poll(() => shareCalls(logFile).length, { timeout: 10_000 }).toBe(3);
+    call = shareCalls(logFile)[2];
+    expect(call.kind).toBe('text');
+    expect(call.defaultFilename).toMatch(/^\d{4}-\d{2}-\d{2}-epsilon-planning-notes\.md$/);
+    expect(call.defaultFilename).not.toBe(shareCalls(logFile)[1].defaultFilename);
+    expect(call.payloadHead).toContain('## Summary');
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a share in flight shows Preparing and swallows a second click', async ({ launchApp }) => {
+  const outDir = mkdtempSync(path.join(tmpdir(), 'steno-share-pending-t1-'));
+  const logFile = path.join(outDir, 'share-calls.jsonl');
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_MEETING: '1',
+      STENOAI_E2E_SHARE_CAPABLE: '1',
+      STENOAI_E2E_SHARE_LOG: logFile,
+      STENOAI_E2E_SHARE_DELAY_MS: '3000',
+    },
+  });
+
+  try {
+    await openDetail(page);
+    const menu = await openShareMenu(page);
+    await menu.getByRole('button', { name: /Share notes as PDF/ }).click();
+
+    // The menu stays open and the clicked entry says what it is doing. Without
+    // this the user sees nothing happen for up to 15 seconds.
+    await expect(menu.getByRole('button', { name: 'Preparing…' })).toBeVisible();
+    await expect(menu).toBeVisible();
+    // Every share entry is off while one is in flight, not just the clicked one.
+    for (const entry of [/Share notes as \.md/, /Share transcript/]) {
+      await expect(menu.getByRole('button', { name: entry })).toBeDisabled();
+    }
+
+    // force: past the disabled attribute, so this tests the guard in the handler
+    // rather than only the rendered state. A second sheet must not be queued.
+    await menu.getByRole('button', { name: 'Preparing…' }).click({ force: true });
+    await expect.poll(() => shareCalls(logFile).length, { timeout: 5_000 }).toBe(1);
+
+    // It resolves back to its own label rather than staying stuck.
+    await expect(menu.getByRole('button', { name: /Share notes as PDF/ })).toBeEnabled({
+      timeout: 10_000,
+    });
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }

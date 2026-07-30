@@ -22,7 +22,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { Select, SelectContent, SelectItem, SelectSeparator } from '@/components/ui/select';
@@ -701,6 +701,59 @@ function DetailContent({
   };
   React.useEffect(() => cancelShareClose, []);
 
+  // Is there a native share sheet here at all. A capability answered by the main
+  // process, NOT the renderer's isMac: that is a navigator.platform constant
+  // frozen at import, so it can neither be flipped at runtime nor exercised in
+  // both directions by a test - and the absent branch is the one that keeps
+  // Windows from reaching a ShareMenu that does not exist there.
+  // `=== true` means an unresolved query counts as false, so the group never
+  // flashes in before it is known to exist. Cached across notes: the answer
+  // cannot change while the app runs.
+  const shareCapability = useQuery({
+    queryKey: ['share', 'canShare'],
+    queryFn: () => ipc().share.canShare(),
+    staleTime: Infinity,
+  });
+  const canShareToSheet = shareCapability.data === true;
+
+  // Which share is in flight, or null. Unlike the save actions there is no
+  // dialog to react to a click: up to 15 seconds pass before the sheet appears,
+  // and in that gap everyone clicks a second time. So the clicked entry says so,
+  // and only one share may be in flight across all three.
+  type ShareEntry = 'notes-pdf' | 'notes-md' | 'transcript';
+  const [sharing, setSharing] = React.useState<ShareEntry | null>(null);
+
+  const runShare = async (
+    entry: ShareEntry,
+    kind: 'pdf' | 'text',
+    what: 'notes' | 'transcript',
+    filename: string,
+    payload: string,
+    trigger: HTMLElement,
+  ) => {
+    // The disabled attribute already blocks the second click; this is what
+    // actually holds if a re-render lands between the click and the state
+    // update.
+    if (sharing) return;
+    // Read the anchor BEFORE the await: the entry re-renders as "Preparing…"
+    // and the menu can reflow, so a rectangle read afterwards would point at
+    // something else. The sheet is anchored under the clicked entry.
+    const rect = trigger.getBoundingClientRect();
+    const anchor = { x: Math.round(rect.left), y: Math.round(rect.bottom) };
+    setSharing(entry);
+    setExportError(null);
+    try {
+      const res = await ipc().share.shareFile(kind, filename, payload, anchor);
+      if (!res.success) {
+        setExportError(`Couldn't share ${what}: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't share ${what}: ${getErrorMessage(error)}`);
+    } finally {
+      setSharing(null);
+    }
+  };
+
   const summary = meeting.summary?.trim();
   const participants = asStringArray(meeting.participants);
   const keyPoints = meeting.key_points ?? [];
@@ -927,6 +980,74 @@ function DetailContent({
                   <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   Save transcript as .md…
                 </button>
+                {/* Native share sheet (AirDrop, Mail, Messages, Notes). macOS
+                    only, and rendered only when the main process says a sheet
+                    exists. Share transcript stands as its own entry rather than
+                    riding along inside a combined action: it puts the full
+                    verbatim transcript into an outbound channel, and that
+                    deserves a deliberate click. */}
+                {canShareToSheet && (
+                  <>
+                    <MenuDivider />
+                    <button
+                      type="button"
+                      className={MENU_ENTRY_CLASS}
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={(e) =>
+                        void runShare(
+                          'notes-pdf',
+                          'pdf',
+                          'notes',
+                          defaultExportFilename(meeting, 'pdf'),
+                          buildNotesHtml(noteSections),
+                          e.currentTarget
+                        )
+                      }
+                      disabled={!canExportNotesPdf || notesExportBlocked || sharing !== null}
+                    >
+                      <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {sharing === 'notes-pdf' ? 'Preparing…' : 'Share notes as PDF…'}
+                    </button>
+                    <button
+                      type="button"
+                      className={MENU_ENTRY_CLASS}
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={(e) =>
+                        void runShare(
+                          'notes-md',
+                          'text',
+                          'notes',
+                          notesMarkdownFilename(),
+                          buildNotesMarkdown(noteSections, reportForExport),
+                          e.currentTarget
+                        )
+                      }
+                      disabled={!canExportNotesPdf || notesExportBlocked || sharing !== null}
+                    >
+                      <Share className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {sharing === 'notes-md' ? 'Preparing…' : 'Share notes as .md…'}
+                    </button>
+                    <button
+                      type="button"
+                      className={MENU_ENTRY_CLASS}
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={(e) =>
+                        void runShare(
+                          'transcript',
+                          'text',
+                          'transcript',
+                          defaultExportFilename(meeting),
+                          transcriptBundle ?? '',
+                          e.currentTarget
+                        )
+                      }
+                      disabled={!transcriptBundle || sharing !== null}
+                    >
+                      <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {sharing === 'transcript' ? 'Preparing…' : 'Share transcript…'}
+                    </button>
+                  </>
+                )}
               </PopoverContent>
             </Popover>
             <Popover>
