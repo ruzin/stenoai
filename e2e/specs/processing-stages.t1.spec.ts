@@ -19,6 +19,11 @@ import type { ElectronApplication, Page } from '@playwright/test';
  */
 
 async function openProcessing(page: Page) {
+  // Reached in real usage only via an active recording (never a bare URL
+  // hash) -- start one first so activeSession/recording.sessionName is
+  // truthy, matching what canRetry (retryAudioFile && activeSession) needs
+  // for the retry-button test below.
+  await page.evaluate(() => window.stenoai.recording.start('test-session'));
   await page.evaluate(() => {
     window.location.hash = '/meetings/processing';
   });
@@ -120,6 +125,7 @@ test('a processing failure swaps to the error panel, and retrying does not leak 
   await emit(app, 'processing-complete', {
     success: false,
     sessionName: 'test-session',
+    audioFile: '/fake/audio.wav',
     message: 'boom',
   });
   await expect(label).toHaveCount(0);
