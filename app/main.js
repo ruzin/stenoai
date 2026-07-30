@@ -3989,7 +3989,12 @@ ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, 
 
     // Atomic write: tmp file in the SAME directory, then rename into place.
     // Sharing the same note twice overwrites the first file, which is fine: the
-    // content is identical and Mail copies an attachment into the draft.
+    // content is identical and Mail copies an attachment into the draft. The
+    // exception, since the name is deliberately not randomised: another process
+    // running as the same user could have planted a file of that name in this
+    // directory first, and the rename would replace it. Accepted - the filename
+    // has to stay the readable one the recipient sees, and anyone who can write
+    // here can already read the notes we put here.
     const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
     try {
       await fs.promises.writeFile(tmpPath, bytes, kind === 'pdf' ? undefined : 'utf-8');
