@@ -6779,6 +6779,7 @@ function attachProcessingStderr(proc, label) {
 // pipelines (e.g. a queued process-streaming run during a live record) don't
 // mask each other's heartbeats. Records are logged under the source label.
 const lastHeartbeatLoggedAt = new Map();
+const lastProgressLoggedAt = new Map();
 function logPipelineStdoutLine(line, source) {
   const l = line.trim();
   if (!l) return;
@@ -6789,10 +6790,19 @@ function logPipelineStdoutLine(line, source) {
     processingLog.logLine(source, l);
     return;
   }
-  if (l.startsWith('PROGRESS:diarize:')) {
-    // Only :start/:done markers exist on this pipeline (rare, at most twice
-    // per channel) -- no per-chunk flood risk, so no throttle needed unlike
-    // HEARTBEAT above.
+  if (l.startsWith('PROGRESS:')) {
+    // Stage-transition markers (diarize start/done, summarize
+    // step/reducing) are rare and always worth a line. Per-chunk
+    // sub-progress (transcribe chunks, diarize embedding chunks) can tick
+    // roughly once a second for many minutes on a long recording --
+    // throttle those the same way HEARTBEAT already is, or they'd flood
+    // the on-disk log.
+    const isHighFrequency = l.startsWith('PROGRESS:transcribe:') || l.includes(':embedding:');
+    if (isHighFrequency) {
+      const now = Date.now();
+      if (now - (lastProgressLoggedAt.get(source) || 0) < 10_000) return;
+      lastProgressLoggedAt.set(source, now);
+    }
     processingLog.logLine(source, l);
     return;
   }
