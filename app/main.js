@@ -112,6 +112,24 @@ if (process.env.STENOAI_USER_DATA_DIR) {
   app.setPath('userData', process.env.STENOAI_USER_DATA_DIR);
 }
 const IS_E2E = process.env.STENOAI_E2E === '1';
+// The subset of the harness that redirects WHERE BYTES GO: the STENOAI_E2E_*_PATH
+// seams in export-transcript / export-note-pdf / save-diagnostics, and the
+// path-returning seam in share-note-file. Those need a second condition beyond
+// IS_E2E, because IS_E2E is nothing but an environment variable: a signed build
+// started with STENOAI_E2E=1 plus one of those paths would silently write a
+// user's export to an attacker-chosen location instead of the file they picked
+// in the save dialog, and never show the dialog at all.
+//
+// `!app.isPackaged` is the right second condition rather than a stricter one:
+// every e2e lane launches the DEV binary from source (`electron.launch({ args:
+// ['.'] })` in e2e/fixtures/electron.ts, and the release gate's T1 smoke runs
+// the same way), so no legitimate test run is packaged. A packaged build now
+// ignores these seams entirely, whatever it is started with.
+//
+// Deliberately NOT folded into IS_E2E itself: its other ~30 uses gate the tray,
+// the dock, the scheduler and telemetry, and re-gating those on packaging would
+// be a far wider behavioural change than closing this hole.
+const ALLOW_E2E_PATH_SEAMS = IS_E2E && !app.isPackaged;
 const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
 if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
@@ -3704,9 +3722,10 @@ ipcMain.handle('export-transcript', async (event, defaultFilename, content) => {
       return { success: false, error: 'No transcript content to export.' };
     }
 
-    // Test-only seam: only honor it under e2e, so a stray env var in a real
-    // launch can't silently redirect a user's export to an arbitrary path.
-    const seamPath = IS_E2E ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
+    // Test-only seam: honored only in an UNPACKAGED e2e run, so a stray env var
+    // in a real launch can't silently redirect a user's export to an arbitrary
+    // path. See ALLOW_E2E_PATH_SEAMS - IS_E2E alone is just an env var.
+    const seamPath = ALLOW_E2E_PATH_SEAMS ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
     let targetPath = seamPath;
 
     if (!targetPath) {
@@ -3828,9 +3847,10 @@ ipcMain.handle('export-note-pdf', async (event, defaultFilename, html) => {
       return { success: false, error: 'No notes content to export.' };
     }
 
-    // Test-only seam: only honor it under e2e, so a stray env var in a real
-    // launch can't silently redirect a user's export to an arbitrary path.
-    const seamPath = IS_E2E ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
+    // Test-only seam: honored only in an UNPACKAGED e2e run (see
+    // ALLOW_E2E_PATH_SEAMS), so a stray env var in a real launch can't silently
+    // redirect a user's export to an arbitrary path.
+    const seamPath = ALLOW_E2E_PATH_SEAMS ? process.env.STENOAI_E2E_EXPORT_PATH : undefined;
     let targetPath = seamPath;
 
     if (!targetPath) {
@@ -3882,9 +3902,10 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
       return { success: false, error: 'No diagnostics content to save.' };
     }
 
-    // Test-only seam: only honor it under e2e, so a stray env var in a real
-    // launch can't silently redirect a user's save to an arbitrary path.
-    const seamPath = IS_E2E ? process.env.STENOAI_E2E_DIAGNOSTICS_PATH : undefined;
+    // Test-only seam: honored only in an UNPACKAGED e2e run (see
+    // ALLOW_E2E_PATH_SEAMS), so a stray env var in a real launch can't silently
+    // redirect a user's save to an arbitrary path.
+    const seamPath = ALLOW_E2E_PATH_SEAMS ? process.env.STENOAI_E2E_DIAGNOSTICS_PATH : undefined;
     let targetPath = seamPath;
 
     if (!targetPath) {
@@ -3962,10 +3983,10 @@ ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, 
     }
 
     // Fail before rendering: a stray call off darwin must not pay for a 15
-    // second PDF render just to be refused. Under e2e we deliberately continue
-    // on every platform, because the file write is what those specs assert and
-    // T2 runs on Windows too.
-    if (!IS_E2E && !shareSheetAvailable()) {
+    // second PDF render just to be refused. In an unpackaged e2e run we
+    // deliberately continue on every platform, because the file write is what
+    // those specs assert and T2 runs on Windows too.
+    if (!ALLOW_E2E_PATH_SEAMS && !shareSheetAvailable()) {
       return { success: false, error: 'Sharing is not available on this platform.' };
     }
 
@@ -4010,7 +4031,7 @@ ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, 
     // file went. The path is returned ONLY here - outside the seam the renderer
     // has no business knowing, and a leaked absolute path is exactly what the
     // basename reduction exists to prevent.
-    if (IS_E2E) return { success: true, path: targetPath };
+    if (ALLOW_E2E_PATH_SEAMS) return { success: true, path: targetPath };
 
     // Re-check rather than trust the entry gate above: this is the line that
     // stops `new undefined(...)` from taking the main process down.
