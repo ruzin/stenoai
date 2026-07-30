@@ -25,6 +25,16 @@ const STAGE_LABEL: Record<ProcessingStage, string> = {
   error: 'Couldn’t process this recording.',
 };
 
+// PROGRESS: lines carry raw counts whose units vary by stage (ASR sample
+// position, embedding chunk index, summary chunk index) and can run into
+// the tens of millions -- a percentage is the only display that's useful
+// across all of them. Returns null (caller shows nothing new) for anything
+// unparseable rather than a misleading 0%/NaN%.
+function fractionToPercent(numerator: number, denominator: number): number | null {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return null;
+  return Math.min(100, Math.max(0, Math.round((numerator / denominator) * 100)));
+}
+
 function formatElapsedSeconds(totalSeconds: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`;
   const m = Math.floor(totalSeconds / 60);
@@ -65,13 +75,16 @@ export function Processing() {
   const [retrying, setRetrying] = React.useState(false);
   const [retryError, setRetryError] = React.useState<string | null>(null);
 
-  // Diarization's segmentation pass has no per-chunk checkpoint to report
-  // progress from -- unlike embedding extraction (not part of this branch's
-  // sidecar), so there is nothing to turn into a percentage here. A
-  // client-side elapsed-time ticker is the only way to show visible motion
-  // during that stretch without a backend change.
+  // Segmentation (the diarizer's own pass over the whole channel, before its
+  // embedding-extraction loop even starts) has no per-chunk checkpoint to
+  // report a percentage from -- measured on a real ~21-minute recording, it
+  // alone took 100+ seconds with zero forward signal otherwise, which reads
+  // as "stuck" even though it's healthy. A client-side elapsed-time ticker
+  // is the only way to show visible motion during that stretch without a
+  // backend change.
   const diarizeTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const diarizeStartedAtRef = React.useRef<number | null>(null);
+  const diarizeHasPercentRef = React.useRef(false);
   const clearDiarizeTimer = React.useCallback(() => {
     if (diarizeTimerRef.current) {
       clearInterval(diarizeTimerRef.current);
@@ -152,24 +165,44 @@ export function Processing() {
             setChunkProgress('Merging summaries…');
           } else {
             const [step, total] = raw.split('/').map(Number);
-            if (!Number.isNaN(step) && !Number.isNaN(total)) {
-              setChunkProgress(`Summarizing part ${step} of ${total}…`);
-            }
+            const p = fractionToPercent(step, total);
+            if (p !== null) setChunkProgress(`Summarizing… ${p}%`);
           }
           setStage((s) => (s === 'transcribing' || s === 'diarizing' ? 'summarizing' : s));
+        } else if (e.line.startsWith('PROGRESS:transcribe:')) {
+          const raw = e.line.slice('PROGRESS:transcribe:'.length);
+          const [done, total] = raw.split('/').map(Number);
+          // done/total are raw sample counts, not chunk counts -- can be in
+          // the tens of millions, so only a percentage is ever useful here.
+          const p = fractionToPercent(done, total);
+          if (p !== null) setChunkProgress(`Transcribing… ${p}%`);
         } else if (e.line.startsWith('PROGRESS:diarize:')) {
           const rest = e.line.slice('PROGRESS:diarize:'.length);
-          const [label, kind] = rest.split(':');
+          const [label, kind, fraction] = rest.split(':');
           if (kind === 'start') {
             setStage((s) => (s === 'transcribing' ? 'diarizing' : s));
             clearDiarizeTimer();
+            diarizeHasPercentRef.current = false;
             diarizeStartedAtRef.current = Date.now();
             setChunkProgress(`Diarizing ${label} channel…`);
+            // Segmentation (before the embedding loop starts ticking below)
+            // has no per-chunk checkpoint to report a percentage from -- a
+            // real ~21-minute recording measured 100+ seconds of dead air
+            // here otherwise. This ticks a plain elapsed-time counter so
+            // the stage visibly stays alive until real percentages arrive.
             diarizeTimerRef.current = setInterval(() => {
-              if (diarizeStartedAtRef.current === null) return;
+              if (diarizeHasPercentRef.current || diarizeStartedAtRef.current === null) return;
               const elapsedS = Math.floor((Date.now() - diarizeStartedAtRef.current) / 1000);
               setChunkProgress(`Diarizing ${label} channel… (${formatElapsedSeconds(elapsedS)})`);
             }, 1000);
+          } else if (kind === 'embedding' && fraction) {
+            const [i, n] = fraction.split('/').map(Number);
+            const p = fractionToPercent(i, n);
+            if (p !== null) {
+              diarizeHasPercentRef.current = true;
+              clearDiarizeTimer();
+              setChunkProgress(`Diarizing ${label} channel… ${p}%`);
+            }
           } else if (kind === 'done') {
             // Stop the elapsed ticker; no other UI action needed -- the
             // next channel's :start, or the first summarize: chunk,
