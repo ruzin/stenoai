@@ -9,6 +9,7 @@ Covers:
    so a recording where speech starts mid-stream isn't classified as silent.
 """
 
+import io
 import json
 import math
 import struct
@@ -21,6 +22,7 @@ from unittest.mock import Mock, patch
 
 from src.transcriber import (
     BLEED_JACCARD_THRESHOLD,
+    CHANNEL_DOMINANCE_THRESHOLD,
     DIARISED_SPLIT_TIMEOUT_S,
     MIN_RMS_THRESHOLD,
     STENO_DIARIZE_MERGE_GAP_S,
@@ -777,6 +779,25 @@ class ClusterChannelLabelsTests(unittest.TestCase):
         self.assertEqual(labels["SPEAKER_1"], "You")
         self.assertEqual(labels["SPEAKER_0"], "__diar__You__SPEAKER_0")
 
+    def test_overwhelmingly_dominant_speaker_returns_none(self):
+        # A tiny misdiarization blip (e.g. a ~0.3s noise artifact) must not
+        # spawn a phantom second speaker — regression for the real-world
+        # oversplitting issue observed on single-mic multi-person audio.
+        segments = [
+            {"start": 0.0, "end": 59.7, "speaker": "SPEAKER_0"},
+            {"start": 59.7, "end": 60.0, "speaker": "SPEAKER_1"},  # 0.5% of total
+        ]
+        self.assertIsNone(_cluster_channel_labels(segments, "You"))
+
+    def test_dominance_ratio_just_under_threshold_still_clusters(self):
+        total = 100.0
+        minor = total * (1 - CHANNEL_DOMINANCE_THRESHOLD) + 0.5  # comfortably above the gate
+        segments = [
+            {"start": 0.0, "end": total - minor, "speaker": "SPEAKER_0"},
+            {"start": total - minor, "end": total, "speaker": "SPEAKER_1"},
+        ]
+        self.assertIsNotNone(_cluster_channel_labels(segments, "You"))
+
 
 class ResolveSpeakerPlaceholdersTests(unittest.TestCase):
     def test_legacy_labels_are_untouched(self):
@@ -811,6 +832,37 @@ class TagChannelSegmentsTests(unittest.TestCase):
         self.assertEqual(result, [(0.0, "You", "Hi.")])
 
 
+class _FakePopen:
+    """Stand-in for subprocess.Popen, matching only the surface
+    _run_steno_diarize actually uses: .stdout/.stderr as readable byte
+    streams (plain io.BytesIO works fine -- the two reader threads each
+    only ever touch their own stream, so there's no real cross-thread
+    contention to simulate), .wait(timeout=...), .kill(), .returncode.
+    """
+
+    def __init__(self, stdout=b"", stderr=b"", returncode=0, raise_timeout_once=False):
+        self.stdout = io.BytesIO(stdout)
+        self.stderr = io.BytesIO(stderr)
+        self._final_returncode = returncode
+        self._raise_timeout_once = raise_timeout_once
+        self.returncode = None
+        self.killed = False
+
+    def wait(self, timeout=None):
+        if self._raise_timeout_once and timeout is not None:
+            self._raise_timeout_once = False
+            raise subprocess.TimeoutExpired(cmd="steno-diarize", timeout=timeout)
+        self.returncode = self._final_returncode
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+
+
+def _patch_popen(**kwargs):
+    return patch("subprocess.Popen", return_value=_FakePopen(**kwargs))
+
+
 class RunStenoDiarizeTests(unittest.TestCase):
     """_run_steno_diarize must survive the sidecar's real quirks: a
     diagnostic warning printed to stdout ahead of the JSON payload, and any
@@ -827,7 +879,7 @@ class RunStenoDiarizeTests(unittest.TestCase):
         ]).encode()
         stdout = b"E5RT encountered an STL exception. msg = unordered_map::at: key not found." + payload
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             patch("subprocess.run", return_value=Mock(returncode=0, stdout=stdout, stderr=b"")):
+             _patch_popen(stdout=stdout, stderr=b"", returncode=0):
             result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
         self.assertEqual(
             result,
@@ -837,24 +889,62 @@ class RunStenoDiarizeTests(unittest.TestCase):
             ],
         )
 
+    def test_parses_json_with_trailing_warning_after_payload(self):
+        # A late CoreML/Metal warning printed to stdout AFTER the JSON
+        # payload (at teardown) -- json.loads() requires the entire
+        # remaining string to be clean JSON and raises "Extra data" on
+        # trailing text, discarding an otherwise-successful diarization
+        # result. raw_decode() must tolerate this.
+        payload = json.dumps([{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}]).encode()
+        stdout = payload + b"\nMetal warning: some late teardown message"
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=stdout, stderr=b"", returncode=0):
+            result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(result, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+
+    def test_skips_an_interstitial_array_that_is_not_segment_shaped(self):
+        # A non-payload array (no "speakerId" keys) printed BEFORE the real
+        # payload must not be mistaken for it -- keep scanning for an array
+        # of segment-shaped dicts.
+        real_payload = json.dumps([{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}]).encode()
+        stdout = b'["not", "a", "segment"]\n' + real_payload
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=stdout, stderr=b"", returncode=0):
+            result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(result, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+
+    def test_prefers_the_last_matching_payload_when_multiple_exist(self):
+        # If more than one array in stdout looks segment-shaped (shouldn't
+        # normally happen, but the scan must have a defined, sane tie-break
+        # rather than an arbitrary one) -- the real payload is printed once,
+        # at the end, when diarization actually finishes, so prefer the
+        # LAST match.
+        first_payload = json.dumps([{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}]).encode()
+        second_payload = json.dumps([{"speakerId": "SPEAKER_1", "start": 5.0, "end": 6.0}]).encode()
+        stdout = first_payload + b"\n" + second_payload
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=stdout, stderr=b"", returncode=0):
+            result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(result, [{"start": 5.0, "end": 6.0, "speaker": "SPEAKER_1"}])
+
     def test_nonzero_exit_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             patch("subprocess.run", return_value=Mock(returncode=1, stdout=b"", stderr=b"boom")):
+             _patch_popen(stdout=b"", stderr=b"boom", returncode=1):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
     def test_unparseable_json_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             patch("subprocess.run", return_value=Mock(returncode=0, stdout=b"[not json", stderr=b"")):
+             _patch_popen(stdout=b"[not json", stderr=b"", returncode=0):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
     def test_no_bracket_in_stdout_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             patch("subprocess.run", return_value=Mock(returncode=0, stdout=b"nothing useful", stderr=b"")):
+             _patch_popen(stdout=b"nothing useful", stderr=b"", returncode=0):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
     def test_timeout_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="steno-diarize", timeout=60)):
+             _patch_popen(raise_timeout_once=True):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
 
