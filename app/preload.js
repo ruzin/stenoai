@@ -343,6 +343,16 @@ const stenoai = {
     chatStream: (streamId, payload) => send('org-chat-stream', streamId, payload),
   },
 
+  // Native macOS share sheet. canShare answers "does a share sheet exist here",
+  // NOT "does the user agent look like a Mac" — the renderer's isMac is a
+  // module-level navigator.platform constant frozen at import, so it can neither
+  // be flipped at runtime nor exercised in both directions by a test.
+  share: {
+    canShare: () => invoke('share-capability'),
+    shareFile: (kind, defaultFilename, payload, anchor) =>
+      invoke('share-note-file', kind, defaultFilename, payload, anchor),
+  },
+
   dialog: {
     respondQuit: (confirmed) => send('quit-dialog-response', { confirmed }),
   },

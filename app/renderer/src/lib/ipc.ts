@@ -1154,6 +1154,27 @@ export interface StenoaiBridge {
     chatStream: SendFn<[streamId: string, payload: OrgChatPayload]>;
   };
 
+  share: {
+    /** Whether a native share sheet exists on this machine (macOS only). Treat
+     *  an unresolved query as false so the entries never flash in before the
+     *  capability is known. */
+    canShare: RequestFn<[], boolean>;
+    /** Write the payload into the managed share temp directory and pop the
+     *  native sheet on it. `kind: 'pdf'` takes HTML and rasterises it first;
+     *  `'text'` is written as UTF-8. `anchor` is a point in window coordinates
+     *  so the sheet pops from the clicked entry. `success` means only that the
+     *  sheet opened - the destination is never reported back. */
+    shareFile: RequestFn<
+      [
+        kind: 'pdf' | 'text',
+        defaultFilename: string,
+        payload: string,
+        anchor: { x: number; y: number },
+      ],
+      Result<Record<string, never>>
+    >;
+  };
+
   dialog: {
     respondQuit: SendFn<[confirmed: boolean]>;
   };

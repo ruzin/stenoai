@@ -61,6 +61,7 @@ const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-ga
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
+const { shareTempDir, sweepShareTemp, SHARE_TEMP_MAX_AGE_MS } = require('./share-temp');
 const { userNotesFilePath } = require('./notes-file');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
@@ -2105,6 +2106,25 @@ if (!gotSingleInstanceLock) {
       console.warn('Live-snapshot sweep failed (non-fatal):', e?.message);
     }
 
+    // Sweep share-sheet temp files older than a day. This is the ONLY cleanup
+    // for that directory: a file handed to ShareMenu must survive as long as the
+    // destination holds it (an open Mail draft, an AirDrop transfer waiting to be
+    // accepted), and popup() never reports when that ends — so nothing is deleted
+    // during a session. See share-temp.js for the full reasoning. Best-effort: an
+    // undeletable temp directory must not interrupt a launch.
+    try {
+      const { deleted } = sweepShareTemp(
+        shareTempDir(app.getPath('temp')),
+        Date.now(),
+        SHARE_TEMP_MAX_AGE_MS,
+      );
+      if (deleted.length > 0) {
+        sendDebugLog(`Swept ${deleted.length} stale share temp file(s)`);
+      }
+    } catch (e) {
+      console.warn('Share temp sweep failed (non-fatal):', e?.message);
+    }
+
     // Load custom storage path for file validation. Skipped under E2E (spawns
     // the backend; the test tiers keep startup backend-free).
     if (!IS_E2E) {
@@ -3898,6 +3918,112 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
       throw writeErr;
     }
     return { success: true, path: targetPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
+// Whether a native share sheet actually exists on this machine. macOS-only:
+// Electron exposes ShareMenu on darwin and nothing anywhere else. The second
+// half of the check is not paranoia — if a future Electron drops or renames the
+// export, this degrades to a hidden menu group instead of a main-process crash
+// on `new undefined(...)`.
+function shareSheetAvailable() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    return typeof require('electron').ShareMenu === 'function';
+  } catch (_) {
+    return false;
+  }
+}
+
+// The renderer asks once and hides the three share entries when this is false.
+// That flag is only a hint for what to draw; the handler below re-checks, which
+// is what actually keeps a stray call from crashing the process.
+ipcMain.handle('share-capability', () => shareSheetAvailable());
+
+// Hand a note to the native macOS share sheet (AirDrop, Mail, Messages, Notes).
+// Follows the same split as the three export handlers above: the renderer builds
+// the content, we own the bytes. Differences from them, all deliberate:
+//   - No save dialog. The destination is our own managed temp directory, because
+//     the sheet needs a real file and the user never picks a location.
+//   - The filename is user-visible: it becomes the attachment name the recipient
+//     reads, so defaultExportFilename()'s dated slug is used as-is.
+//   - Files are never deleted during the session (see share-temp.js).
+// Returns { success } only; success means the sheet opened, since popup() has no
+// completion callback and the app never learns the destination.
+ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, anchor) => {
+  try {
+    if (kind !== 'pdf' && kind !== 'text') {
+      return { success: false, error: 'Unsupported share type.' };
+    }
+    if (typeof payload !== 'string' || payload.length === 0) {
+      return { success: false, error: 'No content to share.' };
+    }
+
+    // Fail before rendering: a stray call off darwin must not pay for a 15
+    // second PDF render just to be refused. Under e2e we deliberately continue
+    // on every platform, because the file write is what those specs assert and
+    // T2 runs on Windows too.
+    if (!IS_E2E && !shareSheetAvailable()) {
+      return { success: false, error: 'Sharing is not available on this platform.' };
+    }
+
+    // The renderer supplies a suggested name only. Unlike the export handlers,
+    // where the reduced name merely seeds a dialog the user confirms, here it is
+    // joined onto a directory we write into — so `.` and `..` have to be rejected
+    // as well, not just directory components.
+    const fallback = kind === 'pdf' ? 'notes.pdf' : 'notes.md';
+    let base = fallback;
+    if (typeof defaultFilename === 'string' && defaultFilename.trim()) {
+      const reduced = path.basename(defaultFilename).slice(0, 200);
+      if (reduced && reduced !== '.' && reduced !== '..') base = reduced;
+    }
+
+    const dir = shareTempDir(app.getPath('temp'));
+    const targetPath = path.join(dir, base);
+
+    // Rasterise BEFORE touching the destination, so a render failure leaves no
+    // file behind. Mirrors export-note-pdf.
+    const bytes = kind === 'pdf' ? await renderHtmlToPdf(payload) : payload;
+
+    // Atomic write: tmp file in the SAME directory, then rename into place.
+    // Sharing the same note twice overwrites the first file, which is fine: the
+    // content is identical and Mail copies an attachment into the draft.
+    const tmpPath = path.join(dir, `.${base}.${require('crypto').randomBytes(6).toString('hex')}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, bytes, kind === 'pdf' ? undefined : 'utf-8');
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch (writeErr) {
+      try { await fs.promises.unlink(tmpPath); } catch (_) {}
+      throw writeErr;
+    }
+
+    // Test-only seam, mirroring STENOAI_E2E_EXPORT_PATH: a native sheet cannot be
+    // automated (Playwright can neither see nor dismiss it, and an open sheet
+    // blocks the run), so under e2e we stop after the write and return where the
+    // file went. The path is returned ONLY here — outside the seam the renderer
+    // has no business knowing, and a leaked absolute path is exactly what the
+    // basename reduction exists to prevent.
+    if (IS_E2E) return { success: true, path: targetPath };
+
+    // Re-check rather than trust the entry gate above: this is the line that
+    // stops `new undefined(...)` from taking the main process down.
+    if (!shareSheetAvailable()) {
+      return { success: false, error: 'Sharing is not available on this platform.' };
+    }
+    const { ShareMenu } = require('electron');
+    const menu = new ShareMenu({ filePaths: [targetPath] });
+    // Anchor on the clicked entry so the sheet pops from the button rather than
+    // the window corner. A malformed anchor is dropped, not defaulted to 0,0 —
+    // Electron then places the sheet itself.
+    const popupOptions = { window: mainWindow };
+    if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      popupOptions.x = Math.round(anchor.x);
+      popupOptions.y = Math.round(anchor.y);
+    }
+    menu.popup(popupOptions);
+    return { success: true };
   } catch (err) {
     return { success: false, error: String(err && err.message ? err.message : err) };
   }
