@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/electron';
+import { openShareMenu } from '../fixtures/share-menu';
 import type { Page } from '@playwright/test';
 import { readFileSync, rmSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
@@ -6,7 +7,8 @@ import path from 'path';
 
 /**
  * T1 — renderer-only, mock IPC, no backend. Drives the REAL MeetingDetail
- * transcript actions (Copy transcript / Save transcript as .md…) against a
+ * transcript actions (Copy transcript / Save transcript as .md…, both now
+ * inside the Share menu) against a
  * seeded meeting, proving the renderer BUILDS the bundle from meeting data and
  * WIRES it to both sinks. The T2 spec only asserts the backend writes whatever
  * string it's handed; the build + the copy/save wiring the renderer performs
@@ -54,9 +56,9 @@ async function openDetail(page: Page) {
   await page.evaluate((f) => {
     window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
   }, SUMMARY_FILE);
-  // The seeded meeting's title and the transcript actions are present once the
-  // detail route has resolved the meeting from the mocked list.
-  await expect(page.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
+  // The Share menu's trigger is present once the detail route has resolved the
+  // meeting from the mocked list; the transcript actions live inside it.
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
 }
 
 test('Copy transcript copies the renderer-built bundle and confirms only on success', async ({
@@ -66,7 +68,8 @@ test('Copy transcript copies the renderer-built bundle and confirms only on succ
   await openDetail(page);
   await installClipboardRecorder(page);
 
-  await page.getByRole('button', { name: 'Copy transcript' }).click();
+  const menu = await openShareMenu(page);
+  await menu.getByRole('button', { name: 'Copy transcript' }).click();
 
   // Exactly one write, carrying the bundle BUILT from the meeting (not an
   // arbitrary string): English metadata labels + headings, the notes and the
@@ -84,8 +87,8 @@ test('Copy transcript copies the renderer-built bundle and confirms only on succ
     expect(bundle).not.toContain(german);
   }
 
-  // The button confirms the copy only after the write resolved.
-  await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+  // The entry confirms the copy only after the write resolved.
+  await expect(menu.getByRole('button', { name: 'Copied' })).toBeVisible();
 });
 
 test('Copy transcript does not confirm when the clipboard write is rejected', async ({
@@ -98,13 +101,15 @@ test('Copy transcript does not confirm when the clipboard write is rejected', as
     (window as unknown as { __clipboardReject: boolean }).__clipboardReject = true;
   });
 
-  await page.getByRole('button', { name: 'Copy transcript' }).click();
+  const menu = await openShareMenu(page);
+  await menu.getByRole('button', { name: 'Copy transcript' }).click();
 
-  // The write was attempted but rejected, so the button must NOT flip to
-  // "Copied"; the failure surfaces instead.
+  // The write was attempted but rejected, so the entry must NOT flip to
+  // "Copied", and the menu must stay open rather than self-dismissing over the
+  // error the user needs to read.
   await expect(page.getByText(/Couldn't copy transcript/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Copied' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Copied' })).toHaveCount(0);
+  await expect(menu.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
 });
 
 test('Save transcript as .md passes the same built bundle to export-transcript', async ({
@@ -123,12 +128,13 @@ test('Save transcript as .md passes the same built bundle to export-transcript',
 
     // Capture what Copy puts on the clipboard, then Save, and assert the file
     // the export handler received is byte-for-byte the same bundle.
-    await page.getByRole('button', { name: 'Copy transcript' }).click();
+    const copyMenu = await openShareMenu(page);
+    await copyMenu.getByRole('button', { name: 'Copy transcript' }).click();
     const [copied] = await clipboardWrites(page);
     expect(copied).toBeTruthy();
 
-    await page.getByRole('button', { name: 'More options' }).click();
-    await page.getByRole('button', { name: /Save transcript as \.md/ }).click();
+    const saveMenu = await openShareMenu(page);
+    await saveMenu.getByRole('button', { name: /Save transcript as \.md/ }).click();
 
     await expect.poll(() => {
       try {

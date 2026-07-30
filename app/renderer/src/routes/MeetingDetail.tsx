@@ -17,6 +17,7 @@ import {
   Mic,
   PencilLine,
   RefreshCw,
+  Share,
   Trash2,
   Users,
 } from 'lucide-react';
@@ -66,6 +67,7 @@ import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { buildNotesCopyText, type StructuredNoteSections } from '@/lib/notesCopy';
+import { buildNotesMarkdown } from '@/lib/notesMarkdown';
 import { buildNotesHtml, hasNotesContent } from '@/lib/notesPdf';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
@@ -76,6 +78,28 @@ import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
 import { useRecording } from '@/hooks/useRecording';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
+
+// The `…` popover's entry markup, lifted to a constant so the Share menu is
+// visually the same control rather than a near-copy that drifts from it. Both
+// popovers are plain `Popover` + buttons (no roving focus); giving them
+// keyboard navigation is an improvement to that shared pattern, not part of the
+// Share menu.
+const MENU_ENTRY_CLASS =
+  'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50';
+
+// Group separator inside the Share menu. aria-hidden with role="none": it is
+// pure visual grouping, and a `separator` role in a popover that is not a real
+// menu would announce structure the keyboard cannot navigate.
+function MenuDivider() {
+  return (
+    <div
+      role="none"
+      aria-hidden="true"
+      className="mx-2 my-1 h-px"
+      style={{ background: 'var(--border-subtle)' }}
+    />
+  );
+}
 
 // Cross-process sentinel: the export-transcript handler returns this exact error
 // when the user dismisses the save dialog, which we treat as a silent no-op
@@ -526,15 +550,19 @@ function DetailContent({
   // rejected clipboard (permission denied, no focus) must not show a false
   // success. The transcript bundle is large and the only thing a user pastes
   // into an LLM, so a silent miscopy is worse here than for the small notes copy.
+  // Returns whether the copy actually landed, so the Share menu only
+  // self-closes on success and a failure keeps the error line in view.
   const copyTranscriptForAi = async () => {
-    if (!transcriptBundle) return;
+    if (!transcriptBundle) return false;
     setExportError(null);
     try {
       await navigator.clipboard.writeText(transcriptBundle);
       setCopiedTranscript(true);
       setTimeout(() => setCopiedTranscript(false), 1500);
+      return true;
     } catch (error) {
       setExportError(`Couldn't copy transcript: ${getErrorMessage(error)}`);
+      return false;
     }
   };
 
@@ -611,6 +639,67 @@ function DetailContent({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // The active report, reasoning stripped, in the shape the note builders take.
+  // Same selection as copyNotes: whichever note is on screen is what leaves.
+  const reportForExport = activeReport
+    ? { content: stripReasoning(activeReport.content) }
+    : null;
+
+  // Notes exports are off while a summary/report stream is on screen, for the
+  // same reason Copy notes is: otherwise the pre-stream note is written out
+  // while its replacement is still arriving.
+  const notesExportBlocked = streamPhase !== 'idle';
+
+  // Notes and transcript must not suggest the same filename. Both are .md, and
+  // on the share path they land in ONE directory where the second write would
+  // silently replace the first - including under an already-open mail draft,
+  // whose attachment would then quietly become the other document.
+  const notesMarkdownFilename = () =>
+    defaultExportFilename(meeting, 'md').replace(/\.md$/, '-notes.md');
+
+  // Markdown export of the note. Needs no main-process code of its own:
+  // export-transcript already takes an arbitrary string and filters to .md.
+  const saveNotesMarkdown = async () => {
+    if (!canExportNotesPdf || notesExportBlocked) return;
+    setExportError(null);
+    try {
+      const res = await ipc().meetings.exportTranscript(
+        notesMarkdownFilename(),
+        buildNotesMarkdown(noteSections, reportForExport)
+      );
+      if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
+        setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't save notes: ${getErrorMessage(error)}`);
+    }
+  };
+
+  // The Share menu is controlled so a copy can leave its "Copied" label on
+  // screen for a beat before dismissing itself. Inside a menu the old checkmark
+  // feedback would vanish with the popover before it registered.
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const shareCloseTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelShareClose = () => {
+    if (shareCloseTimer.current) {
+      clearTimeout(shareCloseTimer.current);
+      shareCloseTimer.current = null;
+    }
+  };
+  const closeShareAfterCopy = () => {
+    cancelShareClose();
+    shareCloseTimer.current = setTimeout(() => setShareOpen(false), 800);
+  };
+  // A pending auto-close belongs to the menu instance the copy happened in. Any
+  // open/close in between invalidates it - otherwise dismissing the menu inside
+  // that 800 ms window and reopening it lets the stale timer slam the freshly
+  // opened menu shut in the user's face.
+  const onShareOpenChange = (open: boolean) => {
+    cancelShareClose();
+    setShareOpen(open);
+  };
+  React.useEffect(() => cancelShareClose, []);
 
   const summary = meeting.summary?.trim();
   const participants = asStringArray(meeting.participants);
@@ -730,39 +819,6 @@ function DetailContent({
             Home
           </button>
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* Disabled while a summary/report stream is on screen — the
-                    clipboard would otherwise get the old note while the body
-                    shows the in-flux streamed text. */}
-                <ActionIconButton
-                  label={copied ? 'Copied' : 'Copy notes'}
-                  onClick={copyNotes}
-                  disabled={streamPhase !== 'idle'}
-                >
-                  {copied ? <Check className="size-[13px]" /> : <Copy className="size-[13px]" />}
-                </ActionIconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy notes'}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <ActionIconButton
-                  label={copiedTranscript ? 'Copied' : 'Copy transcript'}
-                  onClick={() => void copyTranscriptForAi()}
-                  disabled={!transcriptBundle}
-                >
-                  {copiedTranscript ? (
-                    <Check className="size-[13px]" />
-                  ) : (
-                    <FileText className="size-[13px]" />
-                  )}
-                </ActionIconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {copiedTranscript ? 'Copied!' : 'Copy transcript'}
-              </TooltipContent>
-            </Tooltip>
             {/* Re-runs summarisation on the existing transcript. A
                 transcription-failure note has no transcript, so reprocess
                 would exit non-zero and strand the UI on a spinner — hide it
@@ -792,6 +848,87 @@ function DetailContent({
                 <TooltipContent side="bottom">Generate notes</TooltipContent>
               </Tooltip>
             )}
+            {/* Everything that carries this note OUT of the app, in one place:
+                the two clipboard actions, the file saves, and (macOS only) the
+                native share sheet. The org share deliberately stays in the `…`
+                menu next to Delete: it uploads to a server and has an inverse
+                action, where every entry here is a one-off local act. */}
+            <Popover open={shareOpen} onOpenChange={onShareOpenChange}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Share"
+                  title="Share"
+                  className="inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  <Share className="size-[14px]" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-60 p-1" data-testid="note-share-menu">
+                {/* Disabled while a summary/report stream is on screen — the
+                    clipboard would otherwise get the old note while the body
+                    shows the in-flux streamed text. */}
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => {
+                    copyNotes();
+                    closeShareAfterCopy();
+                  }}
+                  disabled={notesExportBlocked}
+                >
+                  <Copy className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  {copied ? 'Copied' : 'Copy notes'}
+                </button>
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => {
+                    void copyTranscriptForAi().then((ok) => {
+                      if (ok) closeShareAfterCopy();
+                    });
+                  }}
+                  disabled={!transcriptBundle}
+                >
+                  <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  {copiedTranscript ? 'Copied' : 'Copy transcript'}
+                </button>
+                <MenuDivider />
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveNotesPdf()}
+                  disabled={!canExportNotesPdf}
+                >
+                  <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save notes as PDF…
+                </button>
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveNotesMarkdown()}
+                  disabled={!canExportNotesPdf || notesExportBlocked}
+                >
+                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save notes as .md…
+                </button>
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveTranscript()}
+                  disabled={!transcriptBundle}
+                >
+                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save transcript as .md…
+                </button>
+              </PopoverContent>
+            </Popover>
             <Popover>
               <PopoverTrigger asChild>
                 <button
@@ -816,26 +953,6 @@ function DetailContent({
                 >
                   <FolderIcon className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   View containing folder
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                  style={{ color: 'var(--fg-1)' }}
-                  onClick={() => void saveTranscript()}
-                  disabled={!transcriptBundle}
-                >
-                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                  Save transcript as .md…
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                  style={{ color: 'var(--fg-1)' }}
-                  onClick={() => void saveNotesPdf()}
-                  disabled={!canExportNotesPdf}
-                >
-                  <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                  Save notes as PDF…
                 </button>
                 {/* Re-transcribe (#266): only when the source recording still
                     exists (keep-recordings was on). Disabled while a stream is on
