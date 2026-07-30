@@ -15,14 +15,22 @@ import { getLiveDraft, useLiveDraftStore } from '@/hooks/liveDraftStore';
 import { ipc } from '@/lib/ipc';
 import { stripReasoning } from '@/lib/markdown';
 
-type ProcessingStage = 'transcribing' | 'summarizing' | 'finalizing' | 'error';
+type ProcessingStage = 'transcribing' | 'diarizing' | 'summarizing' | 'finalizing' | 'error';
 
 const STAGE_LABEL: Record<ProcessingStage, string> = {
   transcribing: 'Analyzing transcript',
+  diarizing: 'Identifying speakers',
   summarizing: 'Generating notes',
   finalizing: 'Almost done…',
   error: 'Couldn’t process this recording.',
 };
+
+function formatElapsedSeconds(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}m ${s}s`;
+}
 
 export function Processing() {
   const navigate = useNavigate();
@@ -57,6 +65,21 @@ export function Processing() {
   const [retrying, setRetrying] = React.useState(false);
   const [retryError, setRetryError] = React.useState<string | null>(null);
 
+  // Diarization's segmentation pass has no per-chunk checkpoint to report
+  // progress from -- unlike embedding extraction (not part of this branch's
+  // sidecar), so there is nothing to turn into a percentage here. A
+  // client-side elapsed-time ticker is the only way to show visible motion
+  // during that stretch without a backend change.
+  const diarizeTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const diarizeStartedAtRef = React.useRef<number | null>(null);
+  const clearDiarizeTimer = React.useCallback(() => {
+    if (diarizeTimerRef.current) {
+      clearInterval(diarizeTimerRef.current);
+      diarizeTimerRef.current = null;
+    }
+  }, []);
+  React.useEffect(() => () => clearDiarizeTimer(), [clearDiarizeTimer]);
+
   // Buffer streamed chunks and flush at most every 50ms (~20fps). At a
   // typical token rate of 30-60 tokens/sec, this batches ~3 tokens per
   // commit which keeps the UI smooth without re-parsing the entire markdown
@@ -80,8 +103,9 @@ export function Processing() {
     const offs = [
       ipc().on.summaryChunk((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
+        clearDiarizeTimer();
         pendingChunkRef.current += e.chunk;
-        setStage((s) => (s === 'transcribing' ? 'summarizing' : s));
+        setStage((s) => (s === 'transcribing' || s === 'diarizing' ? 'summarizing' : s));
         if (!flushTimerRef.current) {
           flushTimerRef.current = setTimeout(flushPending, 50);
         }
@@ -92,12 +116,16 @@ export function Processing() {
       }),
       ipc().on.summaryComplete((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
+        clearDiarizeTimer();
+        setChunkProgress(null);
         setStage((s) => (s === 'error' ? s : 'finalizing'));
       }),
       ipc().on.processingComplete((e) => {
         if (activeSession && e.sessionName !== activeSession) return;
         if (!e.success) {
           setRetryAudioFile(e.audioFile ?? null);
+          clearDiarizeTimer();
+          setChunkProgress(null);
           setStage('error');
           return;
         }
@@ -118,20 +146,41 @@ export function Processing() {
         // DIFFERENT meeting emits summaryFile-scoped progress — ignore those so
         // another meeting's "Summarizing part N" can't hijack this screen's stage.
         if (e.summaryFile) return;
-        const raw = e.line.replace(/^PROGRESS:summarize:/, '');
-        if (raw === 'reducing') {
-          setChunkProgress('Merging summaries…');
-        } else {
-          const [step, total] = raw.split('/').map(Number);
-          if (!Number.isNaN(step) && !Number.isNaN(total)) {
-            setChunkProgress(`Summarizing part ${step} of ${total}…`);
+        if (e.line.startsWith('PROGRESS:summarize:')) {
+          const raw = e.line.slice('PROGRESS:summarize:'.length);
+          if (raw === 'reducing') {
+            setChunkProgress('Merging summaries…');
+          } else {
+            const [step, total] = raw.split('/').map(Number);
+            if (!Number.isNaN(step) && !Number.isNaN(total)) {
+              setChunkProgress(`Summarizing part ${step} of ${total}…`);
+            }
+          }
+          setStage((s) => (s === 'transcribing' || s === 'diarizing' ? 'summarizing' : s));
+        } else if (e.line.startsWith('PROGRESS:diarize:')) {
+          const rest = e.line.slice('PROGRESS:diarize:'.length);
+          const [label, kind] = rest.split(':');
+          if (kind === 'start') {
+            setStage((s) => (s === 'transcribing' ? 'diarizing' : s));
+            clearDiarizeTimer();
+            diarizeStartedAtRef.current = Date.now();
+            setChunkProgress(`Diarizing ${label} channel…`);
+            diarizeTimerRef.current = setInterval(() => {
+              if (diarizeStartedAtRef.current === null) return;
+              const elapsedS = Math.floor((Date.now() - diarizeStartedAtRef.current) / 1000);
+              setChunkProgress(`Diarizing ${label} channel… (${formatElapsedSeconds(elapsedS)})`);
+            }, 1000);
+          } else if (kind === 'done') {
+            // Stop the elapsed ticker; no other UI action needed -- the
+            // next channel's :start, or the first summarize: chunk,
+            // supersedes this sub-label shortly after.
+            clearDiarizeTimer();
           }
         }
-        setStage((s) => (s === 'transcribing' ? 'summarizing' : s));
       }),
     ];
     return () => offs.forEach((fn) => fn());
-  }, [activeSession, updateMeeting]);
+  }, [activeSession, updateMeeting, clearDiarizeTimer]);
 
   // Actually re-run the failed job: re-queue the preserved source audio via the
   // same import pipeline a stopped recording uses. Its copy-then-queue semantics
@@ -339,10 +388,12 @@ function StageCard({
           style={{ color: 'var(--fg-2)' }}
         />
         <span
+          data-testid="processing-stage-label"
+          data-stage={stage}
           className="text-[13px] transition-colors"
           style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
         >
-          {chunkProgress && stage === 'summarizing' ? chunkProgress : STAGE_LABEL[stage]}
+          {chunkProgress && stage !== 'finalizing' && stage !== 'error' ? chunkProgress : STAGE_LABEL[stage]}
         </span>
       </div>
     </div>
