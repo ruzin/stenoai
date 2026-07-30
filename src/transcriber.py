@@ -27,6 +27,7 @@ ASR engine would now strictly remove real speech without preventing
 anything; the model is the source of truth.
 """
 
+import contextlib
 import inspect
 import json
 import logging
@@ -97,6 +98,14 @@ AUDIO_PREPROCESS_TIMEOUT_S = 600
 # pre-process floor; the helper scales it up with duration for long meetings.
 DIARISED_SPLIT_TIMEOUT_S = 600
 
+# Timeout for the channel-COUNT probe in _split_stereo_to_channels (`-t 0`,
+# header-only -- runs BEFORE we know duration, so unlike the timeouts above
+# this can't scale with it). Should be near-instant, but a live-recorded
+# WebM (no seek index) measured >15s on a real ~3.5h recording -- same
+# silent-mono-fallback failure this whole file already guards against
+# elsewhere, just one step earlier in the pipeline.
+CHANNEL_DETECT_TIMEOUT_S = 60
+
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
 # speakers-mode — still pass. The model handles low-amplitude speech fine;
@@ -120,6 +129,14 @@ STENO_DIARIZE_MERGE_GAP_S = 0.3
 # still bounding a runaway on pathological input. Scaled up by duration for
 # long recordings, same pattern as _diarised_split_timeout.
 STENO_DIARIZE_TIMEOUT_FLOOR_S = 120
+
+# If one diarizer cluster holds this share (or more) of a channel's total
+# speaking time, the channel is treated as single-speaker — any other
+# cluster is almost certainly a brief misdiarization blip (observed
+# empirically: short/overlapping noise segments from Sortformer on
+# single-mic audio), not a real second speaker. Gates the "Speaker N"
+# placeholder path (_cluster_channel_labels).
+CHANNEL_DOMINANCE_THRESHOLD = 0.92
 
 # Sentinel text substituted when transcription produces no usable output
 # (genuine silence or all-hallucination). Callers compare against this to
@@ -603,6 +620,49 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
         segment["text"] = " ".join(t.strip() for t in texts_by_segment[i] if t.strip()).strip()
 
 
+# How often to print a HEARTBEAT: line while blocked waiting on
+# steno-diarize. Comfortably under Electron's TRANSCRIBE_INACTIVITY_MS
+# (8 minutes, app/main.js) -- see _heartbeat_while_waiting's docstring for
+# why this can't just reuse the existing chunk-progress heartbeat registry.
+STENO_DIARIZE_HEARTBEAT_INTERVAL_S = 60.0
+
+
+@contextlib.contextmanager
+def _heartbeat_while_waiting(label: str, interval_s: float = STENO_DIARIZE_HEARTBEAT_INTERVAL_S):
+    """Print a HEARTBEAT: line every ``interval_s`` seconds on a background
+    thread for the duration of the ``with`` block.
+
+    src._heartbeat's chunk-progress registry only works for backends that
+    call back into Python from INSIDE their own per-chunk loop (Parakeet,
+    Whisper.cpp) -- steno-diarize is an opaque external binary invoked via a
+    single blocking call, with no such checkpoint to hang a callback off of.
+    Without this, a diarization run on an hours-long channel prints nothing
+    for its entire duration, which Electron's inactivity watchdog
+    (app/main.js) can't tell apart from a hung process -- and kills,
+    discarding a real, working meeting.
+
+    Never affects the wrapped call's own return value or exceptions --
+    the background thread only ever writes heartbeat lines.
+    """
+    stop = threading.Event()
+
+    def _beat():
+        while not stop.wait(interval_s):
+            try:
+                sys.stdout.write(f"HEARTBEAT:{label}\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_beat, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+
+
 def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]:
     """Run the steno-diarize sidecar on a single mono channel WAV.
 
@@ -611,31 +671,91 @@ def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]
     non-zero exit, or unparseable output — so callers always have a safe
     fallback to legacy channel-only labeling and this can never fail a
     meeting.
+
+    Uses Popen with two concurrent reader threads rather than
+    subprocess.run(capture_output=True) so stdout and stderr are both
+    drained WHILE the process is still running -- matching what
+    subprocess.run's own communicate() does internally to avoid the
+    classic pipe-deadlock (real stdout payloads have measured up to
+    ~211KB in production, well past an OS pipe buffer, so neither stream
+    can safely be read to completion only after the process exits).
     """
     binary = _resolve_steno_diarize()
     if not binary:
         return None
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [binary, str(channel_path)],
-            capture_output=True, timeout=timeout,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        if result.returncode != 0:
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        def _read_stdout():
+            for chunk in iter(lambda: proc.stdout.read(65536), b""):
+                stdout_chunks.append(chunk)
+
+        def _read_stderr():
+            for chunk in iter(lambda: proc.stderr.read(4096), b""):
+                stderr_chunks.append(chunk)
+
+        t_out = threading.Thread(target=_read_stdout, daemon=True)
+        t_err = threading.Thread(target=_read_stderr, daemon=True)
+        t_out.start()
+        t_err.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            t_out.join(timeout=2.0)
+            t_err.join(timeout=2.0)
+            logger.warning("steno-diarize timed out after %ss", timeout)
+            return None
+        t_out.join(timeout=5.0)
+        t_err.join(timeout=5.0)
+
+        if proc.returncode != 0:
+            stderr_text = b"".join(stderr_chunks).decode(errors="replace")
             logger.warning(
                 "steno-diarize exited %s: %s",
-                result.returncode, result.stderr.decode(errors="replace")[:300],
+                proc.returncode, stderr_text[:300],
             )
             return None
-        stdout = result.stdout.decode(errors="replace")
-        # A known FluidAudio/CoreML warning ("E5RT encountered an STL
-        # exception... key not found") can print directly to stdout ahead
-        # of the JSON payload — skip to the first '[' rather than assuming
-        # stdout is pure JSON.
-        bracket = stdout.find("[")
-        if bracket < 0:
-            logger.warning("steno-diarize produced no JSON output")
+        stdout = b"".join(stdout_chunks).decode(errors="replace")
+        # Known FluidAudio/CoreML warnings ("E5RT encountered an STL
+        # exception... key not found") can print directly to stdout
+        # BEFORE, BETWEEN, or AFTER the real JSON payload -- skipping to
+        # the first '[' assumes stdout is pure JSON, which breaks the
+        # moment any warning text (or an interstitial, incomplete blob)
+        # appears ahead of the real array. Scan every '[' in stdout with a
+        # real JSON decoder and keep the LAST array of segment-shaped
+        # dicts -- better than latching onto the first bracket found.
+        raw_segments = None
+        decoder = json.JSONDecoder()
+        search_from = 0
+        while True:
+            next_bracket = stdout.find("[", search_from)
+            if next_bracket < 0:
+                break
+            try:
+                candidate, end = decoder.raw_decode(stdout, next_bracket)
+            except json.JSONDecodeError:
+                search_from = next_bracket + 1
+                continue
+            if (
+                isinstance(candidate, list) and candidate
+                and all(isinstance(s, dict) and "speakerId" in s for s in candidate)
+            ):
+                raw_segments = candidate
+            search_from = max(end, next_bracket + 1)
+        if raw_segments is None:
+            logger.warning(
+                "steno-diarize produced no usable JSON output "
+                "(stdout length %d, last 500 chars: %r)",
+                len(stdout), stdout[-500:],
+            )
             return None
-        raw_segments = json.loads(stdout[bracket:])
     except (subprocess.TimeoutExpired, OSError, ValueError) as e:
         logger.warning("steno-diarize failed: %s", e)
         return None
@@ -661,8 +781,10 @@ def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Opt
     by _resolve_speaker_placeholders.
 
     Returns None when diar_segments contains a single (or zero) distinct
-    speaker — the byte-identical-to-legacy fast path, since there's nothing
-    to disambiguate.
+    speaker, OR when one cluster's share of total speaking time is at or
+    above CHANNEL_DOMINANCE_THRESHOLD — the byte-identical-to-legacy fast
+    path, since a barely-there second cluster is almost certainly
+    misdiarization noise rather than a real second speaker.
     """
     speaker_ids = {s["speaker"] for s in diar_segments}
     if len(speaker_ids) <= 1:
@@ -671,6 +793,9 @@ def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Opt
     for s in diar_segments:
         totals[s["speaker"]] += s["end"] - s["start"]
     dominant = max(totals, key=totals.get)
+    total_time = sum(totals.values())
+    if total_time > 0 and totals[dominant] / total_time >= CHANNEL_DOMINANCE_THRESHOLD:
+        return None
     return {
         sid: (legacy_label if sid == dominant else f"__diar__{legacy_label}__{sid}")
         for sid in speaker_ids
@@ -700,18 +825,29 @@ def _tag_channel_segments(
 
     if channel_path is not None:
         timeout = max(STENO_DIARIZE_TIMEOUT_FLOOR_S, int(duration_seconds or 0))
-        diar_segments = _run_steno_diarize(channel_path, timeout)
-        if diar_segments:
-            cluster_labels = _cluster_channel_labels(diar_segments, legacy_label)
-            if cluster_labels:
-                _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
-                diar_tagged = []
-                for segment in diar_segments:
-                    text = (segment.get("text") or "").strip()
-                    if text:
-                        diar_tagged.append((segment["start"], cluster_labels[segment["speaker"]], text))
-                if diar_tagged:
-                    return diar_tagged
+        logger.info(f"Diarizing {legacy_label} channel acoustically (up to {timeout}s)...")
+        print(f"PROGRESS:diarize:{legacy_label}:start", flush=True)
+        try:
+            with _heartbeat_while_waiting(f"diarize:{legacy_label}"):
+                diar_segments = _run_steno_diarize(channel_path, timeout)
+            if diar_segments:
+                cluster_labels = _cluster_channel_labels(diar_segments, legacy_label)
+                if cluster_labels:
+                    _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
+                    diar_tagged = []
+                    for segment in diar_segments:
+                        text = (segment.get("text") or "").strip()
+                        if text:
+                            diar_tagged.append((segment["start"], cluster_labels[segment["speaker"]], text))
+                    if diar_tagged:
+                        logger.info(
+                            f"Diarizing {legacy_label} channel found "
+                            f"{len(set(cluster_labels.values()))} speaker cluster(s)"
+                        )
+                        return diar_tagged
+            logger.info(f"Diarizing {legacy_label} channel: falling back to legacy single-speaker labeling")
+        finally:
+            print(f"PROGRESS:diarize:{legacy_label}:done", flush=True)
 
     legacy_tagged: list[tuple[float, str, str]] = []
     for s in asr_segments:
@@ -968,6 +1104,11 @@ class WhisperTranscriber:
             return audio_filepath, False
         temp_path = Path(temp_name)
         try:
+            # loudnorm's two-pass loudness analysis can take real wall-clock
+            # time on a long recording, with zero other output in between --
+            # without this, the terminal goes silent for that whole stretch
+            # right after "Saved: ...", which reads as a hang.
+            logger.info(f"Pre-processing audio (highpass + loudnorm): {audio_filepath.name}...")
             result = subprocess.run(
                 [ffmpeg, '-y', '-i', str(audio_filepath),
                  '-af', _audio_filter_chain(),
@@ -1317,12 +1458,21 @@ class WhisperTranscriber:
         # Detect channel count via ffmpeg. `-t 0` makes ffmpeg parse the
         # input header (where the channel layout lives) and exit immediately
         # without decoding any audio frames — without it, a 1-hour recording
-        # would actually decode in full just to read metadata.
+        # would actually decode in full just to read metadata. In practice
+        # this ISN'T always instant: a WebM written live by MediaRecorder
+        # (our sysaudio capture path) has no seek index, so on an unusually
+        # large file ffmpeg's demuxer can still need real time to find the
+        # first decodable packet. A real ~3.5h recording measured this at
+        # >15s. Same failure shape _diarised_split_timeout's docstring
+        # documents for the later full-channel-split step: a too-tight fixed
+        # timeout here silently drops the whole recording to mono (no
+        # [You]/[Others]) instead of failing loudly — so this budget needs
+        # real headroom, not just enough for the common case.
         try:
             probe = subprocess.run(
                 [ffmpeg, '-hide_banner', '-t', '0', '-i', str(audio_filepath),
                  '-f', 'null', '-'],
-                capture_output=True, timeout=15, text=True
+                capture_output=True, timeout=CHANNEL_DETECT_TIMEOUT_S, text=True
             )
             stderr = probe.stderr or ''
             channels = _parse_channels_from_ffmpeg_stderr(stderr)
