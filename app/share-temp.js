@@ -13,7 +13,7 @@ const path = require('path');
 // open draft and may type for ten minutes; AirDrop waits for the receiving side
 // to accept. ShareMenu.popup() has no completion callback, so the app is never
 // told when that ends. Deleting on sheet close, or on quit, would pull the
-// attachment out from under an open draft — an open draft at quit time is not an
+// attachment out from under an open draft - an open draft at quit time is not an
 // exotic case. Sweeping only files older than a day at the NEXT start means
 // files outlive their own session including any draft, the directory still
 // cannot grow without bound, and there is no moment at which the app deletes a
@@ -41,7 +41,7 @@ function shareTempDir(baseTempPath) {
 // Delete every file in `dir` whose mtime is at least maxAgeMs old, measured
 // against the injected `now`. Best-effort throughout: a missing directory
 // returns quietly and a per-entry failure is recorded and skipped, so one
-// locked file cannot abort the rest. Flat by construction — never recurses.
+// locked file cannot abort the rest. Flat by construction - never recurses.
 //
 // `fs` is injectable for the deterministic failure test.
 // Returns { deleted: string[], kept: string[] } of absolute paths acted on, so
@@ -54,7 +54,7 @@ function sweepShareTemp(dir, now, maxAgeMs = SHARE_TEMP_MAX_AGE_MS, fs = fsDefau
   try {
     entries = fs.readdirSync(dir);
   } catch (_) {
-    // Directory missing or unreadable — nothing to sweep.
+    // Directory missing or unreadable - nothing to sweep.
     return { deleted, kept };
   }
 
@@ -67,7 +67,7 @@ function sweepShareTemp(dir, now, maxAgeMs = SHARE_TEMP_MAX_AGE_MS, fs = fsDefau
       // never follow a symlink out of the share directory.
       stat = fs.lstatSync(filePath);
     } catch (_) {
-      // Vanished between readdir and lstat — already gone.
+      // Vanished between readdir and lstat - already gone.
       continue;
     }
 

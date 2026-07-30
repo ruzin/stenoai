@@ -681,22 +681,29 @@ function DetailContent({
   // feedback would vanish with the popover before it registered.
   const [shareOpen, setShareOpen] = React.useState(false);
   const shareCloseTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Identifies the current menu instance. An auto-close belongs to the instance
+  // the copy happened in, and cancelling on open/close is not enough on its own:
+  // the transcript copy awaits the clipboard first, so a menu closed and
+  // reopened during that await has no timer yet to cancel, and the resolving
+  // promise would then schedule one against the new instance. Both the
+  // scheduling and the firing therefore check the epoch.
+  const shareEpoch = React.useRef(0);
   const cancelShareClose = () => {
     if (shareCloseTimer.current) {
       clearTimeout(shareCloseTimer.current);
       shareCloseTimer.current = null;
     }
   };
-  const closeShareAfterCopy = () => {
+  const closeShareAfterCopy = (epoch: number) => {
+    if (shareEpoch.current !== epoch) return;
     cancelShareClose();
-    shareCloseTimer.current = setTimeout(() => setShareOpen(false), 800);
+    shareCloseTimer.current = setTimeout(() => {
+      if (shareEpoch.current === epoch) setShareOpen(false);
+    }, 800);
   };
-  // A pending auto-close belongs to the menu instance the copy happened in. Any
-  // open/close in between invalidates it - otherwise dismissing the menu inside
-  // that 800 ms window and reopening it lets the stale timer slam the freshly
-  // opened menu shut in the user's face.
   const onShareOpenChange = (open: boolean) => {
     cancelShareClose();
+    shareEpoch.current += 1;
     setShareOpen(open);
   };
   React.useEffect(() => cancelShareClose, []);
@@ -919,7 +926,7 @@ function DetailContent({
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-60 p-1" data-testid="note-share-menu">
-                {/* Disabled while a summary/report stream is on screen — the
+                {/* Disabled while a summary/report stream is on screen - the
                     clipboard would otherwise get the old note while the body
                     shows the in-flux streamed text. */}
                 <button
@@ -928,7 +935,7 @@ function DetailContent({
                   style={{ color: 'var(--fg-1)' }}
                   onClick={() => {
                     copyNotes();
-                    closeShareAfterCopy();
+                    closeShareAfterCopy(shareEpoch.current);
                   }}
                   disabled={notesExportBlocked}
                 >
@@ -940,8 +947,12 @@ function DetailContent({
                   className={MENU_ENTRY_CLASS}
                   style={{ color: 'var(--fg-1)' }}
                   onClick={() => {
+                    // Captured BEFORE the await: if the menu is dismissed and
+                    // reopened while the clipboard write is in flight, this copy
+                    // no longer owns the menu that is on screen.
+                    const epoch = shareEpoch.current;
                     void copyTranscriptForAi().then((ok) => {
-                      if (ok) closeShareAfterCopy();
+                      if (ok) closeShareAfterCopy(epoch);
                     });
                   }}
                   disabled={!transcriptBundle}

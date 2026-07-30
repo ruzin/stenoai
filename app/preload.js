@@ -344,7 +344,7 @@ const stenoai = {
   },
 
   // Native macOS share sheet. canShare answers "does a share sheet exist here",
-  // NOT "does the user agent look like a Mac" — the renderer's isMac is a
+  // NOT "does the user agent look like a Mac" - the renderer's isMac is a
   // module-level navigator.platform constant frozen at import, so it can neither
   // be flipped at runtime nor exercised in both directions by a test.
   share: {

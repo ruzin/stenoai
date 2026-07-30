@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 
 /**
- * T1 — renderer-only, mock IPC, no backend. The Share menu collects every
+ * T1 - renderer-only, mock IPC, no backend. The Share menu collects every
  * action that carries a note out of the app. The interaction itself is the risk
  * here, which is why this is a UI spec rather than a T2: the entries moved out
  * of two different homes, and an entry that was DUPLICATED rather than moved
@@ -27,8 +27,8 @@ import path from 'path';
 
 const SUMMARY_FILE = 'epsilon_summary.json';
 
-async function installClipboardRecorder(page: Page) {
-  await page.evaluate(() => {
+async function installClipboardRecorder(page: Page, delayMs = 0) {
+  await page.evaluate((delay) => {
     const w = window as unknown as { __clipboardWrites: string[] };
     w.__clipboardWrites = [];
     Object.defineProperty(navigator, 'clipboard', {
@@ -36,11 +36,15 @@ async function installClipboardRecorder(page: Page) {
       value: {
         writeText: (text: string) => {
           w.__clipboardWrites.push(text);
-          return Promise.resolve();
+          // A held-open write makes the transcript copy's await long enough to
+          // reopen the menu inside it, without racing the clock.
+          return delay > 0
+            ? new Promise<void>((resolve) => setTimeout(resolve, delay))
+            : Promise.resolve();
         },
       },
     });
-  });
+  }, delayMs);
 }
 
 const clipboardWrites = (page: Page) =>
@@ -123,6 +127,32 @@ test('dismissing and reopening after a copy does not inherit the auto-close', as
   await expect(menu).toBeVisible();
 });
 
+test('a copy still in flight does not close the menu reopened during it', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({ mockIpc: true, env: { STENOAI_E2E_SEED_MEETING: '1' } });
+  await openDetail(page);
+  // Copy transcript awaits the clipboard before scheduling its auto-close, so
+  // during that await there is no timer to cancel. Cancelling on open/close is
+  // therefore not sufficient on its own.
+  await installClipboardRecorder(page, 1_500);
+
+  const menu = page.getByTestId('note-share-menu');
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(menu).toBeVisible();
+  await menu.getByRole('button', { name: 'Copy transcript' }).click();
+
+  // Dismiss and reopen while the write is still in flight.
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(menu).toBeVisible();
+
+  // Past the write resolving plus the 800 ms the inherited timer would add.
+  await page.waitForTimeout(2_800);
+  await expect(menu).toBeVisible();
+});
+
 test('the file saves moved out of the ... menu, which keeps its management actions', async ({
   launchApp,
 }) => {
@@ -181,7 +211,7 @@ test('Save notes as .md passes markdown, not the running text Copy notes builds'
       .toContain('# Epsilon Planning');
 
     const md = readFileSync(outFile, 'utf8');
-    // Real markdown headings, not notesCopy's uppercase labels — the assertion
+    // Real markdown headings, not notesCopy's uppercase labels - the assertion
     // that separates the third builder from the one it sits next to.
     expect(md).toContain('## Summary');
     expect(md).toContain('## Participants');

@@ -13,7 +13,7 @@ const {
 
 const HOUR_MS = 60 * 60 * 1000;
 
-// Track every temp dir we create so a single after-hook removes them all —
+// Track every temp dir we create so a single after-hook removes them all -
 // otherwise repeated runs accumulate share-temp-test-* dirs in the system temp.
 const createdTmpDirs = [];
 

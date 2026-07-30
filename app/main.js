@@ -2109,7 +2109,7 @@ if (!gotSingleInstanceLock) {
     // Sweep share-sheet temp files older than a day. This is the ONLY cleanup
     // for that directory: a file handed to ShareMenu must survive as long as the
     // destination holds it (an open Mail draft, an AirDrop transfer waiting to be
-    // accepted), and popup() never reports when that ends — so nothing is deleted
+    // accepted), and popup() never reports when that ends - so nothing is deleted
     // during a session. See share-temp.js for the full reasoning. Best-effort: an
     // undeletable temp directory must not interrupt a launch.
     try {
@@ -3925,7 +3925,7 @@ ipcMain.handle('save-diagnostics', async (event, defaultFilename, content) => {
 
 // Whether a native share sheet actually exists on this machine. macOS-only:
 // Electron exposes ShareMenu on darwin and nothing anywhere else. The second
-// half of the check is not paranoia — if a future Electron drops or renames the
+// half of the check is not paranoia - if a future Electron drops or renames the
 // export, this degrades to a hidden menu group instead of a main-process crash
 // on `new undefined(...)`.
 function shareSheetAvailable() {
@@ -3971,7 +3971,7 @@ ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, 
 
     // The renderer supplies a suggested name only. Unlike the export handlers,
     // where the reduced name merely seeds a dialog the user confirms, here it is
-    // joined onto a directory we write into — so `.` and `..` have to be rejected
+    // joined onto a directory we write into - so `.` and `..` have to be rejected
     // as well, not just directory components.
     const fallback = kind === 'pdf' ? 'notes.pdf' : 'notes.md';
     let base = fallback;
@@ -4002,7 +4002,7 @@ ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, 
     // Test-only seam, mirroring STENOAI_E2E_EXPORT_PATH: a native sheet cannot be
     // automated (Playwright can neither see nor dismiss it, and an open sheet
     // blocks the run), so under e2e we stop after the write and return where the
-    // file went. The path is returned ONLY here — outside the seam the renderer
+    // file went. The path is returned ONLY here - outside the seam the renderer
     // has no business knowing, and a leaked absolute path is exactly what the
     // basename reduction exists to prevent.
     if (IS_E2E) return { success: true, path: targetPath };
@@ -4012,15 +4012,27 @@ ipcMain.handle('share-note-file', async (event, kind, defaultFilename, payload, 
     if (!shareSheetAvailable()) {
       return { success: false, error: 'Sharing is not available on this platform.' };
     }
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { success: false, error: 'No window to share from.' };
+    }
     const { ShareMenu } = require('electron');
     const menu = new ShareMenu({ filePaths: [targetPath] });
     // Anchor on the clicked entry so the sheet pops from the button rather than
-    // the window corner. A malformed anchor is dropped, not defaulted to 0,0 —
-    // Electron then places the sheet itself.
+    // the window corner. The rectangle was read up to 15 seconds ago, before the
+    // PDF render, so a scroll, a window move or a resize can have moved it, and
+    // after a shrink it can sit outside the window entirely. An out-of-range
+    // anchor is worse than none: dropping it lets Electron place the sheet with
+    // coordinates that are at least current. A malformed anchor is dropped for
+    // the same reason rather than defaulted to 0,0.
     const popupOptions = { window: mainWindow };
     if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
-      popupOptions.x = Math.round(anchor.x);
-      popupOptions.y = Math.round(anchor.y);
+      const { width, height } = mainWindow.getContentBounds();
+      const x = Math.round(anchor.x);
+      const y = Math.round(anchor.y);
+      if (x >= 0 && y >= 0 && x <= width && y <= height) {
+        popupOptions.x = x;
+        popupOptions.y = y;
+      }
     }
     menu.popup(popupOptions);
     return { success: true };
