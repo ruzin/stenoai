@@ -2,6 +2,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   textLengthBucket,
   durationBucket,
@@ -11,6 +13,7 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  classifySummarizationStreamError,
   captureSanitizedException,
   redactLocalPaths,
   sanitizeModelForAnalytics,
@@ -212,6 +215,103 @@ test('classifyErrorReason never leaks the raw message -- fixed enum output only'
   assert.ok(!reason.includes('alice'));
   assert.ok(!reason.includes('jane'));
   assert.strictEqual(reason, 'not_found');
+});
+
+test('classifySummarizationStreamError maps summarizer.py raise-site text to fixed enum values', () => {
+  assert.strictEqual(classifySummarizationStreamError('Failed to start Ollama service'), 'ollama_not_running');
+  assert.strictEqual(classifySummarizationStreamError('Failed to ensure model gemma4:e2b-it-qat is available'), 'model_unavailable');
+  assert.strictEqual(classifySummarizationStreamError("Bedrock could not find model 'foo' in eu-west-2"), 'model_unavailable');
+  assert.strictEqual(
+    classifySummarizationStreamError('Meeting is too long to summarize even after chunking — try a model with a larger context window.'),
+    'context_overflow',
+  );
+  assert.strictEqual(classifySummarizationStreamError('Reduce step returned empty result'), 'empty_summary');
+  assert.strictEqual(
+    classifySummarizationStreamError('Chunk 2/5 returned an empty result after retry — Ollama may have run out of context or memory.'),
+    'empty_summary',
+  );
+  assert.strictEqual(classifySummarizationStreamError('Anthropic returned empty response'), 'empty_summary');
+  assert.strictEqual(
+    classifySummarizationStreamError('Org adapter rejected the request (401). Your session may have expired — re-sign in to your organisation in Settings.'),
+    'auth_rejected',
+  );
+  assert.strictEqual(
+    classifySummarizationStreamError("Bedrock rejected the API key (403). Verify the key has bedrock:InvokeModel access in eu-west-2."),
+    'auth_rejected',
+  );
+  assert.strictEqual(classifySummarizationStreamError('Cloud API key is not configured. Set it in Settings > AI.'), 'not_configured');
+  assert.strictEqual(classifySummarizationStreamError('Remote Ollama URL is not configured. Set it in Settings > AI.'), 'not_configured');
+  assert.strictEqual(classifySummarizationStreamError('Ollama is not installed. Please install ollama-python.'), 'dependency_missing');
+  assert.strictEqual(classifySummarizationStreamError('anthropic package is required for Anthropic cloud mode. pip install anthropic'), 'dependency_missing');
+  assert.strictEqual(classifySummarizationStreamError('OpenAI chat failed after all retries'), 'api_error');
+  assert.strictEqual(classifySummarizationStreamError('Bedrock HTTP 500: Internal Server Error'), 'api_error');
+  assert.strictEqual(classifySummarizationStreamError('something totally unexpected'), 'unknown');
+  assert.strictEqual(classifySummarizationStreamError(), 'unknown');
+});
+
+test('classifySummarizationStreamError catches Ollama dying mid-stream and running out of memory, not just the pre-flight check', () => {
+  // These two originate from the Ollama server / a bare-re-raised httpx
+  // exception (see _stream_direct / _chat_no_think's bare `raise original`),
+  // not a literal in summarizer.py -- the 92.5%-of-users-are-local-Ollama
+  // case this classifier most needs to get right.
+  assert.strictEqual(
+    classifySummarizationStreamError("Ollama streaming failed: [Errno 61] Connection refused"),
+    'ollama_not_running',
+  );
+  assert.strictEqual(
+    classifySummarizationStreamError('httpx.ConnectError: All connection attempts failed'),
+    'ollama_not_running',
+  );
+  assert.strictEqual(
+    classifySummarizationStreamError('model requires more system memory (10.5 GiB) than is available (8.0 GiB)'),
+    'insufficient_memory',
+  );
+});
+
+test('classifySummarizationStreamError never leaks raw third-party/opaque text -- unmatched messages fall to unknown', () => {
+  // A bare re-raise of an underlying SDK/HTTP exception (e.g. OpenAI/Bedrock)
+  // can carry unpredictable, potentially sensitive text -- this must never be
+  // classified into a false-confidence bucket, only the safe 'unknown' default.
+  const opaque = 'RateLimitError: You exceeded your current quota, please check your plan and billing details for account acct_1234567890.';
+  const reason = classifySummarizationStreamError(opaque);
+  assert.strictEqual(reason, 'unknown');
+  assert.ok(!reason.includes('acct_'));
+});
+
+test('classifySummarizationStreamError patterns stay in sync with the literal strings in src/summarizer.py (drift guard)', () => {
+  // Every substring below is a literal (or fixed portion of an f-string
+  // template) a classifySummarizationStreamError branch depends on matching.
+  // If a future edit to summarizer.py rewords one of these messages, this
+  // test fails loudly instead of the corresponding bucket silently
+  // degrading to 'unknown' with no signal anywhere. Excludes the
+  // connection-refused half of ollama_not_running and insufficient_memory,
+  // which match text from the Ollama server / httpx client, not a literal
+  // authored in this file (see the comment above classifySummarizationStreamError).
+  const summarizerSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'summarizer.py'),
+    'utf8',
+  );
+  const expectedSubstrings = [
+    'Failed to start Ollama service',
+    'Failed to ensure model',
+    'could not find model',
+    'too long to summarize even after chunking',
+    'returned empty result',
+    'returned an empty result',
+    'returned empty response',
+    'rejected the request',
+    'rejected the API key',
+    'is not configured',
+    'is not installed',
+    'package is required',
+    'failed after all retries',
+  ];
+  for (const substr of expectedSubstrings) {
+    assert.ok(
+      summarizerSrc.includes(substr),
+      `src/summarizer.py no longer contains ${JSON.stringify(substr)} -- update classifySummarizationStreamError's matching pattern to match`,
+    );
+  }
 });
 
 test('sanitizeErrorForCrashReport replaces the message with a fixed enum, never the raw text', () => {
