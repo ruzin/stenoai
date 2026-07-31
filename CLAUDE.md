@@ -69,7 +69,20 @@ overrides luffy's test-level defaults); the QA review lens checks for it.
     out: `--grep @pipeline` runs it (CI's `t2-pipeline-macos` job caches a whisper model),
     `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
     active engine's model **skips** it (loudly) rather than failing.
-  - **Current specs:** `org-lock.t1`, `shared-notes-policy.t1`, `org-lock-lifecycle.t2`,
+  - **`@perf` (a T1 spec)**: `live-transcript-perf.t1` is a measurement harness, not a
+    gate — it drives paced synthetic partials into the live transcript panel and reports
+    per-tick script/style/layout cost (CDP `Performance.getMetrics`), retained heap after a
+    forced GC, and DOM node count against a growing segment list. CI excludes it
+    (`--grep-invert @perf`) because wall-clock work on a shared runner is not something to
+    block a PR on. Run it before **and** after any change to live-transcript rendering:
+    `cd app && npm run test:e2e -- --project=t1 --grep @perf`. Pace matters — fired
+    back-to-back the ticks get batched into one React render and the measurement silently
+    collapses; the harness paces one per animation frame and counts DOM writes to prove it.
+  - **Current specs:** `org-lock.t1`, `shared-notes-policy.t1`, `live-transcript-lanes.t1`
+    (the live panel's rendering contract: a partial is replaced in place per speaker, a
+    final retires it, a late final sorts into place, and the Resumed divider — driven
+    through the real `live-transcript-chunk` channel via `e2e/fixtures/live-transcript.ts`),
+    `org-lock-lifecycle.t2`,
     `config-corruption.t2`, the core-loop trio `recording-lifecycle.t2` /
     `meetings-crud.t2` / `folders-crud.t2`, the config trio `settings-roundtrip.t2` /
     `ai-provider.t2` / `model-management.t2`, and the chat/org pair `chat-sessions.t2`
