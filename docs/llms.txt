@@ -4,7 +4,7 @@
 
 ## Key facts
 
-- Platform: macOS only (macOS 14.4 Sonoma or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0).
+- Platform: macOS (macOS 14.4 Sonoma or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0) and Windows 10/11 (x64) in alpha.
 - Cost: free and open source (MIT license, no usage restrictions). A paid managed Enterprise deployment tier is a separate, optional offering (details coming soon). Source at https://github.com/ruzin/stenoai
 - No meeting bot: records system audio + microphone locally; no participant is notified by Steno.
 - Transcription: two on-device engines — Parakeet (default, with a live transcript while recording; 25 European languages, including English) and Whisper (optional; 99 languages). No audio is uploaded.
