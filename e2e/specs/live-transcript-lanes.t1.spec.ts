@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/electron';
 import { emitLiveSegments, type LiveSegmentInput } from '../fixtures/live-transcript';
 
 /**
- * T1 — renderer-only, mock IPC. The live transcript panel's rendering contract,
+ * T1 - renderer-only, mock IPC. The live transcript panel's rendering contract,
  * driven through the real `live-transcript-chunk` channel.
  *
  * The panel renders in three lanes (carried-over prior segments, finalised
@@ -77,7 +77,7 @@ test('both channels can have an in-progress bubble at once, below the finalised 
   ]);
   await expect(panel.getByText('and theirs too')).toBeVisible();
 
-  // Finalised first, both partials trailing — the order the merged list had.
+  // Finalised first, both partials trailing - the order the merged list had.
   expect(await bubbles(page)).toEqual(['Settled sentence', 'mine still going', 'and theirs too']);
 
   // Partials are dimmed so they don't read as finalised text.
@@ -118,6 +118,42 @@ test('a late final sorts into place instead of landing at the end', async ({ lau
   ]);
 });
 
+test('a note continued twice renders every carried-over line, in order', async ({ launchApp }) => {
+  // main.js prepends the existing priors on every continue (`carryPrior`), and
+  // each recording numbers its segments from its own start - so the carried-over
+  // list legitimately repeats (start, speaker) pairs. That is why the prior lane
+  // keys rows by position while the finals lane keys them by content.
+  //
+  // What this test can and cannot show: it pins that all four carried-over lines
+  // render, in order, ahead of the new tail. It does NOT catch a key collision
+  // on its own - the renderer under test is a production React build, which
+  // neither warns about duplicate keys nor misreconciles a list that is written
+  // once and never reordered. The collision is a latent hazard, established by
+  // reading main.js's carryPrior, not by this assertion.
+  const { app, page } = await launchApp({
+    mockIpc: true,
+    env: { ...PILL_ENV, STENOAI_E2E_SEED_PRIOR_SEGMENTS: 'twice' },
+  });
+
+  await page.evaluate((name) => window.stenoai.recording.start(name), SESSION);
+  await page.getByTestId('transcription-pill').getByRole('button', { name: 'Show transcript' }).click();
+  const panel = page.getByTestId('live-transcript-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText('second session bit two')).toBeVisible();
+
+  await emitLiveSegments(app, SESSION, [seg('and the third session starts here', 3, true)]);
+  await expect(panel.getByText('and the third session starts here')).toBeVisible();
+
+  expect(await bubbles(page)).toEqual([
+    'earlier bit one',
+    'earlier bit two',
+    'second session bit one',
+    'second session bit two',
+    'Resumed',
+    'and the third session starts here',
+  ]);
+});
+
 test('resumed note: the divider sits between the carried-over text and the new tail', async ({
   launchApp,
 }) => {
@@ -133,7 +169,7 @@ test('resumed note: the divider sits between the carried-over text and the new t
   await expect(panel).toBeVisible();
   await expect(panel.getByText('earlier bit one')).toBeVisible();
 
-  // Carried-over text alone gets NO divider — there is nothing to divide from.
+  // Carried-over text alone gets NO divider - there is nothing to divide from.
   await expect(page.getByTestId('live-transcript-resume-divider')).toHaveCount(0);
 
   await emitLiveSegments(app, SESSION, [seg('and now the new bit', 0, true)]);

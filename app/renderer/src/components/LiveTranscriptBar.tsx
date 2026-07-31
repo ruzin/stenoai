@@ -90,7 +90,7 @@ export function LiveTranscriptBar() {
       el.scrollTop = el.scrollHeight;
       // A row rendered for the first time replaces its reserved intrinsic
       // height with its real one, which can grow the scroller a few pixels
-      // *after* the assignment above clamped to the old maximum — leaving the
+      // *after* the assignment above clamped to the old maximum - leaving the
       // newest line a sliver below the fold. Re-assert on the next frame,
       // once that layout has settled.
       second = requestAnimationFrame(() => {
@@ -273,8 +273,8 @@ interface BodyStateProps {
   /** The search result, rendered as one flat list while a query is active. */
   filtered: Segments;
   filtering: boolean;
-  /** Unfiltered rendering runs in three lanes so that a partial tick — up to
-   *  ~5 a second — only invalidates the in-progress rows instead of every
+  /** Unfiltered rendering runs in three lanes so that a partial tick - up to
+   *  ~5 a second - only invalidates the in-progress rows instead of every
    *  finalised row above them. Order on screen: prior, divider, finals,
    *  partials, which is the order the merged list had. */
   priorSegments: Segments;
@@ -372,12 +372,27 @@ function LiveTranscriptBodyState({
  * untouched, so React skips the finalised rows entirely instead of
  * re-creating and diffing every one of them.
  *
- * Keys are content-derived rather than positional. A final released late by
- * the bleed-dedup hold is inserted *into* the sorted lane, and index keys made
- * React re-bind every row below the insert point; start+speaker is unique per
- * lane (one utterance per speaker can begin at a given instant) and stable.
- * The partial lane keys on the speaker alone, so a speaker's growing utterance
- * updates one node in place, tick after tick.
+ * Keys are content-derived in the lanes that get inserted into. A final
+ * released late by the bleed-dedup hold is inserted *into* the sorted finals
+ * lane, and index keys made React re-bind every row below the insert point;
+ * start+speaker is unique there (one utterance per speaker can begin at a given
+ * instant within one recording) and stable. The partial lane keys on the
+ * speaker alone, so a speaker's growing utterance updates one node in place,
+ * tick after tick.
+ *
+ * The prior lane is the exception and keys on position: it carries the
+ * finalised text of EVERY earlier recording into this note (main.js prepends
+ * the existing priors on each continue), and `start` counts from zero within
+ * each recording - so the same speaker at the same offset in two sessions
+ * would collide. That lane is written once and never reordered, which is
+ * exactly the case an index key is right for.
+ *
+ * The filtered lane keys on position too, and there the index genuinely does
+ * point at a different segment after the query changes. It stays because these
+ * rows hold no state of their own - no input, no focus, no animation - so
+ * reusing a node just means React writes new text into it. Only the
+ * reconciliation is less efficient, and only while someone is typing in the
+ * search box.
  */
 const SegmentRows = React.memo(function SegmentRows({
   segments,
@@ -388,7 +403,7 @@ const SegmentRows = React.memo(function SegmentRows({
 }) {
   // Granola-style bubbles. Speaker attribution is the mic/system channel the
   // Python sidecar tagged the segment with: 'Others' renders grey/left,
-  // anything else (explicit 'You' or no attribution) renders green/right —
+  // anything else (explicit 'You' or no attribution) renders green/right -
   // the same charitable default as TranscriptPanel, since the recording
   // mechanically belongs to the mic owner. Partials stay dimmed at 0.55
   // opacity so the user can see them forming without confusing them for
@@ -400,9 +415,9 @@ const SegmentRows = React.memo(function SegmentRows({
         const key =
           lane === 'p'
             ? `p:${isYou ? 'You' : 'Others'}`
-            : lane === 'q'
-              ? `q:${i}`
-              : `${lane}:${seg.start}:${isYou ? 'You' : 'Others'}`;
+            : lane === 'q' || lane === 'e'
+              ? `${lane}:${i}`
+              : `f:${seg.start}:${isYou ? 'You' : 'Others'}`;
         return (
           <li
             key={key}

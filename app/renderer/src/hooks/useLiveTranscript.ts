@@ -6,7 +6,7 @@ export type LiveTranscriptStatus = 'idle' | 'loading' | 'streaming' | 'error';
 export interface UseLiveTranscriptResult {
   status: LiveTranscriptStatus;
   /** Every segment in render order: finalised first, in-progress partials
-   *  trailing. Kept for search, copy and tail-tracking — rendering uses the
+   *  trailing. Kept for search, copy and tail-tracking - rendering uses the
    *  two lanes below so a partial tick doesn't re-render the finals. */
   segments: LiveSegment[];
   /** Finalised segments of the current session, chronologically sorted. */
@@ -77,7 +77,7 @@ function replacePartial(prev: LiveSegment[], segment: LiveSegment): LiveSegment[
  * Only a same-speaker partial that could plausibly BE the utterance this final
  * closes (started before the final's utterance ended) is dropped. A
  * bleed-delayed final can arrive well after the SAME speaker has already
- * started a newer, unrelated utterance — dropping every same-speaker partial
+ * started a newer, unrelated utterance - dropping every same-speaker partial
  * indiscriminately would clobber that unrelated one until its next tick.
  */
 function retirePartials(prev: LiveSegment[], final: LiveSegment): LiveSegment[] {
@@ -113,7 +113,7 @@ function splitLanes(snapshot: LiveSegment[]): { finals: LiveSegment[]; partials:
  * **Why two lanes.** Partials arrive up to ~5x/s (both channels at the
  * sidecar's 400 ms cadence) while finals arrive a couple of times a minute. Held
  * in one array, every partial produced a new array identity for the whole
- * transcript, so React re-rendered every finalised row — a cost that grew with
+ * transcript, so React re-rendered every finalised row - a cost that grew with
  * meeting length. Split, a partial tick only invalidates the (at most two)
  * in-progress rows.
  *
@@ -293,7 +293,7 @@ export function useLiveTranscriptStatus(sessionName: string | null): {
     });
 
     // Same backfill the full hook does, reduced to the booleans this one
-    // exposes — a pill mounted after the recording started must not sit at
+    // exposes - a pill mounted after the recording started must not sit at
     // "Preparing…" until the next event. Carried-over prior segments count as
     // streaming here exactly as they do there, so a resumed recording reads
     // the same in both.

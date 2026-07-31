@@ -48,7 +48,7 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
-      # `@perf` excluded — a measurement harness, not a release gate (see
+      # `@perf` excluded - a measurement harness, not a release gate (see
       # e2e.yml for the same exclusion).
       - name: Run T1 under xvfb
         working-directory: app
