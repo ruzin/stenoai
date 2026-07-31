@@ -38,7 +38,7 @@ async function bubbles(page: import('@playwright/test').Page) {
 }
 
 test('a partial is replaced in place, then retired by its final', async ({ launchApp }) => {
-  const { app, page } = await launchApp({ mockIpc: true, env: PILL_ENV });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true, env: PILL_ENV });
   await page.evaluate((name) => window.stenoai.recording.start(name), SESSION);
   await page.getByTestId('transcription-pill').getByRole('button', { name: 'Show transcript' }).click();
   const panel = page.getByTestId('live-transcript-panel');
@@ -64,7 +64,7 @@ test('a partial is replaced in place, then retired by its final', async ({ launc
 test('both channels can have an in-progress bubble at once, below the finalised text', async ({
   launchApp,
 }) => {
-  const { app, page } = await launchApp({ mockIpc: true, env: PILL_ENV });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true, env: PILL_ENV });
   await page.evaluate((name) => window.stenoai.recording.start(name), SESSION);
   await page.getByTestId('transcription-pill').getByRole('button', { name: 'Show transcript' }).click();
   const panel = page.getByTestId('live-transcript-panel');
@@ -97,7 +97,7 @@ test('a late final sorts into place instead of landing at the end', async ({ lau
   // The live path can release a final well after a later one (the per-segment
   // bleed-dedup hold). It has to sort by start time, or the transcript reads
   // out of order.
-  const { app, page } = await launchApp({ mockIpc: true, env: PILL_ENV });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true, env: PILL_ENV });
   await page.evaluate((name) => window.stenoai.recording.start(name), SESSION);
   await page.getByTestId('transcription-pill').getByRole('button', { name: 'Show transcript' }).click();
   const panel = page.getByTestId('live-transcript-panel');
@@ -132,6 +132,7 @@ test('a note continued twice renders every carried-over line, in order', async (
   // reading main.js's carryPrior, not by this assertion.
   const { app, page } = await launchApp({
     mockIpc: true,
+    fakeAudio: true,
     env: { ...PILL_ENV, STENOAI_E2E_SEED_PRIOR_SEGMENTS: 'twice' },
   });
 
@@ -161,6 +162,7 @@ test('resumed note: the divider sits between the carried-over text and the new t
   // get-live-transcript-state backfill (see pill-dock.t1).
   const { app, page } = await launchApp({
     mockIpc: true,
+    fakeAudio: true,
     env: { ...PILL_ENV, STENOAI_E2E_SEED_PRIOR_SEGMENTS: '1' },
   });
   await page.evaluate((name) => window.stenoai.recording.start(name), SESSION);

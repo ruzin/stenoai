@@ -276,7 +276,7 @@ test('@perf live transcript: per-tick cost against a growing segment list', asyn
   launchApp,
 }) => {
   test.setTimeout(600_000);
-  const { app, page } = await launchApp({ mockIpc: true, env: PERF_ENV });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true, env: PERF_ENV });
   const cdp = await app.context().newCDPSession(page);
   await cdp.send('Performance.enable');
 
@@ -304,7 +304,7 @@ test('@perf live transcript: sustained partial churn does not retain memory', as
 }) => {
   test.setTimeout(600_000);
   const CHURN_TICKS = 2000;
-  const { app, page } = await launchApp({ mockIpc: true, env: PERF_ENV });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true, env: PERF_ENV });
   const cdp = await app.context().newCDPSession(page);
   await cdp.send('Performance.enable');
 
