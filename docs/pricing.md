@@ -33,7 +33,7 @@ organization-specific features, for teams that want that on top of the free app.
 - Everything works with no cloud provider — the default pipeline is fully local and free.
 
 ## Platform
-- macOS only (macOS 14.4 Sonoma or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0).
+- macOS (macOS 14.4 Sonoma or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0) and Windows 10/11 (x64) in alpha.
 
 ## Download
 - https://stenoai.co/#download
