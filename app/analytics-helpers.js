@@ -131,6 +131,28 @@ function classifyErrorReason(error) {
   return 'unknown';
 }
 
+// Coarse, PII-free classification of the STREAM_ERROR:<message> line
+// simple_recorder.py's process_streaming() prints on a summarization
+// failure (see src/summarizer.py's raise sites). Fixed enum output only --
+// NEVER forwards the raw message to PostHog. Most raise sites in
+// summarizer.py are static/templated text (safe to pattern-match by name),
+// but several are bare re-raises of third-party SDK/HTTP exceptions (and
+// Bedrock's raw response body), whose text is unpredictable and can echo
+// request content or infra details -- those simply won't match any pattern
+// below and correctly fall through to 'unknown', same as classifyErrorReason.
+function classifySummarizationStreamError(message) {
+  const msg = String(message || '');
+  if (/Failed to start Ollama service/i.test(msg)) return 'ollama_not_running';
+  if (/Failed to ensure model .* is available|could not find model/i.test(msg)) return 'model_unavailable';
+  if (/too long to summarize even after chunking/i.test(msg)) return 'context_overflow';
+  if (/returned empty result|returned an empty result after retry|returned empty response|returned an empty (summary|report)/i.test(msg)) return 'empty_summary';
+  if (/rejected the (request|api key)/i.test(msg)) return 'auth_expired';
+  if (/is not configured/i.test(msg)) return 'not_configured';
+  if (/is not installed|package is required/i.test(msg)) return 'dependency_missing';
+  if (/failed after all retries|HTTP \d+/i.test(msg)) return 'api_error';
+  return 'unknown';
+}
+
 // This module lives in the app/ directory alongside main.js and is always
 // required from there via a relative path, so __dirname here is identical to
 // main.js's own -- the app's install root, whether that's an asar-packaged
@@ -368,6 +390,7 @@ module.exports = {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  classifySummarizationStreamError,
   captureSanitizedException,
   redactLocalPaths,
   sanitizeModelForAnalytics,

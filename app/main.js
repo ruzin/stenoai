@@ -84,6 +84,7 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  classifySummarizationStreamError,
   captureSanitizedException,
   sanitizeModelForAnalytics,
   summarizeCalendarSnapshot,
@@ -5217,6 +5218,10 @@ async function processNextInQueue() {
   // so the catch block below can still read it after the inner Promise
   // executor's scope has closed.
   let processingStage = 'transcription';
+  // Captured from a STREAM_ERROR: line during the summarization stage, so the
+  // catch block below can classify the real failure reason for error_occurred
+  // instead of only seeing "exited with code N" (see classifySummarizationStreamError).
+  let summarizationStreamError = null;
   // Read once per job (not per marker) -- engine/model/language/provider
   // don't change mid-job, and this avoids a repeated config.json read on
   // every stdout line.
@@ -5334,6 +5339,9 @@ async function processNextInQueue() {
               model: transcriptionCtx.model,
               language: transcriptionCtx.language,
             });
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            summarizationStreamError = line.slice('STREAM_ERROR:'.length).trim();
+            forwardDiagnosticStdout(line, 'process-streaming');
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
               // Instant stop stamps the (deterministic) summaryFile so the
@@ -5447,6 +5455,13 @@ async function processNextInQueue() {
       error_type: 'processing_queue',
       stage: processingStage,
       reason: classifyErrorReason(error),
+      // A STREAM_ERROR: line during the summarization stage carries the real
+      // failure reason (Ollama down, model missing, empty reduce result, ...)
+      // that classifyErrorReason can't see -- it only looked at stderr, which
+      // otherwise collapses every summarization crash into subprocess_exit_1.
+      ...(processingStage === 'summarization' && summarizationStreamError
+        ? { summarization_reason: classifySummarizationStreamError(summarizationStreamError) }
+        : {}),
     });
 
     // A processing crash (e.g. a metal::malloc OOM that SIGABRTs the

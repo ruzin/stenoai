@@ -11,6 +11,7 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  classifySummarizationStreamError,
   captureSanitizedException,
   redactLocalPaths,
   sanitizeModelForAnalytics,
@@ -212,6 +213,44 @@ test('classifyErrorReason never leaks the raw message -- fixed enum output only'
   assert.ok(!reason.includes('alice'));
   assert.ok(!reason.includes('jane'));
   assert.strictEqual(reason, 'not_found');
+});
+
+test('classifySummarizationStreamError maps summarizer.py raise-site text to fixed enum values', () => {
+  assert.strictEqual(classifySummarizationStreamError('Failed to start Ollama service'), 'ollama_not_running');
+  assert.strictEqual(classifySummarizationStreamError('Failed to ensure model gemma4:e2b-it-qat is available'), 'model_unavailable');
+  assert.strictEqual(classifySummarizationStreamError("Bedrock could not find model 'foo' in eu-west-2"), 'model_unavailable');
+  assert.strictEqual(
+    classifySummarizationStreamError('Meeting is too long to summarize even after chunking — try a model with a larger context window.'),
+    'context_overflow',
+  );
+  assert.strictEqual(classifySummarizationStreamError('Reduce step returned empty result'), 'empty_summary');
+  assert.strictEqual(
+    classifySummarizationStreamError('Chunk 2/5 returned an empty result after retry — Ollama may have run out of context or memory.'),
+    'empty_summary',
+  );
+  assert.strictEqual(classifySummarizationStreamError('Anthropic returned empty response'), 'empty_summary');
+  assert.strictEqual(
+    classifySummarizationStreamError('Org adapter rejected the request (401). Your session may have expired — re-sign in to your organisation in Settings.'),
+    'auth_expired',
+  );
+  assert.strictEqual(classifySummarizationStreamError('Cloud API key is not configured. Set it in Settings > AI.'), 'not_configured');
+  assert.strictEqual(classifySummarizationStreamError('Remote Ollama URL is not configured. Set it in Settings > AI.'), 'not_configured');
+  assert.strictEqual(classifySummarizationStreamError('Ollama is not installed. Please install ollama-python.'), 'dependency_missing');
+  assert.strictEqual(classifySummarizationStreamError('anthropic package is required for Anthropic cloud mode. pip install anthropic'), 'dependency_missing');
+  assert.strictEqual(classifySummarizationStreamError('OpenAI chat failed after all retries'), 'api_error');
+  assert.strictEqual(classifySummarizationStreamError('Bedrock HTTP 500: Internal Server Error'), 'api_error');
+  assert.strictEqual(classifySummarizationStreamError('something totally unexpected'), 'unknown');
+  assert.strictEqual(classifySummarizationStreamError(), 'unknown');
+});
+
+test('classifySummarizationStreamError never leaks raw third-party/opaque text -- unmatched messages fall to unknown', () => {
+  // A bare re-raise of an underlying SDK/HTTP exception (e.g. OpenAI/Bedrock)
+  // can carry unpredictable, potentially sensitive text -- this must never be
+  // classified into a false-confidence bucket, only the safe 'unknown' default.
+  const opaque = 'RateLimitError: You exceeded your current quota, please check your plan and billing details for account acct_1234567890.';
+  const reason = classifySummarizationStreamError(opaque);
+  assert.strictEqual(reason, 'unknown');
+  assert.ok(!reason.includes('acct_'));
 });
 
 test('sanitizeErrorForCrashReport replaces the message with a fixed enum, never the raw text', () => {
