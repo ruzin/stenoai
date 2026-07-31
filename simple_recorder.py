@@ -1743,6 +1743,26 @@ def set_auto_install_when_idle_cmd(enabled: bool):
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
+@cli.command(name='get-identity-matching-enabled')
+def get_identity_matching_enabled_cmd():
+    """Get whether cross-recording speaker identification is enabled."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"identity_matching_enabled": config.get_identity_matching_enabled()}))
+
+
+@cli.command(name='set-identity-matching-enabled')
+@click.argument('enabled', type=bool)
+def set_identity_matching_enabled_cmd(enabled: bool):
+    """Set whether cross-recording speaker identification is enabled."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_identity_matching_enabled(enabled):
+        print(json.dumps({"success": True, "identity_matching_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
 @cli.command(name='get-auto-summarize')
 def get_auto_summarize_cmd():
     """Get whether notes are generated automatically after transcription."""
@@ -5359,12 +5379,24 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
     use --extension to restrict to exactly one format instead of the
     default auto-detection.
     """
-    from src.config import get_data_dirs
+    from src.config import get_config, get_data_dirs
     from src.transcriber import WhisperTranscriber, STENO_DIARIZE_TIMEOUT_FLOOR_S, _run_steno_diarize
     from src.speaker_suggestions import (
         build_clusters_from_diarization, determine_recording_type,
         speakers_sidecar_path, write_speakers_sidecar,
     )
+
+    # This command exists specifically to extract+persist speaker
+    # embeddings outside the normal per-meeting pipeline, which is exactly
+    # what identity_matching_enabled=False turns off there (see
+    # src.transcriber._identity_matching_enabled) -- without this check,
+    # the setting would be silently bypassable by just running this CLI.
+    if not get_config().get_identity_matching_enabled():
+        print(json.dumps({
+            "success": False,
+            "error": "Identity matching is disabled in settings; not extracting speaker embeddings.",
+        }))
+        sys.exit(1)
 
     dirs = get_data_dirs()
     output_dir = dirs["output"]

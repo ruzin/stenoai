@@ -969,6 +969,23 @@ def _apply_voiceprint_matches(
     return updated
 
 
+def _identity_matching_enabled() -> bool:
+    """Whether cross-recording speaker identification is enabled (default
+    on, user-configurable). Independent of diarization itself: disabling
+    this stops self-voiceprint matching (_apply_voiceprint_matches) and
+    per-meeting speaker-embedding persistence (clusters_out), but "Speaker
+    N" splitting within a meeting is unaffected, since that only depends on
+    diarizer segments, not embeddings. Defaults to enabled on any
+    config-read failure, matching this file's "never fail a meeting"
+    pattern elsewhere.
+    """
+    try:
+        from src.config import get_config
+        return get_config().get_identity_matching_enabled()
+    except Exception:
+        return True
+
+
 def _tag_channel_segments(
     asr_segments: list[dict],
     channel_path: Optional[Path],
@@ -2001,6 +2018,7 @@ class WhisperTranscriber:
             # multiple speakers sharing one side of the call; any failure
             # or a single-cluster result falls back to the legacy
             # "You"/"Others" channel-only labeling.
+            identity_enabled = _identity_matching_enabled()
             mic_clusters: dict = {}
             system_clusters: dict = {}
             tagged: list[tuple[float, str, str, str, Optional[str]]] = []
@@ -2008,14 +2026,15 @@ class WhisperTranscriber:
                 (start, label, text, "mic", raw_sid)
                 for start, label, text, raw_sid in _tag_channel_segments(
                     mic_segments, mic_path, duration, "You",
-                    allow_self_match=True, clusters_out=mic_clusters,
+                    allow_self_match=identity_enabled,
+                    clusters_out=mic_clusters if identity_enabled else None,
                 )
             )
             tagged.extend(
                 (start, label, text, "system", raw_sid)
                 for start, label, text, raw_sid in _tag_channel_segments(
                     system_segments, system_path, duration, "Others",
-                    clusters_out=system_clusters,
+                    clusters_out=system_clusters if identity_enabled else None,
                 )
             )
             tagged.sort(key=lambda t: t[0])
@@ -2152,12 +2171,14 @@ class WhisperTranscriber:
 
         asr_segments = result.get("segments") or []
         duration = result.get("duration_seconds")
+        identity_enabled = _identity_matching_enabled()
         mono_clusters: dict = {}
         tagged = [
             (start, label, text, "mic", raw_sid)
             for start, label, text, raw_sid in _tag_channel_segments(
                 asr_segments, audio_filepath, duration, "You",
-                allow_self_match=True, clusters_out=mono_clusters,
+                allow_self_match=identity_enabled,
+                clusters_out=mono_clusters if identity_enabled else None,
             )
         ]
         tagged.sort(key=lambda t: t[0])

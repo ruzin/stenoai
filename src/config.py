@@ -711,6 +711,15 @@ class Config:
             # notification is unchanged; this only removes the manual click,
             # and main.js keeps autoInstallOnAppQuit as the safe fallback.
             "auto_install_when_idle": True,
+            # Default ON — cross-recording speaker identification (matching
+            # a diarized voice against stored person profiles/voiceprints).
+            # Independent of diarization itself: turning this off stops per-
+            # meeting speaker embeddings from ever being extracted/stored/
+            # suggested, but "Speaker N" splitting within a meeting is
+            # unaffected (it only depends on diarizer segments, not
+            # embeddings). See src.transcriber's allow_self_match/
+            # clusters_out gating.
+            "identity_matching_enabled": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
@@ -1102,10 +1111,45 @@ class Config:
         return self._save()
 
     def delete_person_profile(self, person_id: str) -> bool:
+        """Delete a person profile and, critically, the derived evidence of
+        them stored in EVERYONE ELSE's profiles.
+
+        `confirm-speaker` creates mutual hard negatives: confirming person A
+        next to person B writes a hard-negative entry into B's profile whose
+        embedding is literally A's own voice sample, tagged with the
+        meeting/channel/diarization_speaker_id A was confirmed under (see
+        that command's "Mutual hard negatives" section). Without this
+        cleanup, deleting A leaves that sample sitting in B's profile
+        indefinitely -- a deleted person's voice would outlive their own
+        profile.
+
+        Walks A's own (about-to-be-deleted) `prototypes` -- each already
+        carries the exact meeting/channel/sid tuple A was confirmed under --
+        and reuses `remove_speaker_evidence` (the same removal primitive the
+        correction path already relies on) to strip any hard-negative entry
+        in another profile derived from that specific confirmation.
+        """
         profiles = self._config.get("person_profiles", [])
-        remaining = [p for p in profiles if p.get("person_id") != person_id]
-        if len(remaining) == len(profiles):
+        target = next((p for p in profiles if p.get("person_id") == person_id), None)
+        if target is None:
             return False  # no such profile
+
+        for proto in target.get("prototypes") or []:
+            meeting_id = proto.get("meeting_id")
+            sid = proto.get("diarization_speaker_id")
+            if not meeting_id or not sid:
+                continue
+            for other in profiles:
+                if other.get("person_id") == person_id:
+                    continue
+                self.remove_speaker_evidence(
+                    other["person_id"], meeting_id=meeting_id,
+                    channel=proto.get("channel"),
+                    channel_recording_type=proto.get("recording_type"),
+                    sids={sid}, negative=True,
+                )
+
+        remaining = [p for p in profiles if p.get("person_id") != person_id]
         self._config["person_profiles"] = remaining
         return self._save()
 
@@ -1439,6 +1483,18 @@ class Config:
     def set_auto_install_when_idle(self, enabled: bool) -> bool:
         """Set whether idle auto-install is enabled."""
         self._config["auto_install_when_idle"] = enabled
+        return self._save()
+
+    def get_identity_matching_enabled(self) -> bool:
+        """Get whether cross-recording speaker identification is enabled.
+        Default on. Independent of diarization itself -- see the module
+        comment above the default-config `identity_matching_enabled` entry
+        for what turning this off actually stops."""
+        return self._config.get("identity_matching_enabled", True)
+
+    def set_identity_matching_enabled(self, enabled: bool) -> bool:
+        """Set whether cross-recording speaker identification is enabled."""
+        self._config["identity_matching_enabled"] = enabled
         return self._save()
 
     def get_auto_summarize_enabled(self) -> bool:

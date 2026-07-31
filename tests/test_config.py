@@ -542,6 +542,24 @@ class ConfigAutoInstallWhenIdleTests(unittest.TestCase):
             self.assertTrue(reloaded.get_auto_install_when_idle())
 
 
+class ConfigIdentityMatchingEnabledTests(unittest.TestCase):
+    def test_default_identity_matching_enabled_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_identity_matching_enabled())
+
+    def test_identity_matching_enabled_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_identity_matching_enabled(False))
+            self.assertFalse(config.get_identity_matching_enabled())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_identity_matching_enabled())
+            self.assertTrue(reloaded.set_identity_matching_enabled(True))
+            self.assertTrue(reloaded.get_identity_matching_enabled())
+
+
 class ConfigBedrockSettingsTests(unittest.TestCase):
     def test_default_bedrock_region_is_us_east_1(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -810,6 +828,51 @@ class ConfigPersonProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
             self.assertFalse(config.delete_person_profile("nonexistent"))
+
+    def test_delete_person_profile_strips_hard_negatives_derived_from_them_in_other_profiles(self):
+        # Mirrors confirm-speaker's mutual-hard-negative shape: confirming
+        # Max next to Julian in the same meeting+channel writes a
+        # hard-negative into Julian's profile whose embedding is literally
+        # Max's own voice sample, tagged with the meeting/channel/sid Max
+        # was confirmed under. Deleting Max must not leave that sample
+        # sitting in Julian's profile forever.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            max_p = config.create_person_profile("Max")
+            julian = config.create_person_profile("Julian")
+
+            # Max's own positive evidence -- what delete_person_profile reads
+            # to know which cross-referenced hard negatives to strip.
+            config.add_speaker_prototype(
+                max_p["person_id"], [0.1, 0.2, 0.3],
+                recording_type="in_person", meeting_id="mtg1",
+                diarization_speaker_id="SPEAKER_0", channel="mic",
+                speech_duration_seconds=30.0, segment_count=5,
+                created_from="user_confirmed",
+            )
+            # Julian's hard negative derived from Max's confirmation above.
+            config.add_speaker_prototype(
+                julian["person_id"], [0.1, 0.2, 0.3],
+                recording_type="in_person", meeting_id="mtg1",
+                diarization_speaker_id="SPEAKER_0", channel="mic",
+                speech_duration_seconds=30.0, segment_count=5,
+                created_from="user_confirmed", negative=True,
+            )
+            # An UNRELATED hard negative on Julian (different meeting) must survive.
+            config.add_speaker_prototype(
+                julian["person_id"], [0.9, 0.9, 0.9],
+                recording_type="in_person", meeting_id="mtg2",
+                diarization_speaker_id="SPEAKER_1", channel="mic",
+                speech_duration_seconds=30.0, segment_count=5,
+                created_from="user_confirmed", negative=True,
+            )
+
+            self.assertTrue(config.delete_person_profile(max_p["person_id"]))
+
+            julian_after = config.get_person_profile(julian["person_id"])
+            remaining_meetings = {h["meeting_id"] for h in julian_after["hard_negatives"]}
+            self.assertNotIn("mtg1", remaining_meetings)
+            self.assertIn("mtg2", remaining_meetings)
 
     def test_add_speaker_prototype_appends_positive_evidence(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

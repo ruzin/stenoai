@@ -343,6 +343,23 @@ export function useSetAutoInstallWhenIdle() {
   });
 }
 
+export function useIdentityMatchingEnabledSetting() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, 'identityMatchingEnabled'] as const,
+    queryFn: async () =>
+      unwrap(await ipc().settings.getIdentityMatchingEnabled()).identity_matching_enabled,
+  });
+}
+
+export function useSetIdentityMatchingEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: boolean) => unwrap(await ipc().settings.setIdentityMatchingEnabled(v)),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: [...settingsKeys.all, 'identityMatchingEnabled'] }),
+  });
+}
+
 export function useAutoSummarizeSetting() {
   return useQuery({
     queryKey: [...settingsKeys.all, 'autoSummarize'] as const,

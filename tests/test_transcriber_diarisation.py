@@ -231,6 +231,50 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         self.assertEqual(clusters["system"]["recording_type"], "remote")
         self.assertEqual(clusters["system"]["clusters"]["SPEAKER_0"]["embedding"], [0.5, 0.6])
 
+    def test_speaker_clusters_empty_and_no_self_match_when_identity_matching_disabled(self):
+        # identity_matching_enabled=False must stop per-meeting speaker
+        # embeddings from ever reaching speaker_clusters (so nothing is
+        # persisted to a {stem}_speakers.json sidecar) and stop
+        # self-voiceprint matching -- but "Speaker N" splitting itself only
+        # depends on segments, not embeddings, so it must be unaffected.
+        # Sets up a mic embedding closer to "self" than the threshold, so if
+        # allow_self_match were (wrongly) still True, the dominant mic
+        # cluster would get re-anchored -- asserting the ORIGINAL dominant-
+        # by-duration label survives is what actually proves self-matching
+        # never ran, not just that it no-op'd by coincidence.
+        mic_diar = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
+        ]
+        system_diar = [{"start": 9.0, "end": 9.5, "speaker": "SPEAKER_0"}]
+        mic_embeddings = {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]}
+        system_embeddings = {"SPEAKER_0": [0.5, 0.6]}
+        self_voiceprint = {"is_self": True, "centroid": [0.3, 0.4]}  # matches SPEAKER_1
+        with patch("src.transcriber._identity_matching_enabled", return_value=False), \
+             patch(
+                "src.transcriber._run_steno_diarize",
+                side_effect=[(mic_diar, mic_embeddings), (system_diar, system_embeddings)],
+             ), \
+             patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = [self_voiceprint]
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Hi there. Not bad. Great.", "segments": [
+                    {"text": "Hi there.", "start": 0.5, "end": 1.5},
+                    {"text": "Not bad.", "start": 3.0, "end": 3.8},
+                    {"text": "Great.", "start": 6.0, "end": 6.8},
+                ]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 9.2, "end": 9.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertEqual(result["speaker_clusters"], {})
+        # Dominant-by-duration labeling survives untouched: SPEAKER_1 stays
+        # "Speaker 2", it is NOT re-anchored to "You" despite matching the
+        # self voiceprint above -- proving self-matching never ran.
+        self.assertTrue(result["is_diarised"])
+        self.assertIn("[You] Hi there.", result["diarised_text"])
+        self.assertIn("[Speaker 2] Not bad.", result["diarised_text"])
+
     def test_speaker_clusters_empty_when_diarization_falls_back_to_legacy(self):
         # No embeddings means no diarization cluster to persist -- must not
         # produce a bogus/empty sidecar entry for a channel that fell back.
