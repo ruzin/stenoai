@@ -140,13 +140,37 @@ function classifyErrorReason(error) {
 // Bedrock's raw response body), whose text is unpredictable and can echo
 // request content or infra details -- those simply won't match any pattern
 // below and correctly fall through to 'unknown', same as classifyErrorReason.
+//
+// The connection-refused half of ollama_not_running and the
+// insufficient_memory branch match text that ORIGINATES from the Ollama
+// server / the underlying httpx client on a bare re-raise, not a literal
+// authored in summarizer.py -- unlike every other branch here, those two
+// are exempt from the drift-guard test in analytics-helpers.test.js (there
+// is no summarizer.py string for them to grep). "Connection refused"/
+// "ConnectError" mirrors the same detection already used for the
+// remote-Ollama status check in simple_recorder.py.
 function classifySummarizationStreamError(message) {
   const msg = String(message || '');
   if (/Failed to start Ollama service/i.test(msg)) return 'ollama_not_running';
+  // A stream can die mid-generation even after the pre-flight readiness
+  // check in _ensure_ollama_ready already passed (Ollama killed/crashed
+  // during generation) -- functionally the same "Ollama isn't there" case.
+  if (/Connection refused|ConnectError|ECONNREFUSED/i.test(msg)) return 'ollama_not_running';
   if (/Failed to ensure model .* is available|could not find model/i.test(msg)) return 'model_unavailable';
+  // Ollama's own server error when a model doesn't fit in available RAM,
+  // e.g. "model requires more system memory (10.5 GiB) than is available
+  // (8.0 GiB)" -- distinct from model_unavailable (the model IS installed).
+  if (/requires more system memory/i.test(msg)) return 'insufficient_memory';
   if (/too long to summarize even after chunking/i.test(msg)) return 'context_overflow';
-  if (/returned empty result|returned an empty result after retry|returned empty response|returned an empty (summary|report)/i.test(msg)) return 'empty_summary';
-  if (/rejected the (request|api key)/i.test(msg)) return 'auth_expired';
+  // Deliberately matches just "returned (an) empty result/response/summary/
+  // report" with no trailing anchor (e.g. NOT "...after retry") -- anchoring
+  // to what follows would make this brittle to a copy-edit of the rest of
+  // the sentence, same drift risk the guard test below exists to catch.
+  if (/returned (an )?empty result|returned empty response|returned an empty (summary|report)/i.test(msg)) return 'empty_summary';
+  // Neutral name (not auth_expired): the adapter's 401/403 really is a
+  // session expiry, but Bedrock's 403 is a missing IAM permission -- a
+  // rejected credential either way, not necessarily an expired one.
+  if (/rejected the (request|api key)/i.test(msg)) return 'auth_rejected';
   if (/is not configured/i.test(msg)) return 'not_configured';
   if (/is not installed|package is required/i.test(msg)) return 'dependency_missing';
   if (/failed after all retries|HTTP \d+/i.test(msg)) return 'api_error';

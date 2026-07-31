@@ -5340,7 +5340,15 @@ async function processNextInQueue() {
               language: transcriptionCtx.language,
             });
           } else if (line.startsWith('STREAM_ERROR:')) {
-            summarizationStreamError = line.slice('STREAM_ERROR:'.length).trim();
+            // Guarded on the WRITE (not just read at trackEvent time): today
+            // process_streaming only ever prints STREAM_ERROR during the
+            // summarization stage, but if that ever changed, an unguarded
+            // capture here would let a transcription-stage STREAM_ERROR
+            // masquerade as (or be overwritten by) a later summarization
+            // failure that dies without its own message.
+            if (processingStage === 'summarization') {
+              summarizationStreamError = line.slice('STREAM_ERROR:'.length).trim();
+            }
             forwardDiagnosticStdout(line, 'process-streaming');
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
