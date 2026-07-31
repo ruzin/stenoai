@@ -6427,20 +6427,25 @@ ipcMain.handle('set-transcription-engine', async (event, engine) => {
 
 ipcMain.handle('get-openai-asr-config', async () => {
   try {
-    const result = await runPythonScript('simple_recorder.py', ['get-openai-asr-config'], true);
+    const extraEnv = {};
+    const oaiKey = loadOpenAiAsrApiKey();
+    if (oaiKey) { extraEnv.STENOAI_OAI_API_KEY = oaiKey; }
+    const result = await runPythonScript('simple_recorder.py', ['get-openai-asr-config'], true, extraEnv);
     return JSON.parse(result.trim());
   } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('set-openai-asr-config', async (_event, cfg) => {
   try {
+    if (cfg.api_key !== undefined) {
+      saveOpenAiAsrApiKey(cfg.api_key);
+    }
     const args = ['set-openai-asr-config'];
     if (cfg.api_url !== undefined) { args.push('--api-url', cfg.api_url); }
     if (cfg.model !== undefined)   { args.push('--model',   cfg.model);   }
     const extraEnv = {};
-    if (cfg.api_key !== undefined) { 
-      extraEnv.STENOAI_OAI_API_KEY = cfg.api_key; 
-    }
+    const oaiKey = loadOpenAiAsrApiKey();
+    if (oaiKey) { extraEnv.STENOAI_OAI_API_KEY = oaiKey; }
     const result = await runPythonScript('simple_recorder.py', args, false, extraEnv);
     return JSON.parse(result.trim());
   } catch (e) { return { success: false, error: e.message }; }
@@ -7254,8 +7259,46 @@ function loadCloudApiKey() {
   }
 }
 
-function hasCloudApiKey() {
-  return fs.existsSync(getCloudKeyPath());
+function getOpenAiAsrKeyPath() {
+  return path.join(getUserDataDir(), '.openai-asr-api-key');
+}
+
+function saveOpenAiAsrApiKey(key) {
+  try {
+    const keyPath = getOpenAiAsrKeyPath();
+    if (!key || !key.trim()) {
+      if (fs.existsSync(keyPath)) {
+        fs.unlinkSync(keyPath);
+      }
+      return true;
+    }
+    const keyDir = path.dirname(keyPath);
+    if (!fs.existsSync(keyDir)) {
+      fs.mkdirSync(keyDir, { recursive: true });
+    }
+    const encrypted = safeStorage.encryptString(key.trim());
+    fs.writeFileSync(keyPath, encrypted);
+    return true;
+  } catch (error) {
+    console.error('Failed to save OpenAI ASR API key:', error.message);
+    return false;
+  }
+}
+
+function loadOpenAiAsrApiKey() {
+  try {
+    const keyPath = getOpenAiAsrKeyPath();
+    if (!fs.existsSync(keyPath)) return null;
+    const encrypted = fs.readFileSync(keyPath);
+    return safeStorage.decryptString(encrypted);
+  } catch (error) {
+    console.error('Failed to load OpenAI ASR API key:', error.message);
+    return null;
+  }
+}
+
+function hasOpenAiAsrApiKey() {
+  return fs.existsSync(getOpenAiAsrKeyPath());
 }
 
 // Build the env additions a Python AI-driven subprocess needs. Merges
@@ -7268,6 +7311,8 @@ function getAiEnv() {
   const env = {};
   const cloudKey = loadCloudApiKey();
   if (cloudKey) env.STENOAI_CLOUD_API_KEY = cloudKey;
+  const oaiAsrKey = loadOpenAiAsrApiKey();
+  if (oaiAsrKey) env.STENOAI_OAI_API_KEY = oaiAsrKey;
   const session = loadOrgSession();
   if (session && session.adapterUrl && session.token && !isJwtExpired(session.token)) {
     env.STENOAI_ADAPTER_URL = session.adapterUrl;
@@ -9849,6 +9894,16 @@ async function firePreMeetingNotification(event) {
   notif.payload.attendees = event.attendees ? event.attendees.map(a => a.name || a.email).join(', ') : '';
   notif.payload.color = '#10B981'; // Provide a consistent color or let it hash
   
+  notif.on('click', () => {
+    if (event.meeting_url) {
+      shell.openExternal(event.meeting_url);
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
   notif.on('close', () => {
     if (!notificationWindow || !notificationWindow._analyticsInteracted) {
       trackEvent('notification_dismissed', { type: 'premeeting' });

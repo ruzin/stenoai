@@ -623,7 +623,6 @@ class Config:
             # api_key: Bearer token sent in the Authorization header.
             # model: model name passed in the multipart form (e.g. whisper-1).
             "openai_asr_api_url": "https://api.openai.com/v1",
-            "openai_asr_api_key": "",
             "openai_asr_model": "whisper-1",
             "version": "1.0"
         }
@@ -1006,21 +1005,40 @@ class Config:
 
     def set_openai_asr_api_url(self, url: str) -> bool:
         """Set the base URL for the OpenAI-compatible STT endpoint."""
-        self._config["openai_asr_api_url"] = (url or "").strip()
+        cleaned = (url or "").strip()
+        if cleaned:
+            import urllib.parse
+            parts = urllib.parse.urlsplit(cleaned)
+            scheme = parts.scheme.lower()
+            hostname = (parts.hostname or "").lower()
+            is_local = hostname in ("localhost", "127.0.0.1", "::1") or hostname.endswith(".local")
+            if scheme == "http" and not is_local:
+                logger.error("openai_asr_api_url must use HTTPS for remote endpoints")
+                return False
+            if scheme not in ("http", "https"):
+                logger.error("openai_asr_api_url must start with https:// (or http:// for localhost)")
+                return False
+        self._config["openai_asr_api_url"] = cleaned
         return self._save()
 
     def get_openai_asr_api_key(self) -> str:
         """Bearer token for the OpenAI-compatible STT endpoint.
 
-        Stored in config.json (same convention as cloud_api_key for the
-        summarisation cloud provider). Empty string when unset.
+        Stored encrypted on disk using Electron safeStorage in .openai-asr-api-key
+        and passed via STENOAI_OAI_API_KEY env. Never persisted to config.json.
         """
-        return self._config.get("openai_asr_api_key", "")
+        return os.environ.get("STENOAI_OAI_API_KEY", "")
 
     def set_openai_asr_api_key(self, key: str) -> bool:
-        """Persist the API key for the OpenAI-compatible STT endpoint."""
-        self._config["openai_asr_api_key"] = (key or "").strip()
-        return self._save()
+        """Set the API key in environment.
+
+        Encrypted storage is managed by Electron safeStorage in .openai-asr-api-key.
+        """
+        os.environ["STENOAI_OAI_API_KEY"] = (key or "").strip()
+        if "openai_asr_api_key" in self._config:
+            del self._config["openai_asr_api_key"]
+            self._save()
+        return True
 
     def get_openai_asr_model(self) -> str:
         """Model name passed to the OpenAI-compatible STT endpoint.

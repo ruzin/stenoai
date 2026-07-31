@@ -377,12 +377,26 @@ function OpenAiAsrConfig() {
       </div>
 
       <div>
-        <label
-          className="mb-1 block text-[12px] font-medium uppercase"
-          style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
-        >
-          API key
-        </label>
+        <div className="mb-1 flex items-center justify-between">
+          <label
+            className="block text-[12px] font-medium uppercase"
+            style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
+          >
+            API key
+          </label>
+          {apiKeySet && (
+            <button
+              type="button"
+              onClick={() => {
+                setConfig.mutate({ api_key: '' });
+                setApiKey('');
+              }}
+              className="text-[12px] text-red-500 hover:underline cursor-pointer"
+            >
+              Remove
+            </button>
+          )}
+        </div>
         <Input
           id="openai-asr-api-key"
           type="password"
@@ -392,6 +406,7 @@ function OpenAiAsrConfig() {
           onBlur={() => {
             if (apiKey !== '') {
               setConfig.mutate({ api_key: apiKey });
+              setApiKey('');
             }
           }}
           className="h-[30px] text-[13px]"
