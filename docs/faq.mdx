@@ -18,11 +18,11 @@ Steno runs on macOS (Apple Silicon, M1 and later -- Intel Macs are not supported
 </Accordion>
 
 <Accordion title="Can I export my notes to Notion, Obsidian, or other tools?">
-Steno saves your notes as plain Markdown files under `~/Library/Application Support/stenoai/output/`. Because they are ordinary files, you can move them into Notion, Obsidian, or any other tool by hand or through your own automation.
+Steno saves your notes as plain Markdown files under `~/Library/Application Support/stenoai/output/` (macOS) or `%APPDATA%\stenoai\output\` (Windows). Because they are ordinary files, you can move them into Notion, Obsidian, or any other tool by hand or through your own automation.
 </Accordion>
 
 <Accordion title="How do I back up or delete my data?">
-Everything Steno stores lives under `~/Library/Application Support/stenoai/` -- recordings, transcripts, and summaries. To back up your data, copy that folder. To delete it, remove that folder. Nothing is stored remotely, so there is no cloud copy to clear.
+Everything Steno stores lives under `~/Library/Application Support/stenoai/` (macOS) or `%APPDATA%\stenoai\` (Windows) -- recordings, transcripts, and summaries. To back up your data, copy that folder. To delete it, remove that folder. Nothing is stored remotely, so there is no cloud copy to clear.
 </Accordion>
 
 ## Privacy and data
@@ -32,7 +32,11 @@ No. Steno processes all recordings using AI models that run locally on your Mac.
 </Accordion>
 
 <Accordion title="Where does Steno store my data?">
-All data is stored in `~/Library/Application Support/stenoai/`:
+All data is stored locally:
+
+**macOS**: `~/Library/Application Support/stenoai/`
+
+**Windows**: `%APPDATA%\stenoai\` (e.g. `C:\Users\<your-name>\AppData\Roaming\stenoai\`)
 
 - `recordings/` -- raw `.webm` audio files
 - `transcripts/` -- verbatim transcript text
@@ -55,8 +59,12 @@ Steno is designed for professionals handling confidential audio. Because process
 Steno is signed but distributed outside the Mac App Store. On first launch, macOS Gatekeeper may block it. Go to **System Settings → Privacy & Security** and click **Open Anyway** next to Steno. This is a one-time step.
 </Accordion>
 
+<Accordion title="Why does Windows SmartScreen say Steno is an unrecognized app?">
+Steno's Windows alpha builds are not digitally signed yet. Windows SmartScreen flags unsigned executables with a warning. To proceed, click **More info** and then **Run anyway**. The app is safe to run — we will sign the installer before the general availability release.
+</Accordion>
+
 <Accordion title="How much disk space does Steno need?">
-The default setup uses roughly 7GB: the Parakeet transcription model (~572MB) plus the default Gemma summarization model. Plan for around 8GB free during install. Larger summarization models take more space. Recordings accumulate over time in `~/Library/Application Support/stenoai/recordings/`.
+The default setup uses roughly 7GB: the Parakeet transcription model (~572MB) plus the default Gemma summarization model. Plan for around 8GB free during install. Larger summarization models take more space. Recordings accumulate over time in `~/Library/Application Support/stenoai/recordings/` (macOS) or `%APPDATA%\stenoai\recordings\` (Windows).
 </Accordion>
 
 <Accordion title="How do I update Steno?">
@@ -64,7 +72,7 @@ Steno updates automatically in the background. When an update is ready, you will
 </Accordion>
 
 <Accordion title="How do I uninstall Steno?">
-Delete Steno from your Applications folder. To also remove all recordings, transcripts, and model files, delete `~/Library/Application Support/stenoai/` and `~/.ollama/` (if you want to remove the Ollama models too).
+Delete Steno from your Applications folder (macOS) or uninstall via **Settings → Apps** (Windows). To also remove all recordings, transcripts, and model files, delete `~/Library/Application Support/stenoai/` (macOS) or `%APPDATA%\stenoai\` (Windows), and `~/.ollama/` (if you want to remove the Ollama models too).
 </Accordion>
 
 ## Recording
