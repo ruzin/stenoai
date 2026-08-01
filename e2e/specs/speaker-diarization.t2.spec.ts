@@ -62,8 +62,15 @@ test('@pipeline synthesized two-speaker mic channel becomes You + Speaker 2', as
     // independent of which channel WAV it's actually pointed at. The tail
     // cluster is deliberately shorter than the boundary so SPEAKER_0 always
     // stays the dominant (most total speaking time) cluster on BOTH
-    // channels — sanity-checked below rather than assumed.
-    const tailSeconds = Math.max(1.5, Math.min(3.0, micBoundarySeconds * 0.6));
+    // channels — sanity-checked below rather than assumed. Expressed as a
+    // fraction of micBoundarySeconds with no floor above it, so the
+    // invariant below holds for any micBoundarySeconds > 0 -- a previous
+    // version floored this at 1.5s, which made the assertion mathematically
+    // impossible whenever isSayAvailable()'s probe let through a runner
+    // where `say` produced near-silent audio (micBoundarySeconds well under
+    // 1.5s). isSayAvailable() now measures real synthesized duration, so
+    // that shouldn't recur, but this formula no longer depends on it either.
+    const tailSeconds = Math.min(micBoundarySeconds * 0.6, 3.0);
     expect(tailSeconds).toBeLessThan(micBoundarySeconds);
 
     const fixtureDir = mkdtempSync(path.join(tmpdir(), 'stenoai-e2e-diarize-'));
