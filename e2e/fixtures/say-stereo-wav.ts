@@ -13,20 +13,6 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
-let sayAvailable: boolean | undefined;
-
-export function isSayAvailable(): boolean {
-  if (sayAvailable === undefined) {
-    try {
-      execFileSync('say', ['-v', '?'], { stdio: 'ignore' });
-      sayAvailable = true;
-    } catch {
-      sayAvailable = false;
-    }
-  }
-  return sayAvailable;
-}
-
 // `say -o out.wav --data-format=LEI16@16000` writes a real (non-canonical)
 // WAV header — macOS prepends a JUNK chunk before `fmt `/`data`, so the
 // data chunk is not at the fixed 44-byte offset make-wav.js assumes.
@@ -42,6 +28,31 @@ function readPcm16Mono(filePath: string): Buffer {
 function synthesize(text: string, destPath: string): Buffer {
   execFileSync('say', ['-o', destPath, '--data-format=LEI16@16000', text]);
   return readPcm16Mono(destPath);
+}
+
+// A real sentence should take at least this long to speak. Guards against a
+// `say` that "works" (exits 0, produces a well-formed WAV) but synthesizes
+// essentially nothing -- observed on GitHub-hosted macOS runners: `say -v ?`
+// (listing voices) exits 0 even when actual synthesis produces ~170 bytes of
+// near-silent PCM (~5ms), presumably because the runner image ships the
+// `say` binary without voice assets. Probing `-v ?` alone is a false
+// positive; this measures what `say` actually wrote.
+const MIN_SAY_DURATION_SECONDS = 1.0;
+
+let sayAvailable: boolean | undefined;
+
+export function isSayAvailable(): boolean {
+  if (sayAvailable === undefined) {
+    try {
+      const dir = mkdtempSync(path.join(tmpdir(), 'stenoai-e2e-say-probe-'));
+      const pcm = synthesize('Testing one two three.', path.join(dir, 'probe.wav'));
+      const seconds = pcm.length / 2 / 16000;
+      sayAvailable = seconds >= MIN_SAY_DURATION_SECONDS;
+    } catch {
+      sayAvailable = false;
+    }
+  }
+  return sayAvailable;
 }
 
 function silencePcm(seconds: number): Buffer {
