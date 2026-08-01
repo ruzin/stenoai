@@ -18,6 +18,8 @@
 
 <p align="center">Steno is the privacy-first AI notepad for all your confidential conversations. No cloud, no usage limits and your private data never leaves your premises. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence, finance, legal and C-suite professionals with confidential data needs.</p>
 
+<p align="center"><sub><b>Platform support:</b> macOS (Apple Silicon) is fully supported. Windows 10/11 (x64) is available in <b>alpha</b> — unsigned builds. There is no iPhone or web version. Any docs pages stating Steno is macOS-only are outdated.</sub></p>
+
 <p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Hashicorp</b>, <b>Rutgers</b> & <b>European Union</b>.</sub></p>
 
 <div align="center">
