@@ -23,7 +23,7 @@ case "$(uname -s)" in
         fi
         FFMPEG_URL="https://www.osxexperts.net/ffmpeg711arm.zip"
         mkdir -p "$BIN_DIR"
-        curl --fail --retry 3 --retry-delay 2 -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
+        curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
         cd "$BIN_DIR"
         # Extract only the binary; skip the __MACOSX resource-fork junk in the zip.
         unzip -o ffmpeg.zip ffmpeg
@@ -54,7 +54,7 @@ case "$(uname -s)" in
         # Use static build for Linux
         FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
         mkdir -p "$BIN_DIR"
-        curl --fail --retry 3 --retry-delay 2 -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.tar.xz"
+        curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.tar.xz"
         cd "$BIN_DIR"
         tar -xf ffmpeg.tar.xz --strip-components=1 --wildcards '*/ffmpeg'
         rm ffmpeg.tar.xz
@@ -67,7 +67,7 @@ case "$(uname -s)" in
         # BtbN's static GPL build — one self-contained ffmpeg.exe, no DLLs.
         FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
         mkdir -p "$BIN_DIR"
-        curl --fail --retry 3 --retry-delay 2 -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
+        curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$FFMPEG_URL" -o "$BIN_DIR/ffmpeg.zip"
         cd "$BIN_DIR"
         # Zip nests under a versioned dir; pull just ffmpeg.exe into bin/.
         unzip -o ffmpeg.zip -d ffmpeg-extract > /dev/null
@@ -112,7 +112,7 @@ mkdir -p "$BIN_DIR"
 cd "$BIN_DIR"
 
 # Download
-curl --fail --retry 3 --retry-delay 2 -L "$OLLAMA_URL" -o "$OLLAMA_FILE"
+curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$OLLAMA_URL" -o "$OLLAMA_FILE"
 
 # Extract based on file type
 if [[ "$OLLAMA_FILE" == *.zip ]]; then
