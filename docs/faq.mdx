@@ -18,7 +18,7 @@ Steno runs on macOS (Apple Silicon, M1 and later -- Intel Macs are not supported
 </Accordion>
 
 <Accordion title="Can I export my notes to Notion, Obsidian, or other tools?">
-Steno saves your notes as plain Markdown files under `~/Library/Application Support/stenoai/output/`. Because they are ordinary files, you can move them into Notion, Obsidian, or any other tool by hand or through your own automation.
+Steno saves your notes as plain Markdown files under `~/Library/Application Support/stenoai/output/` (macOS) or `%APPDATA%\stenoai\output\` (Windows). Because they are ordinary files, you can move them into Notion, Obsidian, or any other tool by hand or through your own automation.
 </Accordion>
 
 <Accordion title="How do I back up or delete my data?">
@@ -64,7 +64,7 @@ Steno's Windows alpha builds are not digitally signed yet. Windows SmartScreen f
 </Accordion>
 
 <Accordion title="How much disk space does Steno need?">
-The default setup uses roughly 7GB: the Parakeet transcription model (~572MB) plus the default Gemma summarization model. Plan for around 8GB free during install. Larger summarization models take more space. Recordings accumulate over time in `~/Library/Application Support/stenoai/recordings/`.
+The default setup uses roughly 7GB: the Parakeet transcription model (~572MB) plus the default Gemma summarization model. Plan for around 8GB free during install. Larger summarization models take more space. Recordings accumulate over time in `~/Library/Application Support/stenoai/recordings/` (macOS) or `%APPDATA%\stenoai\recordings\` (Windows).
 </Accordion>
 
 <Accordion title="How do I update Steno?">
