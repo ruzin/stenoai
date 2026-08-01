@@ -141,6 +141,10 @@ cd "$BIN_DIR"
 # Download
 curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$OLLAMA_URL" -o "$OLLAMA_FILE"
 
+# Remove stale ollama binary from a previous run so the find below only
+# matches the freshly extracted download.
+rm -f ollama ollama.exe
+
 # Extract based on file type
 if [[ "$OLLAMA_FILE" == *.zip ]]; then
     unzip -o "$OLLAMA_FILE"
@@ -152,8 +156,9 @@ rm "$OLLAMA_FILE"
 
 # The Ollama archives differ in layout between platforms (some nest the binary under
 # bin/), so locate it rather than assuming a path, and fail if the extract produced
-# nothing at all.
-OLLAMA_BIN="$(find . -maxdepth 3 -type f \( -name ollama -o -name ollama.exe \) | head -n 1)"
+# nothing at all.  -print -quit stops at the first match (more efficient than piping
+# through head, and deterministic because stale binaries were removed above).
+OLLAMA_BIN="$(find . -maxdepth 3 -type f \( -name ollama -o -name ollama.exe \) -print -quit)"
 if [ -z "$OLLAMA_BIN" ]; then
     echo "No ollama binary found under $BIN_DIR after extracting $OLLAMA_FILE" >&2
     exit 1
