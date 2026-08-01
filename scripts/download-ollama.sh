@@ -141,10 +141,12 @@ cd "$BIN_DIR"
 # Download
 curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$OLLAMA_URL" -o "$OLLAMA_FILE"
 
-# Remove stale ollama binaries from a previous run so the find below only
+# Backup existing ollama binaries so the find below only
 # matches the freshly extracted download. Same scope as the lookup below
-# (-maxdepth 3, both names): any path the lookup can hit is cleared first.
-find . -maxdepth 3 -type f \( -name ollama -o -name ollama.exe \) -delete
+# (-maxdepth 3, both names): any path the lookup can hit is backed up first.
+# Using mv instead of delete preserves the last-known-good binary if the new
+# download or extraction fails, allowing easy manual recovery.
+find . -maxdepth 3 -type f \( -name ollama -o -name ollama.exe \) -exec mv {} {}.bak \;
 
 # Extract based on file type
 if [[ "$OLLAMA_FILE" == *.zip ]]; then
@@ -165,6 +167,9 @@ if [ -z "$OLLAMA_BIN" ]; then
     exit 1
 fi
 assert_binary "$OLLAMA_BIN" "$MIN_OLLAMA_BYTES"
+
+# Clean up any .bak files from the previous run now that the new binary is verified.
+find . -maxdepth 3 -name '*.bak' -delete
 
 echo "Ollama downloaded to $BIN_DIR"
 ls -la "$BIN_DIR"
