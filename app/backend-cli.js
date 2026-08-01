@@ -176,7 +176,14 @@ function createBackendCli({
         if (code === 0) {
           resolve(stdout);
         } else {
-          reject(new Error(`Python script failed with code ${code}: ${stderr}`));
+          const err = new Error(`Python script failed with code ${code}: ${stderr}`);
+          // Callers (see parsePythonFailureJson in main.js) recover a graceful
+          // {"success": false, "error": ...} a CLI command printed to stdout
+          // right before exiting non-zero -- without these, that message is
+          // unreachable and every failure looks like a generic crash.
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
         }
       });
 
