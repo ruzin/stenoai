@@ -7,6 +7,30 @@ set -e
 OLLAMA_VERSION="v0.31.1"
 BIN_DIR="$(cd "$(dirname "$0")/.." && pwd)/bin"
 
+# Assert an extracted artifact exists and is not implausibly small, then report it.
+# `curl --fail` only rejects an HTTP error status: a transfer that dies mid-flight
+# still exits 200 with a partial file, and `find ... -exec mv` exits 0 even when it
+# matched nothing. Both leave a bad or missing binary that only surfaces much later
+# in PyInstaller or at runtime. Size is the one post-condition that works on every
+# platform -- the Windows binary cannot be executed on the runner that produced it.
+assert_binary() {
+    local path="$1" min_bytes="$2" size
+    if [ ! -f "$path" ]; then
+        echo "Expected $path after extract, but it is missing" >&2
+        exit 1
+    fi
+    size=$(wc -c < "$path" | tr -d '[:space:]')
+    if [ "$size" -lt "$min_bytes" ]; then
+        echo "$path is only ${size} bytes (expected at least ${min_bytes}); download or extract was truncated" >&2
+        exit 1
+    fi
+}
+
+# Conservative floors: the real binaries are tens of MB, while an HTML error page
+# or a truncated transfer is orders of magnitude below these.
+MIN_FFMPEG_BYTES=5000000
+MIN_OLLAMA_BYTES=1000000
+
 # --- Download ffmpeg ---
 echo "=== Downloading ffmpeg ==="
 case "$(uname -s)" in
@@ -29,6 +53,7 @@ case "$(uname -s)" in
         unzip -o ffmpeg.zip ffmpeg
         rm ffmpeg.zip
         chmod +x ffmpeg
+        assert_binary ffmpeg "$MIN_FFMPEG_BYTES"
         # Validate the binary before bundling it. Two distinct failure modes:
         #  1. Wrong architecture. An x86_64 ffmpeg runs fine HERE under Rosetta and
         #     would sail through the -version check, then crash on a Rosetta-less
@@ -59,6 +84,7 @@ case "$(uname -s)" in
         tar -xf ffmpeg.tar.xz --strip-components=1 --wildcards '*/ffmpeg'
         rm ffmpeg.tar.xz
         chmod +x ffmpeg
+        assert_binary ffmpeg "$MIN_FFMPEG_BYTES"
         echo "ffmpeg downloaded"
         cd - > /dev/null
         ;;
@@ -73,6 +99,7 @@ case "$(uname -s)" in
         unzip -o ffmpeg.zip -d ffmpeg-extract > /dev/null
         find ffmpeg-extract -name 'ffmpeg.exe' -exec mv {} . \;
         rm -rf ffmpeg-extract ffmpeg.zip
+        assert_binary ffmpeg.exe "$MIN_FFMPEG_BYTES"
         echo "ffmpeg.exe downloaded"
         cd - > /dev/null
         ;;
@@ -122,6 +149,16 @@ else
 fi
 
 rm "$OLLAMA_FILE"
+
+# The Ollama archives differ in layout between platforms (some nest the binary under
+# bin/), so locate it rather than assuming a path, and fail if the extract produced
+# nothing at all.
+OLLAMA_BIN="$(find . -maxdepth 3 -type f \( -name ollama -o -name ollama.exe \) | head -n 1)"
+if [ -z "$OLLAMA_BIN" ]; then
+    echo "No ollama binary found under $BIN_DIR after extracting $OLLAMA_FILE" >&2
+    exit 1
+fi
+assert_binary "$OLLAMA_BIN" "$MIN_OLLAMA_BYTES"
 
 echo "Ollama downloaded to $BIN_DIR"
 ls -la "$BIN_DIR"
