@@ -1,5 +1,7 @@
 import * as React from 'react';
 import { Calendar, ChevronLeft, ChevronRight, PencilLine, RefreshCw, Search, Square, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { cn, isMac } from '@/lib/utils';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { UpcomingCard } from '@/components/home/UpcomingCard';
@@ -26,6 +28,7 @@ interface HomeProps {
 }
 
 export function Home({ mode }: HomeProps) {
+  const { t } = useTranslation();
   const meetings = useMeetings();
   const folders = useFolders();
   const calendar = useCalendarEvents();
@@ -209,7 +212,9 @@ export function Home({ mode }: HomeProps) {
     if (!search.trim()) return previous;
     return searchNotes(previous, search);
   }, [mode, previous, search]);
-  const groups = React.useMemo(() => groupPrevious(filtered), [filtered]);
+  // `t` is a dep on purpose: react-i18next hands back a new `t` when the
+  // language changes, which is what re-labels the groups without a remount.
+  const groups = React.useMemo(() => groupPrevious(filtered, t), [filtered, t]);
 
   // Calendar-connect nudge: most new users don't realise Steno can
   // surface their meetings until something tells them. Show a small
@@ -336,7 +341,7 @@ export function Home({ mode }: HomeProps) {
               style={{ color: 'var(--fg-muted)' }}
             >
               <Calendar className="size-3.5 flex-shrink-0" />
-              <span>Connect your calendar to see today's meetings.</span>
+              <span>{t('home.calendarNudge.prompt')}</span>
               {!withDismiss && (
                 <ChevronRight className="size-3 flex-shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
               )}
@@ -348,8 +353,9 @@ export function Home({ mode }: HomeProps) {
                 style={{ color: 'var(--fg-muted)' }}
               />
               <span>
-                Connecting to {pendingProvider === 'google' ? 'Google' : 'Outlook'}
-                …
+                {t('home.calendarNudge.connecting', {
+                  provider: pendingProvider === 'google' ? 'Google' : 'Outlook',
+                })}
               </span>
               <button
                 type="button"
@@ -357,7 +363,7 @@ export function Home({ mode }: HomeProps) {
                 className="rounded px-2 py-0.5 transition-colors hover:bg-[color:var(--surface-hover)]"
                 style={{ color: 'var(--fg-1)' }}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             </>
           ) : (
@@ -366,7 +372,7 @@ export function Home({ mode }: HomeProps) {
                 className="size-3.5 flex-shrink-0"
                 style={{ color: 'var(--fg-muted)' }}
               />
-              <span>Connect:</span>
+              <span>{t('home.calendarNudge.connectLabel')}</span>
               <button
                 type="button"
                 onClick={() => startConnect('google')}
@@ -389,8 +395,8 @@ export function Home({ mode }: HomeProps) {
             <button
               type="button"
               onClick={onDismissCalendarNudge}
-              aria-label="Dismiss"
-              title="Dismiss"
+              aria-label={t('home.calendarNudge.dismiss')}
+              title={t('home.calendarNudge.dismiss')}
               className="ml-auto rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)]"
               style={{ color: 'var(--fg-muted)' }}
             >
@@ -470,7 +476,7 @@ export function Home({ mode }: HomeProps) {
     >
       {meetings.isLoading ? (
         <div className="flex min-h-[40vh] items-center justify-center text-[color:var(--fg-2)]">
-          Loading meetings…
+          {t('home.loading')}
         </div>
       ) : emptyState ? (
         <div className="flex flex-col items-center gap-8 text-center">
@@ -485,16 +491,16 @@ export function Home({ mode }: HomeProps) {
                 color: 'var(--fg-1)',
               }}
             >
-              Welcome to Steno.
+              {t('home.empty.title')}
             </h1>
             <p
               className="text-[17px] leading-[1.55]"
               style={{ color: 'var(--fg-2)' }}
             >
-              AI for your confidential workflows.
+              {t('home.empty.tagline')}
             </p>
             <p className="text-sm" style={{ color: 'var(--fg-muted)' }}>
-              Always get consent when transcribing others.
+              {t('home.empty.consent')}
             </p>
           </div>
           <div className="flex flex-col items-center gap-3">
@@ -504,17 +510,19 @@ export function Home({ mode }: HomeProps) {
               className="gap-2"
             >
               {isRecording ? <Square className="size-4" /> : <PencilLine className="size-4" />}
-              {isRecording ? 'Stop recording' : 'New note'}
+              {isRecording ? t('home.empty.stopRecording') : t('home.empty.newNote')}
             </Button>
             <p
               className="flex items-center gap-1.5 text-xs"
               style={{ color: 'var(--fg-muted)' }}
             >
-              <span>Quick start:</span>
+              {/* Split around the <kbd> run rather than a single interpolated
+                  sentence — the keys are real elements, not text. */}
+              <span>{t('home.empty.quickStartLabel')}</span>
               <KbdKey>{isMac ? '⌘' : 'Ctrl'}</KbdKey>
               <KbdKey>{isMac ? '⇧' : 'Shift'}</KbdKey>
               <KbdKey>R</KbdKey>
-              <span>from anywhere</span>
+              <span>{t('home.empty.quickStartSuffix')}</span>
             </p>
           </div>
           {emptyStateCalendarNudge && (
@@ -570,7 +578,7 @@ export function Home({ mode }: HomeProps) {
             return (
               <section className="mb-10">
                 <SectionHead
-                  title="Coming up"
+                  title={t('home.sections.comingUp')}
                   isSerif
                   count={upcomingToday.length}
                   action={
@@ -580,7 +588,7 @@ export function Home({ mode }: HomeProps) {
                           <button
                             type="button"
                             className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
-                            title="Previous"
+                            title={t('home.upcoming.prevPage')}
                             onClick={() => setUpcomingPage((p) => Math.max(0, p - 1))}
                             disabled={!canPagePrev}
                             style={{ color: 'var(--fg-2)' }}
@@ -590,7 +598,7 @@ export function Home({ mode }: HomeProps) {
                           <button
                             type="button"
                             className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
-                            title="Next"
+                            title={t('home.upcoming.nextPage')}
                             onClick={() => setUpcomingPage((p) => Math.min(upcomingPageCount - 1, p + 1))}
                             disabled={!canPageNext}
                             style={{ color: 'var(--fg-2)' }}
@@ -602,7 +610,7 @@ export function Home({ mode }: HomeProps) {
                       <button
                         type="button"
                         className="inline-flex items-center rounded p-1 transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                        title="Check for new calendar events"
+                        title={t('home.upcoming.refresh')}
                         onClick={() => calendar.refetch()}
                         disabled={calendar.isFetching}
                         style={{ color: 'var(--fg-2)' }}
@@ -664,7 +672,7 @@ export function Home({ mode }: HomeProps) {
 
           {upcomingToday.length === 0 && tomorrowPreview && mode === 'home' && (
             <section className="mb-10">
-              <SectionHead title="Tomorrow" count={1} />
+              <SectionHead title={t('home.sections.tomorrow')} count={1} />
               <AllDayInline
                 events={allDayToday}
                 expanded={allDayExpanded}
@@ -681,7 +689,7 @@ export function Home({ mode }: HomeProps) {
 
           {upcomingToday.length === 0 && !tomorrowPreview && allDayToday.length > 0 && mode === 'home' && (
             <section className="mb-10">
-              <SectionHead title="Today" count={allDayToday.length} />
+              <SectionHead title={t('home.sections.today')} count={allDayToday.length} />
               <AllDayInline
                 events={allDayToday}
                 expanded={allDayExpanded}
@@ -692,7 +700,11 @@ export function Home({ mode }: HomeProps) {
 
           <section>
             <SectionHead
-              title={mode === 'meetings' ? 'All notes' : 'Previous'}
+              title={
+                mode === 'meetings'
+                  ? t('home.sections.allNotes')
+                  : t('home.sections.previous')
+              }
               count={mode === 'meetings' ? filtered.length : previous.length}
               action={
                 mode === 'meetings' ? (
@@ -706,8 +718,8 @@ export function Home({ mode }: HomeProps) {
                       type="text"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search notes"
-                      aria-label="Search notes"
+                      placeholder={t('home.search.placeholder')}
+                      aria-label={t('home.search.placeholder')}
                       className="h-[26px] w-[180px] rounded-md border-0 pl-7 pr-7 text-[12.5px] outline-none transition-colors focus:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
                       style={{
                         background: 'rgba(27,27,25,0.04)',
@@ -722,7 +734,7 @@ export function Home({ mode }: HomeProps) {
                           setSearch('');
                           searchInputRef.current?.focus();
                         }}
-                        aria-label="Clear search"
+                        aria-label={t('home.search.clear')}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex size-4 items-center justify-center rounded transition-colors hover:bg-[color:var(--surface-hover)]"
                         style={{ color: 'var(--fg-muted)' }}
                       >
@@ -738,7 +750,7 @@ export function Home({ mode }: HomeProps) {
                 className="px-6 py-12 text-center text-[13px]"
                 style={{ color: 'var(--fg-2)' }}
               >
-                No meetings match &ldquo;{search.trim()}&rdquo;.
+                {t('home.search.noMatches', { query: search.trim() })}
               </div>
             ) : (
               groups.map((g) => (
@@ -810,6 +822,7 @@ interface AllDayInlineProps {
 }
 
 function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
+  const { t } = useTranslation();
   if (events.length === 0) return null;
   return (
     <div className="mb-2 flex flex-col gap-2">
@@ -820,7 +833,7 @@ function AllDayInline({ events, expanded, onToggle }: AllDayInlineProps) {
         className="-mx-1 self-start rounded px-1 py-0.5 text-xs transition-colors hover:bg-[color:var(--surface-hover)]"
         style={{ color: 'var(--fg-2)' }}
       >
-        + {events.length} all-day event{events.length === 1 ? '' : 's'} today
+        {t('home.allDay.toggle', { count: events.length })}
       </button>
       {expanded && (
         // Render as full UpcomingCards so all-day events match the visual
@@ -852,7 +865,7 @@ interface Group {
   items: Meeting[];
 }
 
-function groupPrevious(meetings: Meeting[]): Group[] {
+function groupPrevious(meetings: Meeting[], t: TFunction): Group[] {
   const groups: Record<string, Meeting[]> = {};
   const order: string[] = [];
   const now = new Date();
@@ -863,7 +876,7 @@ function groupPrevious(meetings: Meeting[]): Group[] {
   });
   for (const m of sorted) {
     const raw = m.session_info.processed_at ?? m.session_info.updated_at;
-    const label = raw ? groupLabel(new Date(raw), now) : 'Earlier';
+    const label = raw ? groupLabel(new Date(raw), now, t) : t('home.day.earlier');
     if (!groups[label]) {
       groups[label] = [];
       order.push(label);
@@ -873,15 +886,15 @@ function groupPrevious(meetings: Meeting[]): Group[] {
   return order.map((label) => ({ label, items: groups[label] }));
 }
 
-function groupLabel(d: Date, now: Date): string {
+function groupLabel(d: Date, now: Date, t: TFunction): string {
   const sameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
-  if (sameDay(d, now)) return 'Today';
+  if (sameDay(d, now)) return t('home.day.today');
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (sameDay(d, yesterday)) return 'Yesterday';
+  if (sameDay(d, yesterday)) return t('home.day.yesterday');
   const age = now.getTime() - d.getTime();
   if (age < 7 * 24 * 60 * 60 * 1000) {
     return d.toLocaleDateString(undefined, { weekday: 'long' });

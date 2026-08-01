@@ -1,5 +1,7 @@
 import * as React from 'react';
 import { Check, ChevronLeft, Loader2, Lock, Plus, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { templateDisplayName } from '@/lib/templateName';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Textarea } from '@/components/ui/input';
@@ -21,6 +23,7 @@ import {
 } from '@/hooks/useTemplates';
 import { COMPACT_BTN } from './primitives';
 import { LANGUAGES_WHISPER, type LangOption } from './languages';
+import { languageLabel } from '@/lib/transcription-languages';
 
 // ---------------------------------------------------------------------------
 // Templates tab — manage summary report templates (CRUD + default pick) as a
@@ -47,6 +50,7 @@ export function TemplatesTab({
   // redundant leftover from the list view above it.
   onEditingChange?: (editing: boolean) => void;
 } = {}) {
+  const { t: translate } = useTranslation();
   const { templates, defaultId } = useTemplates();
   const setDefault = useSetDefaultTemplate();
   const del = useDeleteTemplate();
@@ -89,10 +93,10 @@ export function TemplatesTab({
           <Plus size={16} className="shrink-0" />
           <div className="min-w-0 flex-1">
             <span className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
-              New Template
+              {translate('settings.templates.new')}
             </span>
             <div className="truncate text-[12px] mt-0.5">
-              Create custom prompts to tailor how your meetings are summarised.
+              {translate('settings.templates.newDescription')}
             </div>
           </div>
         </button>
@@ -149,26 +153,26 @@ export function TemplatesTab({
                     className="truncate text-[13px] font-medium"
                     style={{ color: 'var(--fg-1)' }}
                   >
-                    {t.name}
+                    {templateDisplayName(t)}
                   </span>
                   {isDefault && (
                     <span
                       className="inline-flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider font-semibold"
                       style={{ color: 'var(--fg-1)' }}
-                      title="Used automatically for new meetings unless you pick a different one"
+                      title={translate('settings.templates.defaultTitle')}
                     >
                       <Check size={10} aria-hidden="true" />
-                      Default
+                      {translate('settings.templates.default')}
                     </span>
                   )}
                   {t.locked && !isDefault && (
                     <span
                       className="inline-flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider"
                       style={{ color: 'var(--fg-muted)' }}
-                      title="Built-in template — protected from editing and deletion"
+                      title={translate('settings.templates.lockedTitle')}
                     >
                       <Lock size={10} aria-hidden="true" />
-                      Locked
+                      {translate('settings.templates.locked')}
                     </span>
                   )}
                   {t.builtin && !t.locked && !isDefault && (
@@ -179,7 +183,7 @@ export function TemplatesTab({
                         border: '1px solid var(--border-subtle)',
                       }}
                     >
-                      Built-in
+                      {translate('settings.templates.builtin')}
                     </span>
                   )}
                 </div>
@@ -192,7 +196,10 @@ export function TemplatesTab({
                   style={{ color: 'var(--fg-muted)', opacity: t.prompt ? 1 : 0.6 }}
                   title={t.prompt}
                 >
-                  {t.prompt || (t.builtin ? 'Uses structured format' : 'No prompt provided.')}
+                  {t.prompt ||
+                    (t.builtin
+                      ? translate('settings.templates.usesStructuredFormat')
+                      : translate('settings.templates.noPrompt'))}
                 </div>
               </div>
 
@@ -211,7 +218,7 @@ export function TemplatesTab({
                       disabled={setDefault.isPending}
                       onClick={() => setDefault.mutate(t.id)}
                     >
-                      Make Default
+                      {translate('settings.templates.makeDefault')}
                     </Button>
                   )}
                   {!t.builtin && (
@@ -226,7 +233,7 @@ export function TemplatesTab({
                         setDeleteError(null);
                         setDeleteTarget(t);
                       }}
-                      aria-label={`Delete ${t.name}`}
+                      aria-label={translate('settings.templates.deleteAria', { name: t.name })}
                     >
                       <Trash2 size={14} />
                     </Button>
@@ -246,11 +253,14 @@ export function TemplatesTab({
             setDeleteError(null);
           }
         }}
-        title={deleteTarget ? `Delete template "${deleteTarget.name}"?` : ''}
+        title={
+          deleteTarget
+            ? translate('settings.templates.deleteTitle', { name: deleteTarget.name })
+            : ''
+        }
         description={
           <>
-            This permanently deletes the template. Reports already generated
-            from it are not affected.
+            {translate('settings.templates.deleteDescription')}
             {deleteError && (
               <span
                 role="alert"
@@ -265,7 +275,7 @@ export function TemplatesTab({
             )}
           </>
         }
-        confirmLabel="Delete"
+        confirmLabel={translate('common.delete')}
         destructive
         isPending={del.isPending}
         onConfirm={async () => {
@@ -277,7 +287,7 @@ export function TemplatesTab({
           } catch (e) {
             // Keep the dialog open so the user can retry; surface why.
             setDeleteError(
-              e instanceof Error ? e.message : 'Failed to delete template.',
+              e instanceof Error ? e.message : translate('settings.templates.deleteFailed'),
             );
           }
         }}
@@ -295,6 +305,7 @@ function TemplateEditor({
   editing: Partial<Template> | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const save = useSaveTemplate();
   const reset = useResetTemplate();
   const { defaultId } = useTemplates();
@@ -317,7 +328,8 @@ function TemplateEditor({
       { id: editing?.id, name, prompt, language },
       {
         onSuccess: () => onClose(),
-        onError: (e) => setError(e instanceof Error ? e.message : 'Save failed'),
+        onError: (e) =>
+          setError(e instanceof Error ? e.message : t('settings.templates.saveFailed')),
       },
     );
   };
@@ -334,7 +346,7 @@ function TemplateEditor({
             type="button"
             onClick={onClose}
             disabled={busy}
-            aria-label="Back to templates"
+            aria-label={t('settings.templates.backAria')}
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)] disabled:pointer-events-none disabled:opacity-50"
             style={{ color: 'var(--fg-2)' }}
           >
@@ -342,10 +354,12 @@ function TemplateEditor({
           </button>
           <div>
             <h2 className="text-[20px] font-medium" style={{ color: 'var(--fg-1)' }}>
-              {editing?.id ? 'Edit template' : 'New template'}
+              {editing?.id
+                ? t('settings.templates.editTitle')
+                : t('settings.templates.newTitle')}
             </h2>
             <p className="text-[13px] mt-1" style={{ color: 'var(--fg-muted)' }}>
-              Configure how your meetings should be summarized
+              {t('settings.templates.editorSubtitle')}
             </p>
           </div>
         </div>
@@ -361,7 +375,7 @@ function TemplateEditor({
                 if (editing.id) setDefault.mutate(editing.id);
               }}
             >
-              Make Default
+              {t('settings.templates.makeDefault')}
             </Button>
           )}
           {editing?.id && editing.builtin && !editing.locked && (
@@ -370,12 +384,12 @@ function TemplateEditor({
               size="sm"
               className={COMPACT_BTN}
               disabled={busy}
-              title="Discard your edits and revert to Steno's shipped version of this template"
+              title={t('settings.templates.resetTitle')}
               onClick={() => {
                 if (editing.id) reset.mutate(editing.id, { onSuccess: () => onClose() });
               }}
             >
-              Reset
+              {t('settings.templates.reset')}
             </Button>
           )}
           <Button
@@ -387,10 +401,10 @@ function TemplateEditor({
             {save.isPending ? (
               <>
                 <Loader2 className="mr-1.5 size-3 animate-spin" />
-                Saving…
+                {t('settings.templates.saving')}
               </>
             ) : (
-              'Save Template'
+              t('settings.templates.save')
             )}
           </Button>
         </div>
@@ -400,18 +414,18 @@ function TemplateEditor({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6 shrink-0">
         <div className="flex flex-col gap-2">
           <label className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
-            Name
+            {t('settings.templates.name')}
           </label>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Weekly Sync, Executive Summary..."
+            placeholder={t('settings.templates.namePlaceholder')}
             className="text-[14px] bg-[color:var(--surface-raised)]"
           />
         </div>
         <div className="flex flex-col gap-2">
           <label className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
-            Language
+            {t('settings.templates.language')}
           </label>
           <Select value={language} onValueChange={setLanguage}>
             <SelectTrigger className="text-[14px] bg-[color:var(--surface-raised)]">
@@ -420,7 +434,7 @@ function TemplateEditor({
             <SelectContent>
               {TEMPLATE_LANGUAGES.map((l) => (
                 <SelectItem key={l.value} value={l.value}>
-                  {l.label}
+                  {languageLabel(l.value, l.label)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -444,16 +458,16 @@ function TemplateEditor({
           }}
         >
           <span className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
-            System Prompt
+            {t('settings.templates.systemPrompt')}
           </span>
           <span className="text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-            Markdown supported
+            {t('settings.templates.markdownSupported')}
           </span>
         </div>
         <Textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Write a prompt instructing the AI how to structure the meeting summary..."
+          placeholder={t('settings.templates.promptPlaceholder')}
           className="flex-1 w-full p-5 text-[14px] leading-relaxed border-0 focus-visible:ring-0 resize-none bg-[color:var(--surface-raised)] shadow-none"
           style={{ color: 'var(--fg-1)' }}
         />

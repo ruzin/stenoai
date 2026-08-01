@@ -1,0 +1,1208 @@
+{
+  "app": {
+    "actions": "Actions",
+    "date": {
+      "today": "Today",
+      "yesterday": "Yesterday"
+    },
+    "dropBlocked": "Stop recording to import",
+    "dropToImport": "Drop audio to import",
+    "loading": "Loading…",
+    "rename": "Rename"
+  },
+  "chat": {
+    "askAbout": "Ask about {{name}}",
+    "askAcross": "Ask across…",
+    "askAi": "Ask AI",
+    "askAria": "Ask about this meeting",
+    "backToChat": "Back to Chat",
+    "bucket": {
+      "last2Weeks": "Last 2 weeks",
+      "thisMonth": "This month",
+      "thisWeek": "This week",
+      "today": "Today",
+      "yesterday": "Yesterday"
+    },
+    "chatActions": "Chat actions",
+    "chips": {
+      "actionItems": "Action items",
+      "keyDecisions": "Summarize key decisions",
+      "mainTopics": "Main topics"
+    },
+    "collapse": "Collapse",
+    "composerPlaceholder": "Ask anything  /",
+    "copyTranscript": "Copy transcript",
+    "deleteChat": "Delete chat {{name}}",
+    "emptyResponse": "(empty response)",
+    "failedToSend": "Failed to send",
+    "greeting": "Ask anything",
+    "greetingNamed": "Hi <name>{{name}}</name>, ask anything",
+    "hideTranscript": "Hide transcript",
+    "history": "History",
+    "mayOmitOlderNotes": "· may omit older notes",
+    "model": {
+      "auto": "Auto",
+      "cloud": "Cloud",
+      "organisation": "Organisation",
+      "remoteOllama": "Remote Ollama"
+    },
+    "newChat": "New chat",
+    "noOtherChats": "No other chats yet.",
+    "noRecents": "Your past chats will show up here.",
+    "noSavedChats": "No saved chats yet.",
+    "notFound": "Chat not found.",
+    "notFoundHint": "This conversation may have been deleted.",
+    "orgScopeHint": "Cross-note chat against {{org}}'s shared notes",
+    "placeholderAsk": "Ask anything about this meeting…",
+    "placeholderContinue": "Continue chat…",
+    "placeholderRecording": "Chat available after recording",
+    "presets": "Presets",
+    "providerRequired": "Your AI provider isn't ready for chat yet — add a cloud API key, sign in to your Organisation, or set your remote Ollama URL in <settingsLink>Settings → AI</settingsLink>.",
+    "providerRequiredPlaceholder": "Set up an AI provider in Settings to ask across notes",
+    "queryFailed": "query failed",
+    "recents": "Recents",
+    "relative": {
+      "days": "{{n}}d",
+      "hours": "{{n}}h",
+      "minutes": "{{n}}m",
+      "months": "{{n}}mo",
+      "now": "now",
+      "weeks": "{{n}}w",
+      "years": "{{n}}y"
+    },
+    "resume": "Resume",
+    "resumeAria": "Resume recording on this note",
+    "resumeTitle": "Resume recording — the new audio is appended to this note",
+    "scopeAria": "Scope: {{scope}}",
+    "seeAll": "See all",
+    "send": "Send",
+    "showLess": "Show less",
+    "showTranscript": "Show transcript",
+    "skills": "Skills",
+    "stop": "Stop",
+    "streamError": "Error: {{error}}",
+    "switchChat": "Switch chat",
+    "thinking": "Thinking",
+    "thinkingStream": "Thinking…",
+    "transcript": "Transcript",
+    "untitled": "Untitled chat"
+  },
+  "common": {
+    "appName": "Steno",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "done": "Done",
+    "retry": "Retry",
+    "save": "Save",
+    "working": "Working..."
+  },
+  "dialog": {
+    "filter": {
+      "audio": "Audio Files",
+      "markdown": "Markdown",
+      "pdf": "PDF",
+      "text": "Text"
+    }
+  },
+  "dock": {
+    "changeLanguage": "Change transcript language",
+    "copyTranscript": "Copy transcript",
+    "hideTranscript": "Hide transcript",
+    "languageAria": "Language: {{language}}",
+    "languageMulti": "Multi",
+    "listening": "Listening…",
+    "listeningHint": "Start speaking — finalised sentences will appear here.",
+    "liveUnavailable": "Live transcription unavailable",
+    "minimizeTranscript": "Minimize transcript",
+    "noMatches": "No matches",
+    "noMatchesHint": "Nothing matches your filter yet.",
+    "paused": "Paused",
+    "preparing": "Preparing transcription…",
+    "preparingHint": "Parakeet is warming up. Audio is being captured.",
+    "preparingShort": "Preparing…",
+    "preparingSlow": "Still warming up — first launch can take a moment. Audio is being captured.",
+    "recording": "Recording",
+    "resumeRecording": "Resume recording",
+    "resumed": "Resumed",
+    "searchTranscript": "Search transcript",
+    "showTranscript": "Show transcript",
+    "stage": "Stage: {{stage}}",
+    "stageWithMessage": "{{stage}}: {{message}}",
+    "stillPreparing": "Still preparing…",
+    "stop": "Stop",
+    "stopRecording": "Stop recording",
+    "transcript": "Transcript",
+    "transcriptHeader": "Transcript header"
+  },
+  "folders": {
+    "changeIcon": "Change folder icon",
+    "create": "Create folder",
+    "deleteNoMeetings": "No recordings or transcripts will be deleted.",
+    "deleteTitle": "Delete folder \"{{name}}\"?",
+    "deleteWithMeetings_one": "{{count}} meeting will be moved back to All Notes. No recordings or transcripts will be deleted.",
+    "deleteWithMeetings_other": "{{count}} meetings will be moved back to All Notes. No recordings or transcripts will be deleted.",
+    "emptyHint": "Notes you save to this folder will show up here.",
+    "emptyTitle": "Nothing here yet",
+    "loading": "Loading folder…",
+    "meetingCount_one": "{{count}} meeting",
+    "meetingCount_other": "{{count}} meetings",
+    "namePlaceholder": "e.g. Acme Corp",
+    "newFolder": "New folder",
+    "newFolderDescription": "Group related meetings together. Folder names are only visible to you.",
+    "noIconsMatch": "No icons match \"{{query}}\"",
+    "notFound": "Folder not found.",
+    "notFoundHint": "This folder may have been deleted. <homeLink>Back to Home</homeLink>.",
+    "notes": "Notes",
+    "searchIcons": "Search icons…"
+  },
+  "hero": {
+    "headline": {
+      "clearDay": "Clear day ahead",
+      "inMeeting": "In a meeting now",
+      "nextInHours_one": "Next meeting in {{count}} hr",
+      "nextInHours_other": "Next meeting in {{count}} hrs",
+      "nextInMinutes_one": "Next meeting in {{count}} min",
+      "nextInMinutes_other": "Next meeting in {{count}} mins",
+      "paused": "Recording paused",
+      "processing": "Processing your note",
+      "ready": "Ready to capture beautiful notes",
+      "recording": "Recording"
+    },
+    "recordingHint": "Start recording from the top-right, or from anywhere with {{shortcut}}.",
+    "subtitle": {
+      "inMeeting": "Press {{shortcut}} to start recording — or tap a meeting card below.",
+      "inProgressFallback": "In progress",
+      "nextSoon": "{{title}} at {{time}} — {{shortcut}} when you're ready.",
+      "paused": "Recording paused. Tap resume on the bar below to continue.",
+      "processing": "We'll have your note ready in a moment.",
+      "recording": "{{title}} · {{shortcut}} to stop",
+      "tomorrow": "Next up: {{title}} tomorrow at {{time}}."
+    }
+  },
+  "home": {
+    "allDay": {
+      "toggle_one": "+ {{count}} all-day event today",
+      "toggle_other": "+ {{count}} all-day events today"
+    },
+    "calendarNudge": {
+      "connectLabel": "Connect:",
+      "connecting": "Connecting to {{provider}}…",
+      "dismiss": "Dismiss",
+      "prompt": "Connect your calendar to see today's meetings."
+    },
+    "day": {
+      "earlier": "Earlier",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "yesterday": "Yesterday"
+    },
+    "duration": {
+      "hoursMinutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "seconds": "{{seconds}}s"
+    },
+    "empty": {
+      "consent": "Always get consent when transcribing others.",
+      "newNote": "New note",
+      "quickStartLabel": "Quick start:",
+      "quickStartSuffix": "from anywhere",
+      "stopRecording": "Stop recording",
+      "tagline": "AI for your confidential workflows.",
+      "title": "Welcome to Steno."
+    },
+    "loading": "Loading meetings…",
+    "previousRow": {
+      "participants_one": "{{count}} person",
+      "participants_other": "{{count}} people",
+      "processingBadge": "Processing",
+      "recordingBadge": "Recording",
+      "untitledNote": "Untitled note"
+    },
+    "relative": {
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "hours_one": "{{count}} hr",
+      "hours_other": "{{count}} hrs",
+      "minutes_one": "{{count}} min",
+      "minutes_other": "{{count}} mins",
+      "now": "Now"
+    },
+    "search": {
+      "clear": "Clear search",
+      "noMatches": "No meetings match “{{query}}”.",
+      "placeholder": "Search notes"
+    },
+    "sections": {
+      "allNotes": "All notes",
+      "comingUp": "Coming up",
+      "previous": "Previous",
+      "today": "Today",
+      "tomorrow": "Tomorrow"
+    },
+    "upcoming": {
+      "nextPage": "Next",
+      "prevPage": "Previous",
+      "refresh": "Check for new calendar events"
+    },
+    "upcomingCard": {
+      "allDay": "All day",
+      "endsIn_one": "Ends in {{count}} min",
+      "endsIn_other": "Ends in {{count}} mins",
+      "join": "Join",
+      "justStarted": "Just started",
+      "startNow": "Start now",
+      "startedAgo_one": "Started {{count}} min ago",
+      "startedAgo_other": "Started {{count}} mins ago",
+      "untitled": "Untitled meeting"
+    }
+  },
+  "meeting": {
+    "action": {
+      "backToHome": "Back to home",
+      "copied": "Copied",
+      "copiedConfirm": "Copied!",
+      "copyNotes": "Copy notes",
+      "copyTranscript": "Copy transcript",
+      "deleteNote": "Delete note",
+      "generateNotes": "Generate notes",
+      "home": "Home",
+      "moreOptions": "More options",
+      "regenerateTitle": "Regenerate title",
+      "retranscribeRecording": "Re-transcribe recording",
+      "saveNotesPdf": "Save notes as PDF…",
+      "saveTranscriptMarkdown": "Save transcript as .md…",
+      "viewContainingFolder": "View containing folder"
+    },
+    "backToMeetings": "Back to meetings",
+    "backup": {
+      "backingUp": "Backing up…",
+      "failed": "This note has not been backed up. Click to retry.",
+      "failedWithReason": "Last backup failed: {{error}}. Click to retry.",
+      "notBackedUp": "Not backed up"
+    },
+    "error": {
+      "copyTranscript": "Couldn't copy transcript: {{error}}",
+      "deleteFailed": "Delete failed: {{error}}",
+      "generic": "Something went wrong.",
+      "saveNotes": "Couldn't save notes: {{error}}",
+      "saveTranscript": "Couldn't save transcript: {{error}}",
+      "unknown": "unknown error"
+    },
+    "folder": {
+      "addToFolder": "Add to folder",
+      "namePlaceholder": "Folder name...",
+      "new": "New folder...",
+      "none": "No folder"
+    },
+    "loadError": {
+      "body": "An error occurred loading this note.",
+      "title": "Couldn't load note."
+    },
+    "loading": "Loading meeting…",
+    "noNotesYet": {
+      "body": "This recording was transcribed but notes were not generated automatically. Use the <strong>Generate notes</strong> button below to create them, or copy or save the transcript from the actions above.",
+      "title": "No notes yet"
+    },
+    "noSummary": "No summary available for this meeting.",
+    "notFound": {
+      "body": "This recording may have been deleted. Pick another from the sidebar.",
+      "title": "Note not found."
+    },
+    "notes": {
+      "placeholder": "Write notes…"
+    },
+    "participantCount_one": "{{count}} person",
+    "participantCount_other": "{{count}} people",
+    "placeholderTitle": {
+      "meeting": "Meeting",
+      "note": "Note"
+    },
+    "processing": {
+      "body": "Your transcript is captured — refining it and generating notes in the background. You can read and edit <strong>My notes</strong> now.",
+      "title": "Finishing up"
+    },
+    "report": {
+      "deleteBody": "This permanently deletes this generated report. The transcript and other reports are not affected.",
+      "deleteLabel": "Delete report {{name}}",
+      "deleteTitle": "Delete report \"{{name}}\"?"
+    },
+    "reprocessFailed": {
+      "body": "That didn’t work this time — give it another go. If it keeps failing on a long meeting, switch to a smaller model in Settings.",
+      "title": "Notes weren’t generated"
+    },
+    "retranscribeDialog": {
+      "body": "This re-runs transcription with your current transcription settings, replacing the transcript and regenerating the summary.",
+      "confirm": "Re-transcribe",
+      "title": "Re-transcribe this recording?"
+    },
+    "section": {
+      "actionItems": "Action items",
+      "keyPoints": "Key points",
+      "keyTopics": "Key topics",
+      "participants": "Participants",
+      "summary": "Summary"
+    },
+    "share": {
+      "failed": "Share failed: {{error}}",
+      "shareWith": "Share with {{org}}",
+      "sharing": "Sharing…",
+      "unshareFrom": "Unshare from {{org}}"
+    },
+    "stream": {
+      "analysing": "Analysing transcript",
+      "generatingNotes": "Generating notes",
+      "summarisingPart": "Summarising part {{step}}/{{total}}"
+    },
+    "transcriptionFailed": {
+      "body": "No notes could be generated for this recording. Your audio was preserved (not deleted), so nothing was lost.",
+      "details": "Details: {{error}}",
+      "title": "Transcription failed"
+    },
+    "unshareDialog": {
+      "body": "The shared copy will be removed from your organisation. Your local note stays on this device. You can re-share at any time.",
+      "confirm": "Unshare",
+      "pending": "Unsharing…",
+      "title": "Unshare from {{org}}?",
+      "yourOrg": "your org"
+    },
+    "view": {
+      "chooseViewOrTemplate": "Choose view or template",
+      "generateFromTemplate": "Generate from template",
+      "generating": "Generating…",
+      "myNotes": "My notes",
+      "summary": "Summary",
+      "tablistLabel": "Note view"
+    }
+  },
+  "menu": {
+    "about": "About {{app}}",
+    "close": "Close Window",
+    "copy": "Copy",
+    "cut": "Cut",
+    "delete": "Delete",
+    "edit": "Edit",
+    "file": "&File",
+    "fileMac": "File",
+    "forceReload": "Force Reload",
+    "front": "Bring All to Front",
+    "help": "Help",
+    "hide": "Hide {{app}}",
+    "hideOthers": "Hide Others",
+    "learnMore": "Learn More",
+    "minimize": "Minimize",
+    "paste": "Paste",
+    "pasteAndMatchStyle": "Paste and Match Style",
+    "quit": "Quit {{app}}",
+    "redo": "Redo",
+    "reload": "Reload",
+    "reportBug": "Report a Bug",
+    "resetZoom": "Actual Size",
+    "selectAll": "Select All",
+    "services": "Services",
+    "settings": "Settings…",
+    "speech": "Speech",
+    "startSpeaking": "Start Speaking",
+    "stopSpeaking": "Stop Speaking",
+    "substitutions": "Substitutions",
+    "toggleDevTools": "Toggle Developer Tools",
+    "toggleFullScreen": "Toggle Full Screen",
+    "undo": "Undo",
+    "unhide": "Show All",
+    "view": "View",
+    "window": "Window",
+    "zoom": "Zoom",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out"
+  },
+  "nav": {
+    "allNotes": "All notes",
+    "chat": "Chat",
+    "folders": "Folders",
+    "help": "Help",
+    "home": "Home",
+    "search": "Search",
+    "searchNotes": "Search notes",
+    "settings": "Settings",
+    "sharedAcross": "Shared across {{org}}",
+    "sharedNotes": "Shared notes"
+  },
+  "notification": {
+    "meetingDetected": {
+      "action": "Take Notes",
+      "title": "Meeting detected"
+    },
+    "meetingEnded": {
+      "action": "Summarise",
+      "title": "Meeting ended"
+    },
+    "micOnly": {
+      "body": "System audio could not be captured. Check Steno’s Screen & System Audio Recording access in System Settings.",
+      "title": "Recording mic-only"
+    },
+    "noteReady": {
+      "bodyDone": "Your note has finished processing",
+      "bodyFailedTitled": "Steno couldn’t process \"{{title}}\".",
+      "bodyFailedUntitled": "Steno couldn’t process your note.",
+      "bodyPreserved": "Your recording was preserved — open the note for details.",
+      "title": "Note ready",
+      "titleProcessingFailed": "Processing failed",
+      "titleTranscriptionFailed": "Transcription failed"
+    },
+    "preMeeting": {
+      "titleFallback": "Meeting starting"
+    },
+    "recordingFailed": {
+      "body": "Recording couldn't start.",
+      "bodyWithReason": "Recording couldn’t start: {{reason}}",
+      "title": "Steno"
+    },
+    "shortcuts": {
+      "alreadyRecording": "Recording already in progress",
+      "invalidUrl": "Invalid shortcut URL",
+      "title": "Steno Shortcuts"
+    },
+    "silenceAutoStop": {
+      "bodyNamed_one": "{{sessionName}} — {{count}} minute of silence",
+      "bodyNamed_other": "{{sessionName}} — {{count}} minutes of silence",
+      "body_one": "{{count}} minute of silence — your note is being processed.",
+      "body_other": "{{count}} minutes of silence — your note is being processed.",
+      "title": "Recording stopped"
+    },
+    "sleepPaused": {
+      "action": "Resume",
+      "body": "Paused while your computer was asleep. Resume to keep capturing.",
+      "title": "Recording paused"
+    }
+  },
+  "org": {
+    "connectDescription": "Sign in to your Steno enterprise adapter to see notes shared by your colleagues and chat across them.",
+    "connectTitle": "Connect your organisation",
+    "emptyState": "No shared notes yet — share one of your meetings with <org>{{org}}</org> to see it here.",
+    "fromS3": "from S3",
+    "fromS3Title": "Body lives in your org's S3 bucket; the adapter fetched it server-side. Never written to this device.",
+    "loadingNotes": "Loading notes…",
+    "noBody": "(no body)",
+    "noteActions": "Note actions",
+    "noteCount_one": "{{count}} note",
+    "noteCount_other": "{{count}} notes",
+    "openSettings": "Open Settings → Organisation",
+    "orgLabel": "org",
+    "sharedBy": "shared by {{email}}",
+    "sharedNotes": "Shared notes",
+    "signIn": "Sign in to org",
+    "signInHint": "Sign in to share notes with your organisation",
+    "signOut": "Sign out",
+    "todayAt": "today, {{time}}",
+    "unshare": "Unshare",
+    "you": "you",
+    "yourOrg": "your org"
+  },
+  "palette": {
+    "hintClose": "esc close",
+    "hintNavigate": "↑↓ navigate",
+    "hintOpen": "↵ open",
+    "noNotes": "No notes yet",
+    "noNotesMatch": "No notes match “{{query}}”",
+    "noSettings": "No settings",
+    "noSettingsMatch": "No settings match “{{query}}”",
+    "results": "Search results",
+    "searchNotes": "Search notes",
+    "searchNotesPlaceholder": "Search notes…",
+    "searchSettings": "Search settings",
+    "searchSettingsPlaceholder": "Search settings…",
+    "settings": {
+      "about": {
+        "sub": "Version, release notes, check for updates",
+        "title": "About"
+      },
+      "aiProvider": {
+        "sub": "Local, private server, cloud, or organisation",
+        "title": "AI provider"
+      },
+      "analytics": {
+        "sub": "Opt in or out",
+        "title": "Anonymous usage analytics"
+      },
+      "autoDetect": {
+        "sub": "Notify when another app uses the microphone",
+        "title": "Auto-detected meetings"
+      },
+      "autoNotes": {
+        "sub": "Summarise after transcription",
+        "title": "Generate notes automatically"
+      },
+      "calendar": {
+        "sub": "Google, Outlook",
+        "title": "Connect calendar"
+      },
+      "clearRecordingState": {
+        "sub": "Reset a stuck recording",
+        "title": "Clear recording state"
+      },
+      "developer": {
+        "sub": "Diagnostics and logs",
+        "title": "Developer"
+      },
+      "discord": {
+        "sub": "Join the community, ask questions, share feedback",
+        "title": "Discord"
+      },
+      "dockIcon": {
+        "sub": "Menu bar / tray icon only",
+        "title": "Hide dock icon"
+      },
+      "language": {
+        "sub": "Transcription and summary language",
+        "title": "Language"
+      },
+      "launch": {
+        "sub": "Start Steno automatically",
+        "title": "Launch on login"
+      },
+      "menuBar": {
+        "sub": "Quick-access icon in the menu bar or system tray",
+        "title": "Show in menu bar"
+      },
+      "microphone": {
+        "sub": "Input device",
+        "title": "Microphone"
+      },
+      "name": {
+        "sub": "In-app greeting",
+        "title": "Your name"
+      },
+      "notifications": {
+        "sub": "Desktop notifications when notes are ready",
+        "title": "Post meeting notifications"
+      },
+      "organisation": {
+        "sub": "Sign in and back up notes to your org",
+        "title": "Organisation"
+      },
+      "saveRecordings": {
+        "sub": "Keep the audio files after transcription",
+        "title": "Save recordings"
+      },
+      "scheduled": {
+        "sub": "Upcoming calendar events",
+        "title": "Scheduled meetings"
+      },
+      "setupWizard": {
+        "sub": "Re-run first-time setup",
+        "title": "Setup wizard"
+      },
+      "silence": {
+        "sub": "End a recording when it goes quiet",
+        "title": "Auto-stop on silence"
+      },
+      "storage": {
+        "sub": "Where notes and recordings are saved",
+        "title": "Storage location"
+      },
+      "systemAudio": {
+        "sub": "Capture other participants",
+        "title": "Record system audio"
+      },
+      "systemTray": {
+        "sub": "Quick-access icon in the menu bar or system tray",
+        "title": "Show in system tray"
+      },
+      "templates": {
+        "sub": "Custom note formats",
+        "title": "Templates"
+      },
+      "theme": {
+        "sub": "Light, dark, or system theme",
+        "title": "Appearance"
+      },
+      "transcriptionModel": {
+        "sub": "Parakeet or Whisper",
+        "title": "Transcription model"
+      }
+    },
+    "untitledMeeting": "Untitled Meeting"
+  },
+  "privacy": {
+    "acknowledge": "Got it",
+    "description": "To help find and fix failures, Steno sends anonymous usage data — never your recordings, transcripts, or notes. Steno also starts automatically when you log in. Both are on by default and you can change either one anytime in Settings.",
+    "launch": {
+      "description": "Start Steno automatically when you log in (hidden in the menu bar).",
+      "label": "Launch on login"
+    },
+    "telemetry": {
+      "description": "Crash and usage signals only. Meeting content is never sent.",
+      "label": "Anonymous usage data"
+    },
+    "title": "A quick note on privacy"
+  },
+  "processing": {
+    "backToHome": "Back to home",
+    "chip": "Processing",
+    "duration": {
+      "hoursMinutes_one": "{{hours}} h {{count}} min",
+      "hoursMinutes_other": "{{hours}} h {{count}} min",
+      "hours_one": "{{count}} h",
+      "hours_other": "{{count}} h",
+      "minutes_one": "{{count}} min",
+      "minutes_other": "{{count}} min",
+      "seconds_one": "{{count}} sec",
+      "seconds_other": "{{count}} sec"
+    },
+    "error": {
+      "canRetry": "Try again to re-run processing on this recording.",
+      "cannotRetry": "This recording couldn’t be recovered automatically. Try importing the audio file again from Home.",
+      "restartFailed": "Couldn’t restart processing. Please try again.",
+      "retrying": "Retrying…",
+      "tryAgain": "Try again"
+    },
+    "home": "Home",
+    "myNotes": "My notes",
+    "progress": {
+      "merging": "Merging summaries…",
+      "part": "Summarizing part {{step}} of {{total}}…"
+    },
+    "stage": {
+      "error": "Couldn’t process this recording.",
+      "finalizing": "Almost done…",
+      "summarizing": "Generating notes",
+      "transcribing": "Analyzing transcript"
+    },
+    "untitledNote": "Note"
+  },
+  "quit": {
+    "processing": {
+      "body_one": "{{count}} recording is still being processed. Quitting will cancel processing.",
+      "body_other": "{{count}} recordings are still being processed. Quitting will cancel processing.",
+      "confirm": "Quit anyway",
+      "title": "Processing in progress"
+    },
+    "recording": {
+      "body": "Quitting will stop and save the current recording.",
+      "confirm": "Stop & quit",
+      "title": "Recording in progress"
+    }
+  },
+  "recording": {
+    "addToFolder": "Add to folder",
+    "backToHome": "Back to home",
+    "home": "Home",
+    "myNotes": "My notes",
+    "notesPlaceholder": "Type anything you want to capture — decisions, questions, follow-ups. Steno handles the transcript.",
+    "startedAt": "Started {{time}}",
+    "titlePlaceholder": "New note"
+  },
+  "settings": {
+    "about": {
+      "checkFailed": "Check failed",
+      "checkForUpdates": "Check for Updates",
+      "checking": "Checking for Updates",
+      "discord": {
+        "description": "Join the community, ask questions, share feedback"
+      },
+      "downloadFailed": "Update download failed: {{error}}",
+      "downloading": "Downloading update…",
+      "github": {
+        "description": "Steno is open source — browse the code, file issues"
+      },
+      "join": "Join",
+      "privacy": "Privacy Policy",
+      "releaseNotes": {
+        "description": "See what's new",
+        "label": "Release notes"
+      },
+      "restartToUpdate": "Restart to Update (v{{version}})",
+      "terms": "Terms of Service",
+      "upToDate": "You're on the latest version",
+      "version": "Version {{version}}",
+      "versionUpdateAvailable": "Version {{version}} — Update available (v{{latest}})",
+      "versionUpdateBlocked": "Version {{version}} — v{{latest}} requires a newer version of macOS",
+      "view": "View",
+      "viewRelease": "View release"
+    },
+    "advanced": {
+      "anonymousId": {
+        "description": "Identifies this install in analytics. Useful when reporting bugs.",
+        "label": "Anonymous ID"
+      },
+      "clearState": {
+        "clear": "Clear",
+        "clearing": "Clearing…",
+        "description": "Fix stuck recordings or processing",
+        "label": "Clear recording state"
+      },
+      "copied": "Copied",
+      "copy": "Copy to clipboard",
+      "setupWizard": {
+        "description": "Reinstall dependencies or fix configuration",
+        "label": "Setup wizard",
+        "run": "Run"
+      },
+      "storage": {
+        "choose": "Choose…",
+        "description": "Where your notes and recordings are saved",
+        "label": "Storage location",
+        "reset": "Reset"
+      },
+      "telemetry": {
+        "description": "Help improve Steno — no meeting content is ever sent",
+        "label": "Anonymous usage analytics"
+      }
+    },
+    "ai": {
+      "adapter": {
+        "signedIn": "Summaries, titles, and chat are routed through your organisation's adapter. The model and API key are configured by your organisation — no setup needed here.",
+        "signedOut": "You are not signed in to an organisation. Sign in under <strong>Settings > Organisation</strong>, or switch this provider back to Local / Private Server / Cloud API."
+      },
+      "autoSummarize": {
+        "description": "Summarise each recording right after transcription. Turn off to stop at a transcript and generate notes on demand.",
+        "label": "Generate notes automatically"
+      },
+      "cloud": {
+        "apiKeyLabel": "API key",
+        "apiKeyPlaceholderBedrock": "Bedrock API key (bearer token)",
+        "apiUrlLabel": "API base URL",
+        "custom": "Custom (OpenAI-compatible)",
+        "customOption": "Custom…",
+        "disclaimer": "Transcripts will be sent to a third-party cloud service. No audio files leave your device.",
+        "inferenceProfileLabel": "Inference profile (optional)",
+        "modelLabel": "Model",
+        "modelsAvailable_one": "{{count}} model available",
+        "modelsAvailable_other": "{{count}} models available",
+        "pickFromList": "Pick from list",
+        "regionLabel": "AWS region",
+        "selectModelPlaceholder": "Select a model",
+        "serviceLabel": "Service",
+        "testToLoadModels": "Test connection to load the list of available models."
+      },
+      "connection": {
+        "connected": "Connected",
+        "failed": "Failed",
+        "test": "Test connection",
+        "testing": "Testing…"
+      },
+      "engine": {
+        "parakeet": "Fastest — English + European languages",
+        "whisper": "Most accurate — 99 languages"
+      },
+      "keepRecordings": {
+        "description": "Save audio files to your storage location (see Advanced) after processing. Uses 1–10 MB per minute depending on capture mode.",
+        "label": "Save recordings"
+      },
+      "language": {
+        "description": "Auto-detects by default. Pick one to pin it.",
+        "label": "Language"
+      },
+      "model": {
+        "description": "Which speech-to-text model transcribes your recordings.",
+        "label": "Model",
+        "loadError": "Could not load models."
+      },
+      "models": {
+        "deleteDescriptionBoth": "Delete {{name}} and its faster build ({{size}}) to free up disk space? You can re-download them anytime.",
+        "deleteDescriptionOne": "Delete {{name}} ({{size}}) to free up disk space? You can re-download it anytime.",
+        "deleteFasterBuildDescription": "{{name}} ({{size}}) is no longer needed now that the faster build is active. Delete it to free up disk space?",
+        "deleteTitle": "Delete model?",
+        "hideDeprecated": "Hide deprecated models",
+        "loading": "Loading models…",
+        "none": "No models available.",
+        "ollamaUnreachable": "Could not reach Ollama. Run the setup wizard.",
+        "qualityNote": "{{value}} quality",
+        "showDeprecated": "Show deprecated models",
+        "speedNote": "{{value}} speed",
+        "unknownSize": "unknown size"
+      },
+      "provider": {
+        "adapter": "Organisation",
+        "adapterDescription": "Uses your organisation's AI key. No setup needed.",
+        "adapterDisabledDescription": "Sign in to your organisation to enable this option.",
+        "cloud": "Cloud API",
+        "cloudDescription": "Use OpenAI, Anthropic, or a compatible API. Best quality, requires a paid key.",
+        "description": "Where models run. Local keeps all data on your device.",
+        "label": "AI provider",
+        "local": "Local (on-device)",
+        "localDescription": "Runs entirely on your device. Private and free, no internet required.",
+        "orgManaged": "Managed by your organisation while you're signed in. Sign out under Settings > Organisation to change it.",
+        "remote": "Private Server",
+        "remoteDescription": "Connect to your own Ollama server. Data stays within your network."
+      },
+      "remote": {
+        "urlLabel": "Ollama server URL"
+      },
+      "summarisation": {
+        "heading": "Summarisation & Chat",
+        "intro": "Turns your transcript into notes and answers your questions. This is the one step that can run locally or in the cloud — if you choose a cloud provider, only the text transcript is sent, never audio."
+      },
+      "summaryModel": {
+        "description": "Which model generates your summaries, titles, and chat answers.",
+        "label": "Model"
+      },
+      "transcription": {
+        "heading": "Transcription",
+        "intro": "Speech-to-text always runs on your device — your audio never leaves your computer."
+      }
+    },
+    "developer": {
+      "clear": "Clear",
+      "console": {
+        "description": "Real-time log output from backend processes.",
+        "label": "Debug console"
+      },
+      "copy": "Copy",
+      "placeholder": "Steno debug console\nSession started — waiting for activity…\n",
+      "save": "Save",
+      "saveFailed": "Couldn't save diagnostics: {{error}}",
+      "unknownError": "unknown error"
+    },
+    "general": {
+      "appearance": {
+        "dark": "Dark",
+        "description": "Choose light, dark, or match your system",
+        "label": "Appearance",
+        "light": "Light",
+        "system": "System"
+      },
+      "autoInstall": {
+        "description": "When the app is idle and not recording, download and install updates in the background, then restart. You'll still be notified when an update is available.",
+        "label": "Install updates automatically"
+      },
+      "bothIconsHidden": "Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.",
+      "calendar": {
+        "connected": "Connected to {{account}}",
+        "description": "Show upcoming meetings on the home screen",
+        "disconnect": "Disconnect",
+        "heading": "Calendar",
+        "label": "Connect calendar"
+      },
+      "dockIcon": {
+        "description": "Run as menu bar app only",
+        "label": "Hide dock icon"
+      },
+      "launchOnLogin": {
+        "description": "Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually.",
+        "label": "Launch on login"
+      },
+      "microphone": {
+        "description": "Which input device Steno records from. Pins your choice so the OS switching its default (e.g. AirPods connecting) doesn't silently change what gets recorded. Applies the next time you start a recording.",
+        "label": "Microphone",
+        "numbered": "Microphone {{index}}",
+        "systemDefault": "System Default",
+        "unknownDevice": "Unknown device (disconnected)"
+      },
+      "name": {
+        "description": "First name only — used for in-app greetings. Stored locally.",
+        "label": "Your name",
+        "placeholder": "Your name"
+      },
+      "notifications": {
+        "autoDetected": {
+          "description": "Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record.",
+          "label": "Auto-detected meetings",
+          "unsupported": "Watch for other apps using your microphone and notify you when a call starts. Requires macOS 14 (Sonoma) or later.",
+          "unsupportedVersion": "Watch for other apps using your microphone and notify you when a call starts. Requires macOS 14 (Sonoma) or later, you're on {{version}}."
+        },
+        "heading": "Meeting notifications",
+        "post": {
+          "description": "Notify when your notes are ready or a recording auto-stops from silence.",
+          "label": "Post meeting notifications"
+        },
+        "scheduled": {
+          "description": "Show a notification before meetings start, based on your calendar.",
+          "label": "Scheduled meetings"
+        }
+      },
+      "oauth": {
+        "connectingTitle": "Connecting to {{provider}}",
+        "errorFallback": "The authorization flow did not complete.",
+        "errorTitle": "Couldn't connect to {{provider}}",
+        "pendingDescription": "Complete the authorization in your browser. This dialog will close automatically once access is granted.",
+        "tryAgain": "Try again",
+        "waiting": "Waiting for authorization…"
+      },
+      "recording": {
+        "heading": "Recording"
+      },
+      "silence": {
+        "description": "End the recording and start processing it once both the mic and system audio have been silent for the chosen duration. Useful when you forget to stop after a meeting ends.",
+        "label": "Auto-stop on silence",
+        "minutes_one": "{{count}} minute",
+        "minutes_other": "{{count}} minutes"
+      },
+      "system": {
+        "heading": "System"
+      },
+      "systemAudio": {
+        "description": "Capture both sides of a call. Turn off to record your mic only.",
+        "label": "Record system audio",
+        "unknownVersion": "an older version",
+        "unsupported": "Capture both sides of a call (requires macOS 14.4+, you're on {{version}}). Mic-only recording still works."
+      },
+      "trayIcon": {
+        "descriptionMac": "Show a Steno icon in the menu bar for quick access.",
+        "descriptionWindows": "Show a Steno icon in the system tray for quick access.",
+        "labelMac": "Show in menu bar",
+        "labelWindows": "Show in system tray"
+      }
+    },
+    "language": {
+      "de": "Deutsch",
+      "description": "The language Steno's own interface is shown in. This does not change the language of your notes or transcripts.",
+      "en": "English",
+      "label": "Interface language",
+      "partial": "partly translated",
+      "system": "System default"
+    },
+    "languages": {
+      "ar": "Arabic",
+      "auto": "Auto (detect)",
+      "autoMulti": "Multi-language",
+      "de": "German",
+      "en": "English",
+      "es": "Spanish",
+      "fr": "French",
+      "hi": "Hindi",
+      "hint": {
+        "auto": "Auto-detect per recording (European languages)",
+        "de": "Transcribe and summarise in German",
+        "en": "Best accuracy when meetings are always in English",
+        "es": "Transcribe and summarise in Spanish",
+        "fr": "Transcribe and summarise in French",
+        "nl": "Transcribe and summarise in Dutch",
+        "pt": "Transcribe and summarise in Portuguese"
+      },
+      "ja": "Japanese",
+      "ko": "Korean",
+      "nl": "Dutch",
+      "pt": "Portuguese",
+      "zh-Hans": "Chinese (Simplified)",
+      "zh-Hant": "Chinese (Traditional)"
+    },
+    "model": {
+      "default": "Default",
+      "deleteAria": "Delete model",
+      "deleteTitle": "Delete this model to free up disk space",
+      "deprecated": "Deprecated",
+      "downloading": "Downloading",
+      "fasterBuildAvailable": "Faster build available",
+      "fasterBuildBlocked": "Finish the current switch first",
+      "fasterBuildRetry": "Retry: switch to faster build",
+      "fasterBuildSwitch": "Switch to faster build",
+      "memoryWarningBadge": "May exceed memory",
+      "memoryWarningTitle": "This model may exceed your Mac's available memory and could run slowly or fail.",
+      "mlxBadge": "MLX model",
+      "mlxTitleDirect": "Downloaded directly as the MLX build ({{tag}}) -- {{name}} was never pulled",
+      "mlxTitleGguf": "Running the MLX build ({{tag}}) instead of {{name}}",
+      "part": "Part {{part}}",
+      "select": "Select",
+      "selected": "Selected",
+      "verifying": "Verifying…"
+    },
+    "nav": {
+      "about": "About",
+      "advanced": "Advanced",
+      "ai": "AI",
+      "back": "Back",
+      "developer": "Developer",
+      "general": "Preferences",
+      "groupSystem": "System",
+      "groupWorkspace": "Workspace",
+      "organisation": "Organisation",
+      "sections": "Settings sections",
+      "templates": "Templates",
+      "title": "Settings"
+    },
+    "organisation": {
+      "adapterUrl": "Adapter URL",
+      "autoBackup": {
+        "aria": "Auto-back up new notes to org",
+        "description": "Push every new note to your org's S3 once summarisation finishes. You can still unshare individual notes from the Shared notes view.",
+        "label": "Auto-back up new notes"
+      },
+      "email": "Email",
+      "intro": "Connect to Steno Enterprise for your organisation.",
+      "or": "or",
+      "org": "org",
+      "password": "Password",
+      "signInWithGoogle": "Sign in with Google",
+      "signInWithPassword": "Sign in with password",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {{name}}",
+      "signingIn": "Signing in…",
+      "ssoHint": "Single sign-on via your organisation's Google Workspace.",
+      "waitingForBrowser": "Waiting for browser…"
+    },
+    "templates": {
+      "backAria": "Back to templates",
+      "builtin": "Built-in",
+      "default": "Default",
+      "defaultTitle": "Used automatically for new meetings unless you pick a different one",
+      "deleteAria": "Delete {{name}}",
+      "deleteDescription": "This permanently deletes the template. Reports already generated from it are not affected.",
+      "deleteFailed": "Failed to delete template.",
+      "deleteTitle": "Delete template \"{{name}}\"?",
+      "editTitle": "Edit template",
+      "editorSubtitle": "Configure how your meetings should be summarized",
+      "intro": "Templates are the instructions your AI follows when turning a transcript into a summary —",
+      "language": "Language",
+      "learnMore": "learn more",
+      "locked": "Locked",
+      "lockedTitle": "Built-in template — protected from editing and deletion",
+      "makeDefault": "Make Default",
+      "markdownSupported": "Markdown supported",
+      "name": "Name",
+      "namePlaceholder": "e.g. Weekly Sync, Executive Summary...",
+      "new": "New Template",
+      "newDescription": "Create custom prompts to tailor how your meetings are summarised.",
+      "newTitle": "New template",
+      "noPrompt": "No prompt provided.",
+      "promptPlaceholder": "Write a prompt instructing the AI how to structure the meeting summary...",
+      "reset": "Reset",
+      "resetTitle": "Discard your edits and revert to Steno's shipped version of this template",
+      "save": "Save Template",
+      "saveFailed": "Save failed",
+      "saving": "Saving…",
+      "seeded": {
+        "shareableSummary": "Shareable summary"
+      },
+      "systemPrompt": "System Prompt",
+      "usesStructuredFormat": "Uses structured format"
+    }
+  },
+  "setup": {
+    "actions": {
+      "begin": "Begin setup",
+      "continueToApp": "Continue to app",
+      "needKeyHint": "Enter your API key to continue.",
+      "needKeyTitle": "Enter your cloud API key first",
+      "settingUp": "Setting up..."
+    },
+    "badge": {
+      "done": "Done",
+      "failed": "Failed",
+      "running": "Running",
+      "waiting": "Waiting"
+    },
+    "chooser": {
+      "cloud": "Cloud",
+      "cloudHint": "Fast. Higher quality. Bring your own API key.",
+      "local": "Local",
+      "localHint": "Private. Free. ~2 GB download.",
+      "title": "How should Steno summarize meetings?"
+    },
+    "cloud": {
+      "apiKeyHint": "Stored locally on this device. Never synced or sent anywhere except the provider you select.",
+      "apiKeyLabel": "API key",
+      "apiUrlLabel": "API base URL",
+      "profileLabel": "Inference profile (optional)",
+      "providerCustom": "Custom (OpenAI-compatible)",
+      "providerLabel": "Provider",
+      "regionLabel": "AWS region"
+    },
+    "debug": {
+      "empty": "Steno Setup\nCommands and output will appear here...\n",
+      "toggle": "Debug console"
+    },
+    "launch": {
+      "description": "Start Steno automatically when you log in (hidden in the menu bar). You can change this any time in Settings.",
+      "title": "Launch on login"
+    },
+    "name": {
+      "hint": "First name only — used for in-app greetings. Stored locally.",
+      "label": "What should we call you?",
+      "placeholder": "Your name"
+    },
+    "progress": {
+      "ollamaAriaLabel": "Summarization model download progress",
+      "ollamaFallback": "Downloading model...",
+      "transcriptionLabel": "Downloading and preparing model..."
+    },
+    "reportIssue": "Report an issue",
+    "status": {
+      "checkingPermission": "Checking permission...",
+      "checkingTranscriptionModel": "Checking transcription model...",
+      "connectedTo": "Connected to {{provider}}",
+      "downloadingModel": "Downloading model (~2 GB)...",
+      "downloadingParakeet": "Downloading Parakeet TDT v3 ({{size}})...",
+      "modelInstalled": "Model installed",
+      "permissionDeniedMac": "Permission denied. Grant it in System Settings.",
+      "permissionDeniedWindows": "Permission denied. Grant it in Settings > Privacy & security > Microphone.",
+      "permissionGranted": "Permission granted",
+      "requestingPermission": "Requesting permission...",
+      "savingCloudCredentials": "Saving cloud credentials...",
+      "stepFailed": "Setup step failed",
+      "testingConnection": "Testing connection...",
+      "transcriptionModelReady": "Transcription model ready"
+    },
+    "steps": {
+      "microphone": {
+        "description": "Required for recording meetings",
+        "title": "Microphone Access"
+      },
+      "summarization": {
+        "descriptionCloud": "Cloud API — fast, no download",
+        "descriptionLocal": "Local model (~2 GB) — private, runs on your device",
+        "title": "Summarization Engine"
+      },
+      "transcription": {
+        "description": "Converts speech to text locally",
+        "title": "Transcription Model"
+      }
+    },
+    "subtitle": "We'll help you set up everything needed for meeting intelligence.",
+    "telemetry": {
+      "description": "Help improve Steno — meeting content is never sent. You can change this any time in Settings → Advanced.",
+      "title": "Anonymous usage analytics"
+    },
+    "title": "Welcome to Steno"
+  },
+  "toast": {
+    "notification": {
+      "close": "Close",
+      "join": "Join & take notes"
+    },
+    "undoDelete": {
+      "dismiss": "Dismiss and delete permanently",
+      "title": "Note deleted",
+      "undo": "Undo"
+    },
+    "update": {
+      "dismiss": "Dismiss update notification",
+      "ready": "Update v{{version}} ready",
+      "restart": "Restart"
+    }
+  },
+  "toolbar": {
+    "hideSidebar": "Hide sidebar",
+    "importAudio": "Import audio file…",
+    "importAudioBlocked": "Stop the current recording to import a file.",
+    "importAudioHint": "Transcribe and summarise an existing recording. It will appear in the list while it processes.",
+    "newChat": "New chat",
+    "newNote": "New note",
+    "openRecording": "Open recording in progress",
+    "paused": "Paused",
+    "recordSystemAudio": "Record system audio",
+    "recordSystemAudioHint": "Capture both sides of calls. Turn off to record your mic only.",
+    "recording": "Recording",
+    "recordingOptions": "Recording options",
+    "recordingOptionsHint": "Deep links and the tray menu also start and stop recording.",
+    "showSidebar": "Show sidebar"
+  },
+  "transcript": {
+    "empty": "No transcript available.",
+    "loading": "Loading…",
+    "searchPlaceholder": "Search transcript"
+  },
+  "tray": {
+    "hide": "Hide Steno",
+    "open": "Open Steno",
+    "quit": "Quit Steno",
+    "reportBug": "Report a Bug",
+    "settings": "Settings",
+    "startRecording": "Start Recording",
+    "stopRecording": "Stop Recording",
+    "tooltip": "Steno",
+    "tooltipRecording": "Steno - Recording",
+    "version": "Steno v{{version}}"
+  }
+}

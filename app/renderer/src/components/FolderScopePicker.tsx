@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, Folder as FolderIcon, Globe, Inbox } from 'lucide-react';
 import {
   Popover,
@@ -27,6 +28,7 @@ interface FolderScopePickerProps {
  * passes it to startGlobalStream.
  */
 export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
+  const { t } = useTranslation();
   const folders = useFolders();
   const orgSession = useOrgSession();
   const orgSignedIn = orgSession.data?.signedIn ?? false;
@@ -57,15 +59,15 @@ export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
   }, [value, folders.data, folder, orgSessionSettled, orgSignedIn, onChange]);
 
   const isOrg = value === ORG_SHARED_SCOPE;
-  const label = isOrg ? 'Shared notes' : folder ? folder.name : 'All notes';
+  const label = isOrg ? t('nav.sharedNotes') : folder ? folder.name : t('nav.allNotes');
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Scope: ${label}`}
-          title={`Scope: ${label}`}
+          aria-label={t('chat.scopeAria', { scope: label })}
+          title={t('chat.scopeAria', { scope: label })}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
           style={{ color: 'var(--fg-2)' }}
         >
@@ -82,7 +84,7 @@ export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[220px] p-1">
         <div className="px-2 pb-1 pt-0.5 text-[11px] font-medium" style={{ color: 'var(--fg-muted)' }}>
-          Ask across…
+          {t('chat.askAcross')}
         </div>
         <button
           type="button"
@@ -97,7 +99,7 @@ export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
           }}
         >
           <Inbox className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
-          All notes
+          {t('nav.allNotes')}
         </button>
         {orgSignedIn && (
           <button
@@ -111,10 +113,12 @@ export function FolderScopePicker({ value, onChange }: FolderScopePickerProps) {
               color: 'var(--fg-1)',
               background: isOrg ? 'var(--surface-active)' : undefined,
             }}
-            title={`Cross-note chat against ${orgSession.data?.orgId ?? 'your org'}'s shared notes`}
+            title={t('chat.orgScopeHint', {
+              org: orgSession.data?.orgId ?? t('org.yourOrg'),
+            })}
           >
             <Globe className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
-            <span className="truncate">Shared notes</span>
+            <span className="truncate">{t('nav.sharedNotes')}</span>
           </button>
         )}
         {(folders.data ?? []).length > 0 && (

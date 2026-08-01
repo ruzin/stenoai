@@ -121,6 +121,98 @@ class ConfigLanguageTests(unittest.TestCase):
             self.assertEqual(config.get_whisper_language(), "de")
 
 
+class ConfigUiLanguageTests(unittest.TestCase):
+    """ui_language is the interface (chrome) language, separate from the
+    "language" setting that drives transcription and summaries (#337)."""
+
+    def test_fresh_install_follows_the_system_locale(self):
+        # No config.json at load: nothing to preserve, so follow the OS.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertEqual(config.get_ui_language(), "system")
+
+    def test_existing_config_without_key_migrates_to_english(self):
+        # The load-bearing case: an install that predates ui_language has an
+        # English interface today. It must NOT become "system", which would
+        # flip a German-OS user's app to German without them asking.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": Config.DEFAULT_MODEL}))
+
+            config = Config(config_path=path)
+
+            self.assertEqual(config.get_ui_language(), "en")
+            # Persisted so the migration doesn't re-run and can't be
+            # re-decided by a later version.
+            self.assertEqual(json.loads(path.read_text())["ui_language"], "en")
+            self.assertEqual(Config(config_path=path).get_ui_language(), "en")
+
+    def test_explicit_system_choice_survives_migration(self):
+        # A user who deliberately picked "system" keeps it; the migration
+        # only fills in values outside VALID_UI_LANGUAGES.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"ui_language": "system"}))
+
+            config = Config(config_path=path)
+
+            self.assertEqual(config.get_ui_language(), "system")
+            self.assertEqual(json.loads(path.read_text())["ui_language"], "system")
+
+    def test_set_ui_language_accepts_every_supported_value(self):
+        for choice in Config.VALID_UI_LANGUAGES:
+            with self.subTest(choice=choice):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    path = Path(tmp_dir) / "config.json"
+                    config = Config(config_path=path)
+
+                    self.assertTrue(config.set_ui_language(choice))
+                    self.assertEqual(config.get_ui_language(), choice)
+                    self.assertEqual(json.loads(path.read_text())["ui_language"], choice)
+                    self.assertEqual(Config(config_path=path).get_ui_language(), choice)
+
+    def test_set_ui_language_rejects_unknown_value(self):
+        # An unsupported code must be refused outright, not stored and then
+        # left for the renderer to fall over on.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_ui_language("de"))
+
+            self.assertFalse(config.set_ui_language("fr"))
+
+            self.assertEqual(config.get_ui_language(), "de")
+            self.assertEqual(json.loads(path.read_text())["ui_language"], "de")
+
+    def test_set_ui_language_rejects_transcription_language_codes(self):
+        # get_language()'s vocabulary is much wider ("auto", "nl", "zh-Hans");
+        # none of it leaks into the UI setting.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            for code in ("auto", "nl", "zh-Hans"):
+                with self.subTest(code=code):
+                    self.assertFalse(config.set_ui_language(code))
+            self.assertEqual(config.get_ui_language(), "system")
+
+    def test_corrupt_config_never_persisted_by_migration(self):
+        # A torn or corrupt file stays byte-identical on disk so it remains
+        # recoverable, and the migration must not write defaults over it.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text("{not json")
+
+            config = Config(config_path=path)
+
+            # "en", not the in-memory "system" default: the file EXISTS, so this
+            # is an existing install that has been showing an English interface,
+            # and it must keep showing one. Reading "system" here would disagree
+            # with readStoredUiLanguage() in app/i18n.js, which resolves the same
+            # corrupt file to "en" during startup -- and the next save would then
+            # persist "system" and flip a German-OS user's UI to German.
+            self.assertEqual(config.get_ui_language(), "en")
+            self.assertEqual(path.read_text(), "{not json")
+
+
 class ConfigMicrophoneTests(unittest.TestCase):
     def test_default_microphone_is_system_default(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

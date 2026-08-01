@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { Trash2, X } from 'lucide-react';
 import { ipc } from '@/lib/ipc';
 import { useUndoDeleteStore, type UndoDeleteEntry } from '@/hooks/undoDeleteStore';
@@ -38,6 +39,7 @@ function UndoDeleteToastItem({
   onUndo: () => void;
   onExpire: () => void;
 }) {
+  const { t } = useTranslation();
   // Keep the expire callback in a ref so the auto-dismiss timer runs exactly once
   // and isn't reset by re-renders (it must expire relative to main's deadline,
   // not the last render).
@@ -92,7 +94,7 @@ function UndoDeleteToastItem({
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <Trash2 size={14} style={{ color: 'var(--fg-2)', flexShrink: 0 }} />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">Note deleted</div>
+          <div className="text-[13px] font-medium">{t('toast.undoDelete.title')}</div>
           {name && (
             <div className="truncate text-[12px]" style={{ color: 'var(--fg-2)' }}>
               {name}
@@ -105,12 +107,12 @@ function UndoDeleteToastItem({
           className="cursor-pointer rounded-full border-0 px-2.5 py-1 text-[12px] font-medium"
           style={{ background: 'var(--fg-1)', color: 'var(--fg-inverse)' }}
         >
-          Undo
+          {t('toast.undoDelete.undo')}
         </button>
         <button
           type="button"
           onClick={onExpire}
-          aria-label="Dismiss and delete permanently"
+          aria-label={t('toast.undoDelete.dismiss')}
           className="inline-flex cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-1"
           style={{ color: 'var(--fg-2)' }}
         >

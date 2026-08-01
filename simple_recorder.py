@@ -1670,6 +1670,41 @@ def set_keep_recordings_cmd(enabled: bool):
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
+@cli.command(name='get-ui-language')
+def get_ui_language_cmd():
+    """Get the interface language ("system" follows the OS locale)."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"ui_language": config.get_ui_language()}))
+
+
+@cli.command(name='set-ui-language')
+@click.argument('ui_language')
+def set_ui_language_cmd(ui_language: str):
+    """Set the interface language ("system", "en" or "de")."""
+    from src.config import get_config
+    config = get_config()
+    if ui_language not in config.VALID_UI_LANGUAGES:
+        print(json.dumps({
+            "success": False,
+            "ui_language": config.get_ui_language(),
+            "error": (
+                f"Unsupported UI language: {ui_language}. "
+                f"Supported: {', '.join(config.VALID_UI_LANGUAGES)}"
+            ),
+        }))
+        return
+
+    if config.set_ui_language(ui_language):
+        print(json.dumps({"success": True, "ui_language": ui_language}))
+    else:
+        print(json.dumps({
+            "success": False,
+            "ui_language": config.get_ui_language(),
+            "error": "Failed to persist setting",
+        }))
+
+
 @cli.command(name='get-auto-install-when-idle')
 def get_auto_install_when_idle_cmd():
     """Get whether updates auto-install when the app is idle."""

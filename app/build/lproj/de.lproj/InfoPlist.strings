@@ -1,0 +1,3 @@
+/* Siehe en.lproj/InfoPlist.strings fuer die Herkunft dieser Datei. */
+"NSMicrophoneUsageDescription" = "Steno braucht Zugriff auf das Mikrofon, um Meetings aufzunehmen und zu transkribieren.";
+"NSAudioCaptureUsageDescription" = "Steno braucht Zugriff auf den Systemton, um den Ton aus Videokonferenzen aufzunehmen.";

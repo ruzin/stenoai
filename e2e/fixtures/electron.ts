@@ -52,6 +52,12 @@ export const test = base.extend<Fixtures>({
         ...(process.env as Record<string, string>),
         STENOAI_E2E: '1',
         STENOAI_USER_DATA_DIR: userDataDir,
+        // Pin the UI language (#337). Most locators in this suite match on
+        // visible text, so a run that picked up a German OS — or a spec that
+        // happened to seed a German preference — would fail them for reasons
+        // unrelated to what they assert. Listed before opts.env so a spec that
+        // genuinely wants another language can override it.
+        STENOAI_UI_LANGUAGE: 'en',
         ...(opts.mockIpc ? { STENOAI_E2E_MOCK_IPC: '1' } : {}),
         ...(opts.env ?? {}),
       };

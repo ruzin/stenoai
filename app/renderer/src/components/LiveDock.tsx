@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronUp, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { useRecording } from '@/hooks/useRecording';
@@ -20,6 +21,7 @@ import { useLiveTranscriptAvailable } from '@/hooks/useModels';
  * drop) — without it an auto-paused recording would be stranded.
  */
 export function LiveDock() {
+  const { t } = useTranslation();
   const recording = useRecording();
   const liveAvailable = useLiveTranscriptAvailable();
   const transcriptOpen = useLiveTranscriptOpen((s) => s.open);
@@ -52,8 +54,8 @@ export function LiveDock() {
   }, [loadingModel]);
   const prepareLabel = showPreparing
     ? live.slow
-      ? 'Still preparing…'
-      : 'Preparing…'
+      ? t('dock.stillPreparing')
+      : t('dock.preparingShort')
     : null;
 
   const onResume = () => {
@@ -76,7 +78,7 @@ export function LiveDock() {
     >
       <span
         style={{ color: 'var(--recording)' }}
-        title={paused ? 'Paused' : 'Recording'}
+        title={paused ? t('dock.paused') : t('dock.recording')}
         aria-hidden="true"
       >
         <AudioWave
@@ -105,8 +107,8 @@ export function LiveDock() {
         <button
           type="button"
           onClick={onResume}
-          aria-label="Resume recording"
-          title="Resume recording"
+          aria-label={t('dock.resumeRecording')}
+          title={t('dock.resumeRecording')}
           className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
           style={{ background: 'transparent', color: 'var(--fg-1)' }}
         >
@@ -122,9 +124,9 @@ export function LiveDock() {
           type="button"
           onClick={toggleTranscript}
           disabled={stopped}
-          aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          aria-label={transcriptOpen ? t('dock.hideTranscript') : t('dock.showTranscript')}
           aria-pressed={transcriptOpen}
-          title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+          title={transcriptOpen ? t('dock.hideTranscript') : t('dock.showTranscript')}
           className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           style={{ background: 'transparent', color: 'var(--fg-1)' }}
         >
@@ -135,8 +137,8 @@ export function LiveDock() {
         type="button"
         onClick={onStop}
         disabled={stopped}
-        aria-label="Stop recording"
-        title="Stop recording"
+        aria-label={t('dock.stopRecording')}
+        title={t('dock.stopRecording')}
         className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         style={{ background: 'transparent', color: 'var(--recording)' }}
       >

@@ -1,12 +1,13 @@
 import * as React from 'react';
 import { ExternalLink } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { AppShell } from '@/components/AppShell';
 import { cn } from '@/lib/utils';
 import { ipc } from '@/lib/ipc';
 import { useNavigate, getLastNonSettingsRoute, useRoute, getRouteParam } from '@/lib/router';
 import { useAppVersion } from '@/hooks/useSettings';
 import { useRecording } from '@/hooks/useRecording';
-import { SettingsNav, SETTINGS_TAB_LABELS, type SettingsTabId } from './settings/SettingsNav';
+import { SettingsNav, SETTINGS_TAB_LABEL_KEYS, type SettingsTabId } from './settings/SettingsNav';
 import { GeneralTab } from './settings/GeneralTab';
 import { AiTab } from './settings/AiTab';
 import { TemplatesTab } from './settings/TemplatesTab';
@@ -14,32 +15,6 @@ import { OrganisationTab } from './settings/OrganisationTab';
 import { AdvancedTab } from './settings/AdvancedTab';
 import { DeveloperTab } from './settings/DeveloperTab';
 import { AboutTab } from './settings/AboutTab';
-
-// Per-tab intro copy, shown in the page header above the divider (rather
-// than repeated inside each tab's own content, which used to duplicate the
-// header on Templates/Organisation). Only tabs with a page-level intro (as
-// opposed to AiTab's per-section copy, or tabs with no intro at all) need an
-// entry here.
-const SETTINGS_TAB_DESCRIPTIONS: Partial<Record<SettingsTabId, React.ReactNode>> = {
-  templates: (
-    <>
-      Templates are the instructions your AI follows when turning a
-      transcript into a summary —{' '}
-      <button
-        type="button"
-        onClick={() =>
-          void ipc().shell.openExternal('https://docs.stenoai.co/features/report-templates')
-        }
-        className="inline-flex items-center gap-1 underline underline-offset-2 hover:no-underline"
-        style={{ color: 'var(--fg-1)' }}
-      >
-        learn more
-        <ExternalLink className="size-3" />
-      </button>
-    </>
-  ),
-  organisation: 'Connect to Steno Enterprise for your organisation.',
-};
 
 // Deep-linkable tab ids: the 7 SettingsTabId nav destinations, plus
 // 'transcription' as a legacy alias that resolves onto 'ai' (its content
@@ -82,6 +57,7 @@ function tabFromRoute(route: string): SettingsTabId | null {
 // ---------------------------------------------------------------------------
 
 export function Settings() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   // Deep-link support: /settings?tab=<id> opens the matching tab on mount.
   // Used by the sidebar's "Sign in to organisation" CTA to land users
@@ -118,6 +94,31 @@ export function Settings() {
     if (tab !== 'templates' && templateEditorOpen) setTemplateEditorOpen(false);
   }, [tab, templateEditorOpen]);
   const showPageHeader = !(tab === 'templates' && templateEditorOpen);
+
+  // Per-tab intro copy, shown in the page header above the divider (rather
+  // than repeated inside each tab's own content, which used to duplicate the
+  // header on Templates/Organisation). Only tabs with a page-level intro (as
+  // opposed to AiTab's per-section copy, or tabs with no intro at all) need an
+  // entry here.
+  const tabDescriptions: Partial<Record<SettingsTabId, React.ReactNode>> = {
+    templates: (
+      <>
+        {t('settings.templates.intro')}{' '}
+        <button
+          type="button"
+          onClick={() =>
+            void ipc().shell.openExternal('https://docs.stenoai.co/features/report-templates')
+          }
+          className="inline-flex items-center gap-1 underline underline-offset-2 hover:no-underline"
+          style={{ color: 'var(--fg-1)' }}
+        >
+          {t('settings.templates.learnMore')}
+          <ExternalLink className="size-3" />
+        </button>
+      </>
+    ),
+    organisation: t('settings.organisation.intro'),
+  };
 
   // Supplies AppShell's recordingStatus/onToggleRecording props directly —
   // previously supplied by MeetingsShell, now that Settings no longer
@@ -187,14 +188,14 @@ export function Settings() {
                   color: 'var(--fg-1)',
                 }}
               >
-                {SETTINGS_TAB_LABELS[tab]}
+                {t(SETTINGS_TAB_LABEL_KEYS[tab])}
               </h1>
-              {SETTINGS_TAB_DESCRIPTIONS[tab] && (
+              {tabDescriptions[tab] && (
                 <p
                   className="m-0 text-[13px] leading-[1.5]"
                   style={{ color: 'var(--fg-2)' }}
                 >
-                  {SETTINGS_TAB_DESCRIPTIONS[tab]}
+                  {tabDescriptions[tab]}
                 </p>
               )}
             </div>

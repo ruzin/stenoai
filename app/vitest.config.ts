@@ -11,11 +11,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'renderer/src'),
+      '@locales': path.resolve(__dirname, 'locales'),
     },
   },
   test: {
     environment: 'jsdom',
     globals: true,
     include: ['renderer/src/**/*.test.{ts,tsx}'],
+    setupFiles: ['renderer/src/test-setup.ts'],
   },
 });

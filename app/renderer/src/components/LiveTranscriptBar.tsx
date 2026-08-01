@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, Copy, Play, Search as SearchIcon, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { Input } from '@/components/ui/input';
@@ -7,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
 import { useLanguageSetting, useSetLanguage } from '@/hooks/useSettings';
-import { PARAKEET_LANGUAGES } from '@/lib/transcription-languages';
+import { PARAKEET_LANGUAGES, languageHint, languageLabel } from '@/lib/transcription-languages';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { formatElapsed } from '@/lib/utils';
 
@@ -39,6 +40,7 @@ function fmtTimestamp(seconds: number): string {
  * Closing returns to the standard LiveDock pill.
  */
 export function LiveTranscriptBar() {
+  const { t } = useTranslation();
   const recording = useRecording();
   const sessionName = recording.sessionName;
   const paused = recording.status === 'paused';
@@ -120,7 +122,7 @@ export function LiveTranscriptBar() {
             action button, not nested. (Nesting `<button>` inside `<button>`
             is invalid HTML and breaks both keyboard navigation and
             assistive-tech focus order.) */}
-        <div className="mv-transcript-head" role="group" aria-label="Transcript header">
+        <div className="mv-transcript-head" role="group" aria-label={t('dock.transcriptHeader')}>
           {/* Static (non-animated) wave for the header — the "is anything
               happening?" cue lives in the footer's recording indicator. */}
           <span className="mv-transcript-wave mv-transcript-wave-static" aria-hidden="true">
@@ -132,13 +134,13 @@ export function LiveTranscriptBar() {
             <span />
             <span />
           </span>
-          <span className="mv-transcript-label">Transcript</span>
+          <span className="mv-transcript-label">{t('dock.transcript')}</span>
           <button
             type="button"
             className="mv-chat-tool"
             onClick={() => void copyAll()}
-            aria-label="Copy transcript"
-            title="Copy transcript"
+            aria-label={t('dock.copyTranscript')}
+            title={t('dock.copyTranscript')}
           >
             {copied ? <Check size={13} /> : <Copy size={13} />}
           </button>
@@ -146,8 +148,8 @@ export function LiveTranscriptBar() {
             type="button"
             className="mv-chat-tool"
             onClick={() => setOpen(false)}
-            aria-label="Minimize transcript"
-            title="Minimize transcript"
+            aria-label={t('dock.minimizeTranscript')}
+            title={t('dock.minimizeTranscript')}
           >
             <ChevronDown size={13} />
           </button>
@@ -162,7 +164,7 @@ export function LiveTranscriptBar() {
             variant="sunken"
             size="sm"
             iconStart={<SearchIcon className="size-3.5" />}
-            placeholder="Search transcript"
+            placeholder={t('dock.searchTranscript')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="flex-1"
@@ -204,8 +206,8 @@ export function LiveTranscriptBar() {
               <button
                 type="button"
                 onClick={onPauseToggle}
-                aria-label="Resume recording"
-                title="Resume recording"
+                aria-label={t('dock.resumeRecording')}
+                title={t('dock.resumeRecording')}
                 className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
                 style={{ background: 'transparent', color: 'var(--fg-1)' }}
               >
@@ -215,13 +217,13 @@ export function LiveTranscriptBar() {
             <button
               type="button"
               onClick={onStop}
-              aria-label="Stop recording"
-              title="Stop recording"
+              aria-label={t('dock.stopRecording')}
+              title={t('dock.stopRecording')}
               className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity"
               style={{ background: 'var(--recording)', color: '#FFFFFF' }}
             >
               <Square size={12} fill="currentColor" stroke="currentColor" />
-              Stop
+              {t('dock.stop')}
             </button>
           </div>
           <LanguageSelector />
@@ -255,35 +257,32 @@ function LiveTranscriptBodyState({
   slow,
   dividerAfter,
 }: BodyStateProps) {
+  const { t } = useTranslation();
   if (status === 'error' && error) {
     return (
       <EmptyState
-        title="Live transcription unavailable"
-        subtitle={error.message ? `${error.stage}: ${error.message}` : `Stage: ${error.stage}`}
+        title={t('dock.liveUnavailable')}
+        subtitle={
+          error.message
+            ? t('dock.stageWithMessage', { stage: error.stage, message: error.message })
+            : t('dock.stage', { stage: error.stage })
+        }
       />
     );
   }
   if (status === 'loading') {
     return (
       <EmptyState
-        title="Preparing transcription…"
-        subtitle={
-          slow
-            ? 'Still warming up — first launch can take a moment. Audio is being captured.'
-            : 'Parakeet is warming up. Audio is being captured.'
-        }
+        title={t('dock.preparing')}
+        subtitle={slow ? t('dock.preparingSlow') : t('dock.preparingHint')}
       />
     );
   }
   if (segments.length === 0) {
     return (
       <EmptyState
-        title={filtering ? 'No matches' : 'Listening…'}
-        subtitle={
-          filtering
-            ? 'Nothing matches your filter yet.'
-            : 'Start speaking — finalised sentences will appear here.'
-        }
+        title={filtering ? t('dock.noMatches') : t('dock.listening')}
+        subtitle={filtering ? t('dock.noMatchesHint') : t('dock.listeningHint')}
       />
     );
   }
@@ -312,7 +311,7 @@ function LiveTranscriptBodyState({
                   className="text-[10px] font-medium uppercase tracking-wide"
                   style={{ color: 'var(--fg-2)' }}
                 >
-                  Resumed
+                  {t('dock.resumed')}
                 </span>
                 <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
               </li>
@@ -376,6 +375,7 @@ interface LanguageOption {
 const LANGUAGE_OPTIONS: LanguageOption[] = PARAKEET_LANGUAGES.map((l) => ({ ...l }));
 
 function LanguageSelector() {
+  const { t } = useTranslation();
   const language = useLanguageSetting();
   const setLanguage = useSetLanguage();
   const [popoverOpen, setPopoverOpen] = React.useState(false);
@@ -385,7 +385,12 @@ function LanguageSelector() {
   // Concrete pins show their name; 'auto' shows the compact "Multi". An
   // out-of-list pin (e.g. a Whisper-only language set in Settings) shows its
   // code rather than being mislabelled "Multi" and silently reset.
-  const display = current === 'auto' ? 'Multi' : (selected?.label ?? current.toUpperCase());
+  const display =
+    current === 'auto'
+      ? t('dock.languageMulti')
+      : selected
+        ? languageLabel(selected.code, selected.label, 'multi')
+        : current.toUpperCase();
 
   const pick = (code: string) => {
     setLanguage.mutate(code);
@@ -402,8 +407,8 @@ function LanguageSelector() {
             'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
           )}
           style={{ color: 'var(--fg-2)' }}
-          aria-label={`Language: ${display}`}
-          title="Change transcript language"
+          aria-label={t('dock.languageAria', { language: display })}
+          title={t('dock.changeLanguage')}
         >
           <span style={{ color: 'var(--fg-1)' }}>{display}</span>
           <ChevronDown size={12} />
@@ -426,11 +431,11 @@ function LanguageSelector() {
                 className="flex w-full items-center justify-between text-[13px] font-medium"
                 style={{ color: 'var(--fg-1)' }}
               >
-                {opt.label}
+                {languageLabel(opt.code, opt.label, 'multi')}
                 {active && <Check size={13} />}
               </span>
               <span className="text-[11.5px]" style={{ color: 'var(--fg-2)' }}>
-                {opt.hint}
+                {languageHint(opt.code, opt.hint)}
               </span>
             </button>
           );
@@ -451,7 +456,8 @@ function RecordingStatusChip({
   paused: boolean;
   elapsedSeconds: number;
 }) {
-  const label = paused ? 'Paused' : 'Recording';
+  const { t } = useTranslation();
+  const label = paused ? t('dock.paused') : t('dock.recording');
   return (
     <span
       className="inline-flex items-center gap-2 px-2 text-[13px]"

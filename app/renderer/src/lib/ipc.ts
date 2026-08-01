@@ -531,6 +531,15 @@ export type GetSilenceAutoStopResponse = Result<{
 export type SetSilenceAutoStopEnabledResponse = Result<{ silence_auto_stop_enabled: boolean }>;
 export type SetSilenceAutoStopMinutesResponse = Result<{ silence_auto_stop_minutes: number }>;
 export type GetLanguageResponse = Result<{ language: string }>;
+
+/*
+ * Interface language (#337). `ui_language` is the stored preference and may be
+ * the 'system' sentinel; `resolved` is the concrete tag the app is actually
+ * rendering in. The picker needs both — it shows "System default" as selected
+ * while the UI itself runs in whatever that resolved to.
+ */
+export type GetUiLanguageResponse = Result<{ ui_language: string; resolved: string }>;
+export type SetUiLanguageResponse = Result<{ ui_language: string; resolved: string }>;
 export type GetMicrophoneResponse = Result<{
   device_id: string | null;
   label: string | null;
@@ -771,6 +780,14 @@ type Subscribe<P = void> = (cb: (payload: P) => void) => () => void;
 
 export interface StenoaiBridge {
   version: number;
+
+  /*
+   * The UI language main resolved for this window, delivered as a launch
+   * argument so lib/i18n.ts can initialise before React mounts. A value, not a
+   * call — anything async here would reintroduce the flash of English it exists
+   * to prevent.
+   */
+  uiLanguage: string;
 
   app: {
     getVersion: RequestFn<[], AppVersionResponse>;
@@ -1027,6 +1044,8 @@ export interface StenoaiBridge {
     >;
     getLanguage: RequestFn<[], GetLanguageResponse>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
+    getUiLanguage: RequestFn<[], GetUiLanguageResponse>;
+    setUiLanguage: RequestFn<[code: string], SetUiLanguageResponse>;
     getMicrophone: RequestFn<[], GetMicrophoneResponse>;
     setMicrophone: RequestFn<[deviceId: string, label: string], GetMicrophoneResponse>;
     getUserName: RequestFn<[], GetUserNameResponse>;
@@ -1084,6 +1103,7 @@ export interface StenoaiBridge {
 
   on: {
     debugLog: Subscribe<string>;
+    uiLanguageChanged: Subscribe<string>;
     setupFlowTriggered: Subscribe<unknown>;
     toggleRecordingHotkey: Subscribe<void>;
     summaryChunk: Subscribe<SummaryChunkEvent>;

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Check, Loader2, Trash2, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 
 // Shared formatters used by both ModelList (Ollama) and WhisperModelList.
@@ -57,6 +58,7 @@ function PullProgressBar({
   bytesPerSecond: number | undefined;
   onCancel: (() => void) | undefined;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex shrink-0 items-center gap-2">
       {/* No outer fixed width here -- it previously hardcoded 96px, which
@@ -100,7 +102,9 @@ function PullProgressBar({
           className="shrink-0 overflow-hidden whitespace-nowrap text-[11px] tabular-nums"
           style={{ color: 'var(--fg-muted)', width: 44 }}
         >
-          {parsePullPart(progress) !== null ? `Part ${parsePullPart(progress)}` : ''}
+          {parsePullPart(progress) !== null
+            ? t('settings.model.part', { part: parsePullPart(progress) })
+            : ''}
         </span>
       </div>
       {/* Only rendered when the caller doesn't already have its own cancel
@@ -113,7 +117,7 @@ function PullProgressBar({
           className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] underline"
           style={{ color: 'var(--fg-muted)' }}
         >
-          Cancel
+          {t('common.cancel')}
         </button>
       )}
     </div>
@@ -196,6 +200,7 @@ export function ModelCard({
   onCancelFasterBuild,
   memoryWarning = false,
 }: ModelCardProps) {
+  const { t } = useTranslation();
   return (
     <div
       // flex-wrap + gap-y lets the wide faster-build row (badge + progress bar
@@ -250,7 +255,7 @@ export function ModelCard({
                 border: '1px solid var(--border)',
               }}
             >
-              Default
+              {t('settings.model.default')}
             </span>
           )}
           {deprecated && (
@@ -261,7 +266,7 @@ export function ModelCard({
                 border: '1px solid var(--border-subtle)',
               }}
             >
-              Deprecated
+              {t('settings.model.deprecated')}
             </span>
           )}
           {fasterBuildTag && fasterBuildInstalled && (
@@ -269,8 +274,8 @@ export function ModelCard({
               className="rounded-[3px] px-1.5 py-px text-[11px]"
               title={
                 ggufInstalled
-                  ? `Running the MLX build (${fasterBuildTag}) instead of ${name}`
-                  : `Downloaded directly as the MLX build (${fasterBuildTag}) -- ${name} was never pulled`
+                  ? t('settings.model.mlxTitleGguf', { tag: fasterBuildTag, name })
+                  : t('settings.model.mlxTitleDirect', { tag: fasterBuildTag, name })
               }
               style={{
                 background: 'var(--surface-sunken)',
@@ -278,20 +283,20 @@ export function ModelCard({
                 border: '1px solid var(--border)',
               }}
             >
-              MLX model
+              {t('settings.model.mlxBadge')}
             </span>
           )}
           {memoryWarning && (
             <span
               className="rounded-[3px] px-1.5 py-px text-[11px]"
-              title="This model may exceed your Mac's available memory and could run slowly or fail."
+              title={t('settings.model.memoryWarningTitle')}
               style={{
                 background: 'var(--danger-bg)',
                 color: 'var(--danger)',
                 border: '1px solid var(--danger)',
               }}
             >
-              May exceed memory
+              {t('settings.model.memoryWarningBadge')}
             </span>
           )}
         </div>
@@ -319,7 +324,7 @@ export function ModelCard({
           style={{ color: 'var(--fg-1)' }}
         >
           <Check size={13} />
-          Selected
+          {t('settings.model.selected')}
         </span>
       ) : !deprecated ? (
         <div className="flex shrink-0 items-center gap-1.5">
@@ -327,8 +332,8 @@ export function ModelCard({
             <button
               type="button"
               onClick={onDeleteModel}
-              aria-label="Delete model"
-              title="Delete this model to free up disk space"
+              aria-label={t('settings.model.deleteAria')}
+              title={t('settings.model.deleteTitle')}
               className="flex size-[28px] cursor-pointer items-center justify-center rounded-[6px] border-0 bg-transparent"
               style={{ color: 'var(--fg-muted)' }}
             >
@@ -349,16 +354,16 @@ export function ModelCard({
               onCancelDownload ? (
                 <>
                   <X className="mr-1.5 size-3" />
-                  Cancel
+                  {t('common.cancel')}
                 </>
               ) : (
                 <>
                   <Loader2 className="mr-1.5 size-3 animate-spin" />
-                  Downloading
+                  {t('settings.model.downloading')}
                 </>
               )
             ) : (
-              'Select'
+              t('settings.model.select')
             )}
           </Button>
         </div>
@@ -376,7 +381,7 @@ export function ModelCard({
               border: '1px solid var(--border-subtle)',
             }}
           >
-            Faster build available
+            {t('settings.model.fasterBuildAvailable')}
           </span>
           {fasterBuildState === 'pulling' ? (
             <PullProgressBar
@@ -389,13 +394,14 @@ export function ModelCard({
               type="button"
               onClick={onSwitchToFasterBuild}
               disabled={fasterBuildState === 'verifying' || fasterBuildBlocked}
-              title={fasterBuildBlocked ? 'Finish the current switch first' : undefined}
+              title={fasterBuildBlocked ? t('settings.model.fasterBuildBlocked') : undefined}
               className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-[12px] underline disabled:cursor-default disabled:no-underline disabled:opacity-60"
               style={{ color: 'var(--fg-1)' }}
             >
-              {fasterBuildState === 'verifying' && 'Verifying…'}
-              {fasterBuildState === 'error' && 'Retry: switch to faster build'}
-              {(fasterBuildState === 'idle' || fasterBuildState === 'done') && 'Switch to faster build'}
+              {fasterBuildState === 'verifying' && t('settings.model.verifying')}
+              {fasterBuildState === 'error' && t('settings.model.fasterBuildRetry')}
+              {(fasterBuildState === 'idle' || fasterBuildState === 'done') &&
+                t('settings.model.fasterBuildSwitch')}
             </button>
           )}
         </div>

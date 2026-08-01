@@ -16,6 +16,7 @@ export const settingsKeys = {
   launchOnLogin: () => [...settingsKeys.all, 'launchOnLogin'] as const,
   silenceAutoStop: () => [...settingsKeys.all, 'silenceAutoStop'] as const,
   language: () => [...settingsKeys.all, 'language'] as const,
+  uiLanguage: () => [...settingsKeys.all, 'uiLanguage'] as const,
   microphone: () => [...settingsKeys.all, 'microphone'] as const,
   storagePath: () => [...settingsKeys.all, 'storagePath'] as const,
   appVersion: () => [...settingsKeys.all, 'appVersion'] as const,
@@ -199,6 +200,36 @@ export function useSetLanguage() {
   return useMutation({
     mutationFn: async (code: string) => unwrap(await ipc().settings.setLanguage(code)),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.language() }),
+  });
+}
+
+/*
+ * Interface language (#337) — not to be confused with useLanguageSetting above,
+ * which is the transcription/content language.
+ *
+ * Returns the stored preference plus the concrete tag in force, because those
+ * differ whenever the preference is 'system'.
+ */
+export function useUiLanguageSetting() {
+  return useQuery({
+    queryKey: settingsKeys.uiLanguage(),
+    queryFn: async () => {
+      const res = unwrap(await ipc().settings.getUiLanguage());
+      return { preference: res.ui_language, resolved: res.resolved };
+    },
+  });
+}
+
+export function useSetUiLanguage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code: string) => unwrap(await ipc().settings.setUiLanguage(code)),
+    // The renderer's own i18next switch is NOT done here. Main broadcasts
+    // 'ui-language-changed' to every window after it has relabelled the native
+    // menus, and useUiLanguageSync applies it — so the window that made the
+    // change takes the same path as every other one, and there is only one
+    // place where the language actually flips.
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKeys.uiLanguage() }),
   });
 }
 

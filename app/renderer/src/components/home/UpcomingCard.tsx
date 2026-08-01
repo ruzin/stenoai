@@ -1,5 +1,7 @@
 import * as React from 'react';
 import { Video } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { CalendarEvent } from '@/lib/ipc';
 import { ipc } from '@/lib/ipc';
 import { cn } from '@/lib/utils';
@@ -10,13 +12,19 @@ interface UpcomingCardProps {
 }
 
 export function UpcomingCard({ event }: UpcomingCardProps) {
+  const { t } = useTranslation();
   const isAllDay = event.is_all_day === true;
   const relative = isAllDay
-    ? ({ prefix: null, value: 'All day', urgent: false, state: 'later' } as const)
-    : relativeLabel(event.start);
+    ? ({
+        prefix: null,
+        value: t('home.upcomingCard.allDay'),
+        urgent: false,
+        state: 'later',
+      } as const)
+    : relativeLabel(event.start, t);
   const meta = isAllDay
-    ? ({ primary: 'Today', timeRange: '' } as const)
-    : formatMeta(event.start, event.end, relative.state);
+    ? ({ primary: t('home.day.today'), timeRange: '' } as const)
+    : formatMeta(event.start, event.end, relative.state, t);
   const meetingUrl = event.meeting_url?.trim();
   const recording = useRecording();
   const isLive = relative.state === 'now';
@@ -73,7 +81,7 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
             className="truncate text-[13.5px] font-medium tracking-[-0.005em]"
             style={{ color: 'var(--fg-1)' }}
           >
-            {event.title || 'Untitled meeting'}
+            {event.title || t('home.upcomingCard.untitled')}
           </div>
           {(isLive && !!meetingUrl) && (
             <span 
@@ -109,7 +117,7 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
                 color: 'var(--primary-fg)',
               }}
             >
-              Start now
+              {t('home.upcomingCard.startNow')}
             </button>
           ) : (
             <button
@@ -123,7 +131,7 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
               }}
             >
               <Video className="size-3" />
-              Join
+              {t('home.upcomingCard.join')}
             </button>
           )
         ) : null}
@@ -134,7 +142,10 @@ export function UpcomingCard({ event }: UpcomingCardProps) {
 
 type RelativeState = 'now' | 'soon' | 'later';
 
-function relativeLabel(startIso: string): {
+function relativeLabel(
+  startIso: string,
+  t: TFunction,
+): {
   prefix: string | null;
   value: string;
   urgent: boolean;
@@ -145,11 +156,12 @@ function relativeLabel(startIso: string): {
     return { prefix: null, value: '—', urgent: false, state: 'later' };
   const diffMs = start.getTime() - Date.now();
   const diffMins = Math.round(diffMs / 60000);
-  if (diffMins <= 0) return { prefix: null, value: 'Now', urgent: true, state: 'now' };
+  if (diffMins <= 0)
+    return { prefix: null, value: t('home.relative.now'), urgent: true, state: 'now' };
   if (diffMins < 60)
     return {
       prefix: 'In',
-      value: `${diffMins} min${diffMins === 1 ? '' : 's'}`,
+      value: t('home.relative.minutes', { count: diffMins }),
       urgent: diffMins <= 15,
       state: diffMins <= 15 ? 'soon' : 'later',
     };
@@ -157,14 +169,14 @@ function relativeLabel(startIso: string): {
   if (hrs < 24)
     return {
       prefix: 'In',
-      value: `${hrs} hr${hrs === 1 ? '' : 's'}`,
+      value: t('home.relative.hours', { count: hrs }),
       urgent: false,
       state: 'later',
     };
   const days = Math.round(hrs / 24);
   return {
     prefix: 'In',
-    value: `${days} day${days === 1 ? '' : 's'}`,
+    value: t('home.relative.days', { count: days }),
     urgent: false,
     state: 'later',
   };
@@ -181,6 +193,7 @@ function formatMeta(
   startIso: string,
   endIso: string,
   state: RelativeState,
+  t: TFunction,
 ): { primary: string; timeRange: string } {
   const start = new Date(startIso);
   const end = endIso ? new Date(endIso) : null;
@@ -202,7 +215,7 @@ function formatMeta(
   if (state === 'now' && end && !Number.isNaN(end.getTime())) {
     const endsInMins = Math.round((end.getTime() - Date.now()) / 60000);
     if (endsInMins > 0 && endsInMins <= 15) {
-      primary = `Ends in ${endsInMins} min${endsInMins === 1 ? '' : 's'}`;
+      primary = t('home.upcomingCard.endsIn', { count: endsInMins });
     } else {
       const startedAgoMins = Math.max(
         0,
@@ -210,13 +223,13 @@ function formatMeta(
       );
       primary =
         startedAgoMins === 0
-          ? 'Just started'
-          : `Started ${startedAgoMins} min${startedAgoMins === 1 ? '' : 's'} ago`;
+          ? t('home.upcomingCard.justStarted')
+          : t('home.upcomingCard.startedAgo', { count: startedAgoMins });
     }
   } else if (sameDay(start, now)) {
-    primary = 'Today';
+    primary = t('home.day.today');
   } else if (sameDay(start, tomorrow)) {
-    primary = 'Tomorrow';
+    primary = t('home.day.tomorrow');
   } else {
     primary = start.toLocaleDateString(undefined, {
       weekday: 'short',

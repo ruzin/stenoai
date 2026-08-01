@@ -2,6 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import './globals.css';
+// Side-effect import, and it has to stay above the render calls below: i18next
+// is initialised at this module's scope, so the very first paint is already in
+// the resolved language. Both mount paths in this file (the app and the
+// notification toast, which is its own window) are covered by this one import.
+import './lib/i18n';
 import { App } from './App';
 import { isMac } from './lib/utils';
 import { queryClient } from './lib/queryClient';

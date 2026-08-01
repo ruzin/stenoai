@@ -116,6 +116,11 @@ vi.mock('@/hooks/useSettings', () => {
     useSetShowMenuBarIcon: m,
     useUserName: () => h.userName,
     useSetUserName: () => h.setUserName,
+    // Interface-language picker (#337). Mocked like every other setting
+    // here so the row renders; this file's races are about calendar OAuth
+    // and the name field, not about language.
+    useUiLanguageSetting: () => q({ preference: 'system', resolved: 'en' }),
+    useSetUiLanguage: () => m(),
     useMicrophoneSetting: () => q(h.microphone.data),
     useSetMicrophone: () => h.setMicrophone,
   };

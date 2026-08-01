@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Search as SearchIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useMeeting } from '@/hooks/useMeetings';
@@ -14,13 +15,14 @@ export function TranscriptPanelContent({
   summaryFile: string;
   onClose?: () => void;
 }) {
+  const { t } = useTranslation();
   const meeting = useMeeting(summaryFile);
 
   if (meeting.isLoading) {
-    return <div className="px-4 py-3 text-sm text-muted-foreground">Loading…</div>;
+    return <div className="px-4 py-3 text-sm text-muted-foreground">{t('transcript.loading')}</div>;
   }
   if (!meeting.data) {
-    return <div className="px-4 py-3 text-sm text-muted-foreground">No transcript available.</div>;
+    return <div className="px-4 py-3 text-sm text-muted-foreground">{t('transcript.empty')}</div>;
   }
   const m = meeting.data;
   const isDiarised = !!(m.is_diarised && m.diarised_text);
@@ -34,8 +36,9 @@ export function TranscriptPanelContent({
  *  doesn't currently round-trip an explicit flag (avoids another
  *  enterprise schema change). */
 export function OrgTranscriptPanelContent({ transcript }: { transcript: string }) {
+  const { t } = useTranslation();
   if (!transcript.trim()) {
-    return <div className="px-4 py-3 text-sm text-muted-foreground">No transcript available.</div>;
+    return <div className="px-4 py-3 text-sm text-muted-foreground">{t('transcript.empty')}</div>;
   }
   const isDiarised = /\[(?:You|Others)\]/.test(transcript);
   return <TranscriptBody text={transcript} isDiarised={isDiarised} />;
@@ -43,6 +46,7 @@ export function OrgTranscriptPanelContent({ transcript }: { transcript: string }
 
 
 function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolean }) {
+  const { t } = useTranslation();
   const segments = React.useMemo(() => parseTranscript(text, isDiarised), [text, isDiarised]);
   const [query, setQuery] = React.useState('');
 
@@ -71,9 +75,7 @@ function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolea
   });
 
   if (segments.length === 0) {
-    return (
-      <div className="px-4 py-3 text-sm text-muted-foreground">No transcript available.</div>
-    );
+    return <div className="px-4 py-3 text-sm text-muted-foreground">{t('transcript.empty')}</div>;
   }
 
   return (
@@ -83,7 +85,7 @@ function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolea
           variant="sunken"
           size="sm"
           iconStart={<SearchIcon className="size-3.5" />}
-          placeholder="Search transcript"
+          placeholder={t('transcript.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="flex-1"

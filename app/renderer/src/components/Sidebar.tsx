@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   Globe,
@@ -160,6 +161,7 @@ export function Sidebar({
   onContextAction,
   currentRoute,
 }: SidebarProps) {
+  const { t } = useTranslation();
   const palette = useCommandPalette();
   const [foldersOpen, setFoldersOpen] = React.useState(true);
   const [dragOverFolder, setDragOverFolder] = React.useState<string | null>(null);
@@ -321,9 +323,9 @@ export function Sidebar({
               onClick={() => palette.open()}
               className="flex h-[30px] w-full items-center rounded-md border-0 px-[10px] pl-[30px] text-left text-[13px] outline-none transition-colors hover:shadow-[inset_0_0_0_1px_hsl(var(--border))] focus-visible:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
               style={{ background: 'rgba(27,27,25,0.04)', color: 'var(--fg-muted)', fontFamily: 'var(--font-sans)' }}
-              aria-label="Search notes"
+              aria-label={t('nav.searchNotes')}
             >
-              Search
+              {t('nav.search')}
             </button>
             <span
               className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-px text-[11px] tabular-nums tracking-[0.02em]"
@@ -344,7 +346,7 @@ export function Sidebar({
             onClick={() => navigate('/')}
           >
             <HomeIcon className="size-[14px]" />
-            <span className="flex-1 truncate">Home</span>
+            <span className="flex-1 truncate">{t('nav.home')}</span>
           </button>
 
           <div
@@ -368,7 +370,7 @@ export function Sidebar({
               onClick={() => navigate('/meetings')}
             >
               <Inbox className="size-[14px]" />
-              <span className="flex-1 truncate">All notes</span>
+              <span className="flex-1 truncate">{t('nav.allNotes')}</span>
               {totalMeetings > 0 && (
                 <span className="text-xs tabular-nums" style={{ color: 'var(--fg-muted)' }}>
                   {totalMeetings}
@@ -383,7 +385,7 @@ export function Sidebar({
             onClick={() => navigate('/chat')}
           >
             <MessageSquare className="size-[14px]" />
-            <span className="flex-1 truncate">Chat</span>
+            <span className="flex-1 truncate">{t('nav.chat')}</span>
           </button>
 
           {sharedNotes.enabled && (
@@ -391,10 +393,12 @@ export function Sidebar({
               type="button"
               className={cn('sb-row', isOrgSharedActive && 'active')}
               onClick={() => navigate('/org/shared')}
-              title={`Shared across ${orgSession.data?.orgId ?? 'your org'}`}
+              title={t('nav.sharedAcross', {
+                org: orgSession.data?.orgId ?? t('org.yourOrg'),
+              })}
             >
               <Globe className="size-[14px]" />
-              <span className="flex-1 truncate">Shared notes</span>
+              <span className="flex-1 truncate">{t('nav.sharedNotes')}</span>
             </button>
           )}
 
@@ -407,13 +411,13 @@ export function Sidebar({
             >
               <span className="flex items-center gap-1.5">
                 <ChevronDown className={cn('size-3 transition-transform', !foldersOpen && '-rotate-90')} />
-                <span>Folders</span>
+                <span>{t('nav.folders')}</span>
               </span>
               <button
                 type="button"
                 className="inline-flex size-5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] [.sb-group-head:hover_&]:opacity-100"
                 onClick={(e) => { e.stopPropagation(); onNewFolder(); }}
-                aria-label="New folder"
+                aria-label={t('folders.newFolder')}
                 style={{ color: 'var(--fg-2)' }}
               >
                 <Plus className="size-3" />
@@ -452,7 +456,7 @@ export function Sidebar({
                       <span
                         role="button"
                         tabIndex={0}
-                        aria-label="Change folder icon"
+                        aria-label={t('folders.changeIcon')}
                         className="flex-shrink-0 rounded p-0.5 hover:bg-[color:var(--surface-active)]"
                         style={{ color: 'var(--fg-2)' }}
                         onClick={(e) => {
@@ -503,10 +507,10 @@ export function Sidebar({
               }}
               className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
               style={{ color: 'var(--fg-1)' }}
-              title="Sign in to share notes with your organisation"
+              title={t('org.signInHint')}
             >
               <LogIn className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
-              <span className="truncate">Sign in to org</span>
+              <span className="truncate">{t('org.signIn')}</span>
             </button>
           ) : (
             <span />
@@ -519,8 +523,8 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => void ipc().shell.openExternal('https://docs.stenoai.co')}
-            aria-label="Help"
-            title="Help"
+            aria-label={t('nav.help')}
+            title={t('nav.help')}
             className="inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
             style={{ color: 'var(--fg-2)' }}
           >
@@ -529,8 +533,8 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => toggleSettings(currentRoute)}
-            aria-label="Settings"
-            title="Settings"
+            aria-label={t('nav.settings')}
+            title={t('nav.settings')}
             // startsWith so the cog still reads "active" on deep-link routes
             // like /settings?tab=organisation, not just bare /settings.
             aria-pressed={currentRoute.startsWith('/settings')}
@@ -594,6 +598,7 @@ interface ProfileChipProps {
 }
 
 function ProfileChip({ email, name, orgId, onSignOut }: ProfileChipProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -650,7 +655,7 @@ function ProfileChip({ email, name, orgId, onSignOut }: ProfileChipProps) {
               {email}
             </div>
             <div className="mt-1 text-[10.5px]" style={{ color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
-              org · {orgId}
+              {t('org.orgLabel')} · {orgId}
             </div>
           </div>
           <div className="border-t border-[color:var(--border-subtle)]">
@@ -664,7 +669,7 @@ function ProfileChip({ email, name, orgId, onSignOut }: ProfileChipProps) {
                 onSignOut();
               }}
             >
-              <LogOut className="size-[12px]" /> Sign out
+              <LogOut className="size-[12px]" /> {t('org.signOut')}
             </button>
           </div>
         </div>

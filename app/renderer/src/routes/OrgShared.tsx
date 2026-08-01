@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { ArrowLeft, Globe, Loader2, Lock, MoreHorizontal, Trash2, Users } from 'lucide-react';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { useActiveOrgMeeting } from '@/lib/askBarContext';
 import { renderMarkdown } from '@/lib/markdown';
 import { navigate } from '@/lib/router';
+import i18n from '@/lib/i18n';
 import {
   useOrgMeeting,
   useOrgMeetings,
@@ -22,11 +24,16 @@ function formatDate(epoch: number): string {
   const d = new Date(epoch * 1000);
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return 'today, ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) {
+    return i18n.t('org.todayAt', {
+      time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+  }
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function NotSignedIn() {
+  const { t } = useTranslation();
   return (
     <MeetingsShell activeSummaryFile={null}>
       <div className="mx-auto flex max-w-[480px] flex-col items-center gap-4 py-16 text-center">
@@ -37,14 +44,13 @@ function NotSignedIn() {
           <Users size={20} />
         </div>
         <h1 className="text-[24px] font-normal" style={{ fontFamily: 'var(--font-serif)', color: 'var(--fg-1)' }}>
-          Connect your organisation
+          {t('org.connectTitle')}
         </h1>
         <p className="text-[14px] leading-[1.55]" style={{ color: 'var(--fg-2)' }}>
-          Sign in to your Steno enterprise adapter to see notes shared by your
-          colleagues and chat across them.
+          {t('org.connectDescription')}
         </p>
         <Button onClick={() => navigate('/settings')} className="mt-2">
-          Open Settings → Organisation
+          {t('org.openSettings')}
         </Button>
       </div>
     </MeetingsShell>
@@ -56,13 +62,14 @@ function NotSignedIn() {
 // ----------------------------------------------------------------------------
 
 export function OrgShared() {
+  const { t } = useTranslation();
   const session = useOrgSession();
   const meetings = useOrgMeetings(session.data?.signedIn ?? false);
 
   if (session.isLoading) {
     return (
       <MeetingsShell activeSummaryFile={null}>
-        <div className="py-8 text-center text-[14px]" style={{ color: 'var(--fg-2)' }}>Loading…</div>
+        <div className="py-8 text-center text-[14px]" style={{ color: 'var(--fg-2)' }}>{t('app.loading')}</div>
       </MeetingsShell>
     );
   }
@@ -79,15 +86,15 @@ export function OrgShared() {
             className="m-0 text-[28px] font-normal"
             style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.02em', color: 'var(--fg-1)' }}
           >
-            Shared notes
+            {t('org.sharedNotes')}
           </h1>
           <p className="mt-1 text-[13px]" style={{ color: 'var(--fg-2)' }}>
-            {session.data.orgId} · {rows.length} {rows.length === 1 ? 'note' : 'notes'}
+            {session.data.orgId} · {t('org.noteCount', { count: rows.length })}
           </p>
         </header>
 
         {meetings.isLoading ? (
-          <div className="py-8 text-center text-[14px]" style={{ color: 'var(--fg-2)' }}>Loading notes…</div>
+          <div className="py-8 text-center text-[14px]" style={{ color: 'var(--fg-2)' }}>{t('org.loadingNotes')}</div>
         ) : meetings.error ? (
           <div className="rounded-[8px] border border-[color:var(--border-subtle)] p-4 text-[13px]" style={{ color: 'var(--danger, #b3261e)' }}>
             {(meetings.error as Error).message}
@@ -101,9 +108,13 @@ export function OrgShared() {
               border: '1px dashed var(--border-subtle)',
             }}
           >
-            No shared notes yet — share one of your meetings with{' '}
-            <span style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}>{session.data.orgId}</span>{' '}
-            to see it here.
+            <Trans
+              i18nKey="org.emptyState"
+              values={{ org: session.data.orgId }}
+              components={{
+                org: <span style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }} />,
+              }}
+            />
           </div>
         ) : (
           <ul className="flex flex-col">
@@ -130,6 +141,7 @@ export function OrgShared() {
 // ----------------------------------------------------------------------------
 
 export function OrgSharedDetail({ id }: { id: string }) {
+  const { t } = useTranslation();
   const session = useOrgSession();
   // Don't fire the GET /meetings/:id call until we know the user is
   // signed in — otherwise the query will 401 (and clear the session)
@@ -174,11 +186,11 @@ export function OrgSharedDetail({ id }: { id: string }) {
         className="mb-5 inline-flex items-center gap-1.5 text-[12px] hover:text-[color:var(--fg-1)]"
         style={{ color: 'var(--fg-2)' }}
       >
-        <ArrowLeft size={12} /> Shared notes
+        <ArrowLeft size={12} /> {t('org.sharedNotes')}
       </button>
 
       {meeting.isLoading ? (
-        <div className="py-8 text-[14px]" style={{ color: 'var(--fg-2)' }}>Loading…</div>
+        <div className="py-8 text-[14px]" style={{ color: 'var(--fg-2)' }}>{t('app.loading')}</div>
       ) : meeting.error ? (
         <div className="rounded-[8px] border border-[color:var(--border-subtle)] p-4 text-[13px]" style={{ color: 'var(--danger, #b3261e)' }}>
           {(meeting.error as Error).message}
@@ -193,14 +205,14 @@ export function OrgSharedDetail({ id }: { id: string }) {
               {meeting.data.title}
             </h1>
             <p className="mt-2 flex flex-wrap items-center gap-2 text-[13px]" style={{ color: 'var(--fg-2)' }}>
-              <span>shared by {meeting.data.owner_email}</span>
+              <span>{t('org.sharedBy', { email: meeting.data.owner_email })}</span>
               <span>·</span>
               <span>{formatDate(meeting.data.created_at)}</span>
               {meeting.data.has_artifact && (
                 <>
                   <span>·</span>
-                  <span title="Body lives in your org's S3 bucket; the adapter fetched it server-side. Never written to this device.">
-                    from S3
+                  <span title={t('org.fromS3Title')}>
+                    {t('org.fromS3')}
                   </span>
                 </>
               )}
@@ -219,7 +231,7 @@ export function OrgSharedDetail({ id }: { id: string }) {
               {renderMarkdown(bodyText)}
             </article>
           ) : (
-            <p className="text-[14px]" style={{ color: 'var(--fg-2)' }}>(no body)</p>
+            <p className="text-[14px]" style={{ color: 'var(--fg-2)' }}>{t('org.noBody')}</p>
           )}
           {/* Bottom of the page — buffer so the global AskBar doesn't
               overlap the last paragraph when the conversation expands. */}
@@ -244,6 +256,7 @@ interface SharedRowProps {
 }
 
 function SharedRow({ id, title, visibility, ownerEmail, createdAt, isOwner }: SharedRowProps) {
+  const { t } = useTranslation();
   const unshare = useUnshareOrgMeeting();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -269,7 +282,7 @@ function SharedRow({ id, title, visibility, ownerEmail, createdAt, isOwner }: Sh
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[12px]" style={{ color: 'var(--fg-2)' }}>
             {visibility === 'org' ? <Globe size={11} /> : <Lock size={11} />}
-            <span>{isOwner ? 'you' : ownerEmail}</span>
+            <span>{isOwner ? t('org.you') : ownerEmail}</span>
             <span>·</span>
             <span>{formatDate(createdAt)}</span>
             {error && (
@@ -286,8 +299,8 @@ function SharedRow({ id, title, visibility, ownerEmail, createdAt, isOwner }: Sh
               <button
                 type="button"
                 onClick={(e) => e.stopPropagation()}
-                aria-label="Note actions"
-                title="Actions"
+                aria-label={t('org.noteActions')}
+                title={t('app.actions')}
                 className={cn(
                   'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-[color:var(--surface-active)]',
                   menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100',
@@ -314,7 +327,7 @@ function SharedRow({ id, title, visibility, ownerEmail, createdAt, isOwner }: Sh
                 style={{ color: 'var(--danger)' }}
               >
                 <Trash2 className="size-[13px]" />
-                Unshare
+                {t('org.unshare')}
               </button>
             </PopoverContent>
           </Popover>

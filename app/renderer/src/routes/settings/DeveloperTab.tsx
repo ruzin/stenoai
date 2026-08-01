@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   clearDebugLogs,
@@ -24,6 +25,7 @@ import { useTranscriptionEngine } from '@/hooks/useModels';
 const DIAGNOSTICS_CANCELED = 'canceled';
 
 export function DeveloperTab() {
+  const { t } = useTranslation();
   // Read from the global store so we get the full session backlog, not just
   // lines emitted after this tab mounted.
   const logs = React.useSyncExternalStore(
@@ -100,17 +102,22 @@ export function DeveloperTab() {
         content,
       );
       if (!res.success && res.error !== DIAGNOSTICS_CANCELED) {
-        setSaveError(`Couldn't save diagnostics: ${res.error || 'unknown error'}`);
+        setSaveError(
+          t('settings.developer.saveFailed', {
+            error: res.error || t('settings.developer.unknownError'),
+          }),
+        );
       }
     } catch (err) {
       setSaveError(
-        `Couldn't save diagnostics: ${err instanceof Error ? err.message : String(err)}`,
+        t('settings.developer.saveFailed', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
       );
     }
   };
 
-  const placeholder =
-    'Steno debug console\nSession started — waiting for activity…\n';
+  const placeholder = t('settings.developer.placeholder');
 
   return (
     <section data-settings-tab="developer">
@@ -120,10 +127,10 @@ export function DeveloperTab() {
             className="text-[14px] font-medium"
             style={{ color: 'var(--fg-1)', marginBottom: 2 }}
           >
-            Debug console
+            {t('settings.developer.console.label')}
           </div>
           <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-            Real-time log output from backend processes.
+            {t('settings.developer.console.description')}
           </div>
         </div>
         <div className="flex gap-2">
@@ -133,7 +140,7 @@ export function DeveloperTab() {
             className="h-7 px-2.5 text-[13px]"
             onClick={clearDebugLogs}
           >
-            Clear
+            {t('settings.developer.clear')}
           </Button>
           <Button
             variant="ghost"
@@ -142,7 +149,7 @@ export function DeveloperTab() {
             onClick={copyLogs}
             disabled={!logs.length}
           >
-            Copy
+            {t('settings.developer.copy')}
           </Button>
           <Button
             variant="ghost"
@@ -151,7 +158,7 @@ export function DeveloperTab() {
             onClick={() => void saveLogs()}
             disabled={!logs.length}
           >
-            Save
+            {t('settings.developer.save')}
           </Button>
         </div>
       </div>

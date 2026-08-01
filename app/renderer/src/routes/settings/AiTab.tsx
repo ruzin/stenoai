@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Building2, Check, ChevronDown, ChevronRight, Cloud, Laptop, Loader2, Server, X } from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
@@ -60,28 +61,27 @@ import { COMPACT_BTN, COMPACT_INPUT, COMPACT_TRIGGER, SectionHeading, SettingRow
 import { ModelCard, formatModelSize, isDefaultModel, parsePullPercent } from './model-card';
 import { modelMayExceedMemory } from './model-memory';
 import { LANGUAGES_PARAKEET, LANGUAGES_WHISPER } from './languages';
+import { languageLabel } from '@/lib/transcription-languages';
 
 export function AiTab() {
+  const { t } = useTranslation();
   return (
     <section data-settings-tab="ai">
-      <SectionHeading>Transcription</SectionHeading>
+      <SectionHeading>{t('settings.ai.transcription.heading')}</SectionHeading>
       <p
         className="text-[13px] leading-[1.5]"
         style={{ color: 'var(--fg-2)', marginBottom: 4 }}
       >
-        Speech-to-text always runs on your device — your audio never leaves
-        your computer.
+        {t('settings.ai.transcription.intro')}
       </p>
       <TranscriptionSection />
 
-      <SectionHeading>Summarisation &amp; Chat</SectionHeading>
+      <SectionHeading>{t('settings.ai.summarisation.heading')}</SectionHeading>
       <p
         className="text-[13px] leading-[1.5]"
         style={{ color: 'var(--fg-2)', marginBottom: 4 }}
       >
-        Turns your transcript into notes and answers your questions. This is
-        the one step that can run locally or in the cloud — if you choose a
-        cloud provider, only the text transcript is sent, never audio.
+        {t('settings.ai.summarisation.intro')}
       </p>
       <SummarisationSection />
     </section>
@@ -89,6 +89,7 @@ export function AiTab() {
 }
 
 function TranscriptionSection() {
+  const { t } = useTranslation();
   const language = useLanguageSetting();
   const setLanguage = useSetLanguage();
   const keepRecordings = useKeepRecordingsSetting();
@@ -111,8 +112,8 @@ function TranscriptionSection() {
     // nested wrapper (the page-level section is now data-settings-tab="ai").
     <div data-settings-tab="transcription">
       <SettingRow
-        label="Language"
-        description="Auto-detects by default. Pick one to pin it."
+        label={t('settings.ai.language.label')}
+        description={t('settings.ai.language.description')}
       >
         <Select
           value={displayValue}
@@ -128,7 +129,7 @@ function TranscriptionSection() {
           <SelectContent>
             {options.map((l) => (
               <SelectItem key={l.value} value={l.value}>
-                {l.label}
+                {languageLabel(l.value, l.label)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -136,8 +137,8 @@ function TranscriptionSection() {
       </SettingRow>
 
       <SettingRow
-        label="Save recordings"
-        description="Save audio files to your storage location (see Advanced) after processing. Uses 1–10 MB per minute depending on capture mode."
+        label={t('settings.ai.keepRecordings.label')}
+        description={t('settings.ai.keepRecordings.description')}
       >
         <Switch
           checked={keepRecordings.data ?? false}
@@ -155,10 +156,11 @@ function TranscriptionSection() {
 // the backend's longer `description` strings (those are written for the
 // old card layout's note line). Keyed by engine since each only ever has
 // one supported model today (see SUPPORTED_PARAKEET_MODELS /
-// SUPPORTED_WHISPER_MODELS in the Python registries).
-const ENGINE_TAGLINE: Record<'parakeet' | 'whisper', string> = {
-  parakeet: 'Fastest — English + European languages',
-  whisper: 'Most accurate — 99 languages',
+// SUPPORTED_WHISPER_MODELS in the Python registries). Values are translation
+// keys, resolved where the dropdown is rendered.
+const ENGINE_TAGLINE_KEY: Record<'parakeet' | 'whisper', string> = {
+  parakeet: 'settings.ai.engine.parakeet',
+  whisper: 'settings.ai.engine.whisper',
 };
 
 /**
@@ -178,6 +180,7 @@ const ENGINE_TAGLINE: Record<'parakeet' | 'whisper', string> = {
  * last silently wins.
  */
 function TranscriptionModelList() {
+  const { t } = useTranslation();
   const parakeet = useParakeetModels();
   const whisper = useWhisperModels();
   const engine = useTranscriptionEngine();
@@ -195,8 +198,8 @@ function TranscriptionModelList() {
   if (isLoading) {
     return (
       <SettingRow
-        label="Model"
-        description="Which speech-to-text model transcribes your recordings."
+        label={t('settings.ai.model.label')}
+        description={t('settings.ai.model.description')}
         noBorder
       >
         <div
@@ -204,7 +207,7 @@ function TranscriptionModelList() {
           style={{ color: 'var(--fg-muted)' }}
         >
           <Loader2 className="size-3.5 shrink-0 animate-spin" />
-          <span className="truncate">Loading models…</span>
+          <span className="truncate">{t('settings.ai.models.loading')}</span>
         </div>
       </SettingRow>
     );
@@ -212,12 +215,12 @@ function TranscriptionModelList() {
   if (isError) {
     return (
       <SettingRow
-        label="Model"
-        description="Which speech-to-text model transcribes your recordings."
+        label={t('settings.ai.model.label')}
+        description={t('settings.ai.model.description')}
         noBorder
       >
         <div className={cn(COMPACT_TRIGGER, 'w-[190px] flex items-center')} style={{ color: 'var(--fg-2)' }}>
-          <span className="truncate">Could not load models.</span>
+          <span className="truncate">{t('settings.ai.model.loadError')}</span>
         </div>
       </SettingRow>
     );
@@ -267,8 +270,8 @@ function TranscriptionModelList() {
 
   return (
     <SettingRow
-      label="Model"
-      description="Which speech-to-text model transcribes your recordings."
+      label={t('settings.ai.model.label')}
+      description={t('settings.ai.model.description')}
       noBorder
     >
       <Select value={value} onValueChange={onValueChange} disabled={isDownloading}>
@@ -296,7 +299,11 @@ function TranscriptionModelList() {
         </SelectTrigger>
         <SelectContent className="w-72">
           {options.map((o) => (
-            <SelectItem key={o.engine} value={o.engine} description={ENGINE_TAGLINE[o.engine]}>
+            <SelectItem
+              key={o.engine}
+              value={o.engine}
+              description={t(ENGINE_TAGLINE_KEY[o.engine])}
+            >
               <span className="inline-flex items-center gap-1.5">
                 {o.icon}
                 {o.model.displayName ?? o.model.name}
@@ -310,6 +317,7 @@ function TranscriptionModelList() {
 }
 
 function SummarisationSection() {
+  const { t } = useTranslation();
   const provider = useAiProvider();
   const setProvider = useSetAiProvider();
   const orgSession = useOrgSession();
@@ -321,8 +329,8 @@ function SummarisationSection() {
   return (
     <>
       <SettingRow
-        label="Generate notes automatically"
-        description="Summarise each recording right after transcription. Turn off to stop at a transcript and generate notes on demand."
+        label={t('settings.ai.autoSummarize.label')}
+        description={t('settings.ai.autoSummarize.description')}
       >
         <Switch
           checked={autoSummarize.data ?? true}
@@ -332,11 +340,11 @@ function SummarisationSection() {
       </SettingRow>
 
       <SettingRow
-        label="AI provider"
+        label={t('settings.ai.provider.label')}
         description={
           orgSignedIn
-            ? "Managed by your organisation while you're signed in. Sign out under Settings > Organisation to change it."
-            : 'Where models run. Local keeps all data on your device.'
+            ? t('settings.ai.provider.orgManaged')
+            : t('settings.ai.provider.description')
         }
         // The Model section right below (local provider) has no divider of
         // its own — Remote/Cloud/Adapter's config blocks do (their own
@@ -359,23 +367,23 @@ function SummarisationSection() {
             <SelectItem
               value="local"
               icon={<Laptop className="size-4" />}
-              description="Runs entirely on your device. Private and free, no internet required."
+              description={t('settings.ai.provider.localDescription')}
             >
-              Local (on-device)
+              {t('settings.ai.provider.local')}
             </SelectItem>
             <SelectItem
               value="remote"
               icon={<Server className="size-4" />}
-              description="Connect to your own Ollama server. Data stays within your network."
+              description={t('settings.ai.provider.remoteDescription')}
             >
-              Private Server
+              {t('settings.ai.provider.remote')}
             </SelectItem>
             <SelectItem
               value="cloud"
               icon={<Cloud className="size-4" />}
-              description="Use OpenAI, Anthropic, or a compatible API. Best quality, requires a paid key."
+              description={t('settings.ai.provider.cloudDescription')}
             >
-              Cloud API
+              {t('settings.ai.provider.cloud')}
             </SelectItem>
             <SelectItem
               value="adapter"
@@ -383,11 +391,11 @@ function SummarisationSection() {
               icon={<Building2 className="size-4" />}
               description={
                 orgSignedIn
-                  ? "Uses your organisation's AI key. No setup needed."
-                  : 'Sign in to your organisation to enable this option.'
+                  ? t('settings.ai.provider.adapterDescription')
+                  : t('settings.ai.provider.adapterDisabledDescription')
               }
             >
-              Organisation
+              {t('settings.ai.provider.adapter')}
             </SelectItem>
           </SelectContent>
         </Select>
@@ -408,10 +416,10 @@ function SummarisationSection() {
       {current !== 'cloud' && current !== 'adapter' && !orgSignedIn && (
         <div style={{ marginTop: '20px' }}>
           <div className="text-[14px] font-normal" style={{ color: 'var(--fg-1)', marginBottom: 2 }}>
-            Model
+            {t('settings.ai.summaryModel.label')}
           </div>
           <p className="text-[13px] leading-[1.5]" style={{ color: 'var(--fg-2)', marginBottom: 8 }}>
-            Which model generates your summaries, titles, and chat answers.
+            {t('settings.ai.summaryModel.description')}
           </p>
           <ModelList />
         </div>
@@ -425,22 +433,23 @@ function SummarisationSection() {
  *  reassures the user it's working (or warns them if their session has
  *  lapsed, in which case summarisation would fall back to an error). */
 function AdapterProviderInfo({ signedIn }: { signedIn: boolean }) {
+  const { t } = useTranslation();
   return (
     <div
       className="space-y-2 py-4 text-[12px]"
       style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--fg-2)' }}
     >
       {signedIn ? (
-        <p>
-          Summaries, titles, and chat are routed through your organisation's
-          adapter. The model and API key are configured by your organisation
-          — no setup needed here.
-        </p>
+        <p>{t('settings.ai.adapter.signedIn')}</p>
       ) : (
         <p style={{ color: 'var(--accent-danger, var(--fg-1))' }}>
-          You are not signed in to an organisation. Sign in under{' '}
-          <strong>Settings &gt; Organisation</strong>, or switch this provider
-          back to Local / Private Server / Cloud API.
+          {/* Trans, not two t() calls: the emphasised settings path sits mid
+              sentence, and splitting it into prefix/suffix keys would strand
+              translators with fragments no other language can reorder. */}
+          <Trans
+            i18nKey="settings.ai.adapter.signedOut"
+            components={{ strong: <strong /> }}
+          />
         </p>
       )}
     </div>
@@ -448,6 +457,7 @@ function AdapterProviderInfo({ signedIn }: { signedIn: boolean }) {
 }
 
 function RemoteProviderConfig() {
+  const { t } = useTranslation();
   const provider = useAiProvider();
   const setUrl = useSetRemoteOllamaUrl();
   const testConnection = useTestRemoteOllama();
@@ -469,7 +479,7 @@ function RemoteProviderConfig() {
           className="mb-1 block text-[12px] font-medium uppercase"
           style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
         >
-          Ollama server URL
+          {t('settings.ai.remote.urlLabel')}
         </label>
         <Input
           value={url}
@@ -487,7 +497,9 @@ function RemoteProviderConfig() {
           onClick={() => testConnection.mutate(url)}
           disabled={!url || testConnection.isPending}
         >
-          {testConnection.isPending ? 'Testing…' : 'Test connection'}
+          {testConnection.isPending
+            ? t('settings.ai.connection.testing')
+            : t('settings.ai.connection.test')}
         </Button>
         <ConnectionStatus
           ok={testConnection.isSuccess ? testConnection.data?.ok ?? true : testConnection.isError ? false : undefined}
@@ -495,7 +507,7 @@ function RemoteProviderConfig() {
             testConnection.isError
               ? testConnection.error instanceof Error
                 ? testConnection.error.message
-                : 'Failed'
+                : t('settings.ai.connection.failed')
               : testConnection.data?.message
           }
         />
@@ -512,6 +524,7 @@ const CLOUD_SERVICE_ICON: Record<CloudProvider, React.ReactNode> = {
 };
 
 function CloudProviderConfig() {
+  const { t } = useTranslation();
   const provider = useAiProvider();
   const setCloudProvider = useSetCloudProvider();
   const setCloudUrl = useSetCloudApiUrl();
@@ -607,7 +620,7 @@ function CloudProviderConfig() {
           className="mb-1 block text-[12px] font-medium uppercase"
           style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
         >
-          Service
+          {t('settings.ai.cloud.serviceLabel')}
         </label>
         <Select
           value={cloudProvider}
@@ -635,7 +648,7 @@ function CloudProviderConfig() {
                 AWS Bedrock (Claude)
               </span>
             </SelectItem>
-            <SelectItem value="custom">Custom (OpenAI-compatible)</SelectItem>
+            <SelectItem value="custom">{t('settings.ai.cloud.custom')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -646,7 +659,7 @@ function CloudProviderConfig() {
               className="mb-1 block text-[12px] font-medium uppercase"
               style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
             >
-              AWS region
+              {t('settings.ai.cloud.regionLabel')}
             </label>
             <Input
               value={bedrockRegion}
@@ -663,7 +676,7 @@ function CloudProviderConfig() {
               className="mb-1 block text-[12px] font-medium uppercase"
               style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
             >
-              Inference profile (optional)
+              {t('settings.ai.cloud.inferenceProfileLabel')}
             </label>
             <Input
               value={bedrockProfile}
@@ -681,7 +694,7 @@ function CloudProviderConfig() {
             className="mb-1 block text-[12px] font-medium uppercase"
             style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
           >
-            API base URL
+            {t('settings.ai.cloud.apiUrlLabel')}
           </label>
           <Input
             value={apiUrl}
@@ -697,7 +710,7 @@ function CloudProviderConfig() {
           className="mb-1 block text-[12px] font-medium uppercase"
           style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
         >
-          API key
+          {t('settings.ai.cloud.apiKeyLabel')}
         </label>
         <Input
           type="password"
@@ -707,7 +720,7 @@ function CloudProviderConfig() {
             provider.data?.cloud_api_key_set
               ? '••••••••'
               : cloudProvider === 'bedrock'
-                ? 'Bedrock API key (bearer token)'
+                ? t('settings.ai.cloud.apiKeyPlaceholderBedrock')
                 : cloudProvider === 'anthropic'
                   ? 'sk-ant-…'
                   : 'sk-…'
@@ -721,12 +734,12 @@ function CloudProviderConfig() {
           className="mb-1 block text-[12px] font-medium uppercase"
           style={{ letterSpacing: '0.06em', color: 'var(--fg-muted)' }}
         >
-          Model
+          {t('settings.ai.cloud.modelLabel')}
         </label>
         {showModelDropdown ? (
           <Select value={model} onValueChange={onModelSelect}>
             <SelectTrigger className={COMPACT_INPUT}>
-              <SelectValue placeholder="Select a model" />
+              <SelectValue placeholder={t('settings.ai.cloud.selectModelPlaceholder')} />
             </SelectTrigger>
             <SelectContent>
               {/* If the persisted model isn't in the fetched list (e.g. a
@@ -740,7 +753,7 @@ function CloudProviderConfig() {
                   {m}
                 </SelectItem>
               ))}
-              <SelectItem value="__custom__">Custom…</SelectItem>
+              <SelectItem value="__custom__">{t('settings.ai.cloud.customOption')}</SelectItem>
             </SelectContent>
           </Select>
         ) : (
@@ -765,14 +778,14 @@ function CloudProviderConfig() {
                 className={COMPACT_BTN}
                 onClick={() => setCustomModelMode(false)}
               >
-                Pick from list
+                {t('settings.ai.cloud.pickFromList')}
               </Button>
             )}
           </div>
         )}
         {availableModels.length === 0 && cloudProvider !== 'bedrock' && (
           <div className="mt-1 text-[11.5px]" style={{ color: 'var(--fg-muted)' }}>
-            Test connection to load the list of available models.
+            {t('settings.ai.cloud.testToLoadModels')}
           </div>
         )}
       </div>
@@ -784,7 +797,9 @@ function CloudProviderConfig() {
           onClick={onTest}
           disabled={testConnection.isPending}
         >
-          {testConnection.isPending ? 'Testing…' : 'Test connection'}
+          {testConnection.isPending
+            ? t('settings.ai.connection.testing')
+            : t('settings.ai.connection.test')}
         </Button>
         <ConnectionStatus
           ok={testConnection.isSuccess ? true : testConnection.isError ? false : undefined}
@@ -792,16 +807,17 @@ function CloudProviderConfig() {
             testConnection.isError
               ? testConnection.error instanceof Error
                 ? testConnection.error.message
-                : 'Failed'
+                : t('settings.ai.connection.failed')
               : testConnection.isSuccess && testConnection.data?.models
-                ? `${testConnection.data.models.length} models available`
+                ? t('settings.ai.cloud.modelsAvailable', {
+                    count: testConnection.data.models.length,
+                  })
                 : undefined
           }
         />
       </div>
       <div className="text-[12px]" style={{ color: 'var(--fg-2)' }}>
-        Transcripts will be sent to a third-party cloud service. No audio files
-        leave your device.
+        {t('settings.ai.cloud.disclaimer')}
       </div>
     </div>
   );
@@ -814,6 +830,7 @@ function ConnectionStatus({
   ok: boolean | undefined;
   message?: string;
 }) {
+  const { t } = useTranslation();
   if (ok === undefined) return null;
   return (
     <span
@@ -821,7 +838,8 @@ function ConnectionStatus({
       style={{ color: ok ? 'var(--fg-1)' : 'var(--danger)' }}
     >
       {ok ? <Check className="size-3.5" /> : <X className="size-3.5" />}
-      {message ?? (ok ? 'Connected' : 'Failed')}
+      {message ??
+        (ok ? t('settings.ai.connection.connected') : t('settings.ai.connection.failed'))}
     </span>
   );
 }
@@ -840,6 +858,7 @@ function getOllamaModelIcon(modelId: string): React.ReactNode | undefined {
 }
 
 function ModelList() {
+  const { t } = useTranslation();
   const models = useModels();
   const current = useCurrentModel();
   const setCurrent = useSetCurrentModel();
@@ -859,7 +878,10 @@ function ModelList() {
     if (match) {
       setDeleteCandidate({
         tags: [match.name],
-        description: `${match.name} (${formatModelSize(match.size_gb) ?? 'unknown size'}) is no longer needed now that the faster build is active. Delete it to free up disk space?`,
+        description: t('settings.ai.models.deleteFasterBuildDescription', {
+          name: match.name,
+          size: formatModelSize(match.size_gb) ?? t('settings.ai.models.unknownSize'),
+        }),
       });
     }
   });
@@ -871,21 +893,21 @@ function ModelList() {
         style={{ color: 'var(--fg-2)' }}
       >
         <Loader2 className="size-3.5 animate-spin" />
-        Loading models…
+        {t('settings.ai.models.loading')}
       </div>
     );
   }
   if (models.isError) {
     return (
       <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-        Could not reach Ollama. Run the setup wizard.
+        {t('settings.ai.models.ollamaUnreachable')}
       </div>
     );
   }
   if (!models.data?.models?.length) {
     return (
       <div className="text-[13px]" style={{ color: 'var(--fg-2)' }}>
-        No models available.
+        {t('settings.ai.models.none')}
       </div>
     );
   }
@@ -928,9 +950,11 @@ function ModelList() {
     if (isRemote && m.description) {
       note = m.description;
     } else if (!isRemote) {
+      // The speed/quality VALUES ("fast", "excellent") come from the backend
+      // registry and stay as-is; only the frame around them is translated.
       const parts: string[] = [];
-      if (m.speed) parts.push(`${m.speed} speed`);
-      if (m.quality) parts.push(`${m.quality} quality`);
+      if (m.speed) parts.push(t('settings.ai.models.speedNote', { value: m.speed }));
+      if (m.quality) parts.push(t('settings.ai.models.qualityNote', { value: m.quality }));
       note = parts.length ? parts.join(' · ') : undefined;
     }
 
@@ -965,11 +989,21 @@ function ModelList() {
       if (m.ggufInstalled) tags.push(m.name);
       if (m.mlxInstalled && m.mlxTag) tags.push(m.mlxTag);
       if (tags.length === 0) return;
-      const label = tags.length > 1 ? `${m.name} and its faster build` : tags[0];
-      const pronoun = tags.length > 1 ? 'them' : 'it';
+      // Two whole-sentence keys rather than one with a pronoun/label hole —
+      // "it"/"them" and "X and its faster build" don't survive translation as
+      // interchangeable fragments.
       setDeleteCandidate({
         tags,
-        description: `Delete ${label} (${sizeLabel ?? 'unknown size'}) to free up disk space? You can re-download ${pronoun} anytime.`,
+        description:
+          tags.length > 1
+            ? t('settings.ai.models.deleteDescriptionBoth', {
+                name: m.name,
+                size: sizeLabel ?? t('settings.ai.models.unknownSize'),
+              })
+            : t('settings.ai.models.deleteDescriptionOne', {
+                name: tags[0],
+                size: sizeLabel ?? t('settings.ai.models.unknownSize'),
+              }),
       });
     };
 
@@ -1024,7 +1058,9 @@ function ModelList() {
             ) : (
               <ChevronRight size={12} />
             )}
-            {showDeprecated ? 'Hide' : 'Show'} deprecated models
+            {showDeprecated
+              ? t('settings.ai.models.hideDeprecated')
+              : t('settings.ai.models.showDeprecated')}
           </button>
 
           {showDeprecated && (
@@ -1042,9 +1078,9 @@ function ModelList() {
               fasterBuild.reset();
             }
           }}
-          title="Delete model?"
+          title={t('settings.ai.models.deleteTitle')}
           description={deleteCandidate.description}
-          confirmLabel="Delete"
+          confirmLabel={t('common.delete')}
           destructive
           onConfirm={async () => {
             // finally, not just a trailing statement: a delete call

@@ -40,11 +40,13 @@ const CHANNELS = [
   'get-privacy-notice-seen', 'set-privacy-notice-seen',
   'get-system-audio', 'set-system-audio',
   'get-language', 'set-language',
+  // Interface language (#337) - distinct from the transcription language above.
+  'get-ui-language', 'set-ui-language',
   'get-microphone', 'set-microphone',
   'get-user-name', 'set-user-name',
 ];
 
-test('registers exactly the 19 settings-toggle handlers', () => {
+test('registers exactly the 21 settings-toggle handlers', () => {
   const { handlers } = harness();
   assert.deepStrictEqual(Object.keys(handlers).sort(), [...CHANNELS].sort());
 });
