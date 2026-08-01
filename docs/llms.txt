@@ -1,6 +1,6 @@
 # Steno
 
-> Steno is an open-source macOS and Windows (alpha) app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. It captures your Mac's system audio and microphone locally — no meeting bot joins the call — and transcribes and summarizes on-device by default, so audio and transcripts never leave your Mac. Free and open source (MIT, no usage restrictions, including enterprise use); a paid managed Enterprise deployment tier is a separate, optional offering. macOS 14.4+ (Apple Silicon only). MIT licensed.
+> Steno is an open-source macOS and Windows (alpha) app that records, transcribes, and summarizes meetings using AI models that run entirely on your device. It captures your device's system audio and microphone locally — no meeting bot joins the call — and transcribes and summarizes on-device by default, so audio and transcripts never leave your device. Free and open source (MIT, no usage restrictions, including enterprise use); a paid managed Enterprise deployment tier is a separate, optional offering. macOS 14.4+ (Apple Silicon only) or Windows 10/11 (x64). MIT licensed.
 
 ## Key facts
 
