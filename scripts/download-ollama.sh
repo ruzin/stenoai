@@ -141,9 +141,10 @@ cd "$BIN_DIR"
 # Download
 curl --fail --retry 3 --retry-delay 2 --retry-all-errors -L "$OLLAMA_URL" -o "$OLLAMA_FILE"
 
-# Remove stale ollama binary from a previous run so the find below only
-# matches the freshly extracted download.
-rm -f ollama ollama.exe
+# Remove stale ollama binaries from a previous run so the find below only
+# matches the freshly extracted download. Same scope as the lookup below
+# (-maxdepth 3, both names): any path the lookup can hit is cleared first.
+find . -maxdepth 3 -type f \( -name ollama -o -name ollama.exe \) -delete
 
 # Extract based on file type
 if [[ "$OLLAMA_FILE" == *.zip ]]; then
