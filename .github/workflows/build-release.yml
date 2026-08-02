@@ -48,9 +48,11 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
+      # `@perf` excluded - a measurement harness, not a release gate (see
+      # e2e.yml for the same exclusion).
       - name: Run T1 under xvfb
         working-directory: app
-        run: xvfb-run -a npm run test:e2e -- --project=t1
+        run: xvfb-run -a npm run test:e2e -- --project=t1 --grep-invert @perf
 
   build-macos:
     needs: gate-smoke

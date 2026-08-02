@@ -143,6 +143,28 @@ const seededMeeting = () =>
     ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: seedActiveReport }
     : SEED_MEETING;
 
+/**
+ * Carried-over segments for the resume/continue case, keyed off
+ * STENOAI_E2E_SEED_PRIOR_SEGMENTS: `1` is one earlier recording, `twice` is a
+ * note continued a second time - two recordings' worth, each numbering its
+ * segments from its own start, which is what produces repeated (start, speaker)
+ * pairs in a single carried-over list.
+ */
+function seedPriorSegments(rec) {
+  const mode = process.env.STENOAI_E2E_SEED_PRIOR_SEGMENTS;
+  if (!mode || !(rec.active || rec.processing)) return [];
+  const first = [
+    { text: 'earlier bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+    { text: 'earlier bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+  ];
+  if (mode !== 'twice') return first;
+  return [
+    ...first,
+    { text: 'second session bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+    { text: 'second session bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+  ];
+}
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -285,18 +307,16 @@ function install({ ipcMain }) {
     // the ASR sidecar (a model) — unreachable in T1 — so we seed it here. With
     // STENOAI_E2E_SEED_PRIOR_SEGMENTS=1 it returns carried-over priorSegments
     // (the resume/continue case) so the generate-notes-bar T1 can assert the
-    // live bar shows earlier speech instead of starting blank.
+    // live bar shows earlier speech instead of starting blank. `=twice` seeds
+    // the note that has been continued a second time: main.js prepends the
+    // existing priors on every continue (main.js, `carryPrior`), and each
+    // recording's `start` counts from zero again, so the carried-over text
+    // legitimately contains repeated offsets for the same speaker.
     'get-live-transcript-state': async () => ({
       success: true,
       sessionName: rec.active || rec.processing ? rec.sessionName : null,
       segments: [],
-      priorSegments:
-        process.env.STENOAI_E2E_SEED_PRIOR_SEGMENTS === '1' && (rec.active || rec.processing)
-          ? [
-              { text: 'earlier bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
-              { text: 'earlier bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
-            ]
-          : [],
+      priorSegments: seedPriorSegments(rec),
       ready: true,
       error: null,
     }),
@@ -467,6 +487,13 @@ function install({ ipcMain }) {
       fs.writeFileSync(seamPath, content, 'utf-8');
       return { success: true, path: seamPath };
     },
+
+    // Notification handlers — the real ones return { success, shown } after the
+    // notifications_enabled gate; the mock has no OS toast, so it just reports
+    // "shown" so a T1 that drives the transcript-ready branch (#bug2/#bug3) sees
+    // a realistic shape instead of the permissive fallback. (The gate itself is
+    // covered by the T2 spec against the real handler.)
+    'show-transcript-ready-notification': async () => ({ success: true, shown: true }),
 
     // Mirror the real export-note-pdf handler's seam. The mock has no Chromium
     // to rasterise HTML, so instead of a PDF it writes the renderer-built HTML

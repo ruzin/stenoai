@@ -17,6 +17,17 @@ const APP_DIR = path.resolve(__dirname, '..', '..', 'app');
 type LaunchOptions = {
   /** Install the deterministic mock IPC layer (T1, no backend). */
   mockIpc?: boolean;
+  /**
+   * Hand Chromium a synthetic capture device so `getUserMedia` resolves on a
+   * machine with no audio hardware. Required by any spec that starts a
+   * recording: a failed renderer-side capture reports
+   * `reportSystemAudioState(false)`, which drops the optimistic recording
+   * state, clears `useRecording().sessionName`, and makes `useLiveTranscript`
+   * discard every `live-transcript-chunk` (it filters strictly on the
+   * session name). That looks like "the panel never renders the segment"
+   * and only happens where there is no device, i.e. CI, never on a dev Mac.
+   */
+  fakeAudio?: boolean;
   /** Extra env vars merged over the e2e defaults. */
   env?: Record<string, string>;
 };
@@ -63,7 +74,16 @@ export const test = base.extend<Fixtures>({
       let lastErr: unknown;
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          app = await electron.launch({ args: ['.'], cwd: APP_DIR, env });
+          app = await electron.launch({
+            args: [
+              '.',
+              ...(opts.fakeAudio
+                ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+                : []),
+            ],
+            cwd: APP_DIR,
+            env,
+          });
           break;
         } catch (e) {
           lastErr = e;
