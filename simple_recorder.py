@@ -315,6 +315,51 @@ def _render_frontmatter(meta: dict) -> list[str]:
     return lines
 
 
+def _persist_speaker_sidecar(output_dir, meeting_stem: str, transcript_data: dict) -> bool:
+    """Write the `{stem}_speakers.json` sidecar from diarization output a
+    run has ALREADY computed. Returns True when a sidecar was written.
+
+    Every path that finishes a meeting must call this, and the reason is
+    that the cost of the work is already sunk long before any of them
+    decide what to do next: diarization and embedding extraction happen
+    inside transcription, so by the time a path reaches its own `return`
+    the clusters are sitting in `transcript_data` fully paid for. Skipping
+    the write does not save anything -- it only discards the embeddings,
+    and with them the meeting's entire Speakers panel, permanently once
+    the source audio is gone (keep_recordings defaults off).
+
+    Three paths used to reach a `return` without writing it, all with the
+    clusters in hand:
+      - MeetingPipeline.process_recording's auto-summarize gate (#258)
+      - process_streaming's auto-summarize gate (the same gate, second copy)
+      - reprocess --retranscribe, which re-runs the FULL transcription
+        (diarization included, at full cost) and then dropped the result
+    The shared symptom was that turning OFF automatic note generation
+    silently turned off speaker identification too, with no setting saying
+    so, no error, and no way to recover the embeddings afterwards -- the
+    diarization itself ran normally and the transcript carried its speaker
+    labels, so nothing on screen suggested anything had been lost.
+
+    Deliberately NOT called from the continue-recording (`append_to`) path.
+    That path folds a segment into an EXISTING note, and this sidecar is
+    keyed by the segment's own audio stem, which belongs to no note --
+    writing there produces exactly the orphaned sidecar that has to be
+    cleaned up by hand later. Continuations keeping the original
+    recording's sidecar is the correct outcome; merging a continuation's
+    clusters into it is a separate piece of work (the cluster ids of two
+    independent diarization runs are unrelated).
+    """
+    speaker_clusters = transcript_data.get("speaker_clusters") or {}
+    if not speaker_clusters:
+        return False
+    from src.speaker_suggestions import write_speakers_sidecar
+    write_speakers_sidecar(
+        output_dir, meeting_stem, speaker_clusters,
+        turn_manifest=transcript_data.get("turn_manifest"),
+    )
+    return True
+
+
 class MeetingPipeline:
     """Simple audio recorder and transcriber."""
     
@@ -739,6 +784,11 @@ Summary output language: {config.get_language_name(output_language)}
                 md_lines.append('')
                 md_lines.append(notes_text)
             _atomic_write_text(summary_path, '\n'.join(md_lines))
+            # Before the audio is deleted below: the sidecar is the only
+            # place these embeddings survive, and this gate is about
+            # skipping the SUMMARY, not about discarding diarization that
+            # already ran.
+            _persist_speaker_sidecar(self.output_dir, audio_path.stem, transcript_data)
             if not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
@@ -842,13 +892,7 @@ Summary output language: {config.get_language_name(output_language)}
         # CLI command ever wrote this sidecar, so a normally-recorded
         # meeting never got a Speakers review panel at all, even when
         # diarization succeeded (is_diarised: true).
-        speaker_clusters = transcript_data.get("speaker_clusters") or {}
-        if speaker_clusters:
-            from src.speaker_suggestions import write_speakers_sidecar
-            write_speakers_sidecar(
-                self.output_dir, audio_path.stem, speaker_clusters,
-                turn_manifest=transcript_data.get("turn_manifest"),
-            )
+        _persist_speaker_sidecar(self.output_dir, audio_path.stem, transcript_data)
 
         # Clean up
         from src.config import get_config
@@ -1296,6 +1340,12 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                 md_lines.append(notes_text)
             _atomic_write_text(summary_path, '\n'.join(md_lines))
 
+            # Before the audio is deleted below: the sidecar is the only
+            # place these embeddings survive, and this gate is about
+            # skipping the SUMMARY, not about discarding diarization that
+            # already ran.
+            _persist_speaker_sidecar(recorder.output_dir, audio_path.stem, transcript_data)
+
             if not is_live_transcript and not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
@@ -1418,13 +1468,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         # CLI command ever wrote this sidecar, so a normally-recorded
         # meeting never got a Speakers review panel at all, even when
         # diarization succeeded (is_diarised: true).
-        speaker_clusters = transcript_data.get("speaker_clusters") or {}
-        if speaker_clusters:
-            from src.speaker_suggestions import write_speakers_sidecar
-            write_speakers_sidecar(
-                recorder.output_dir, audio_path.stem, speaker_clusters,
-                turn_manifest=transcript_data.get("turn_manifest"),
-            )
+        _persist_speaker_sidecar(recorder.output_dir, audio_path.stem, transcript_data)
 
         # Clean up audio. When we fell back to the live transcript the batch
         # transcription was empty/failed, so KEEP the audio regardless of the
@@ -3003,6 +3047,27 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             # A full re-transcribe replaces any live-sourced transcript, so the
             # live-transcript flag (#207) no longer applies to this note.
             _si.pop('is_live_transcript', None)
+
+            # This re-transcribe just re-ran diarization at full cost on the
+            # original audio, so the new clusters describe the transcript
+            # that is being written here -- the OLD sidecar (if any) now
+            # describes a transcript that no longer exists, and its cluster
+            # ids no longer line up with anything. Overwriting it is the
+            # correct outcome, not a loss.
+            #
+            # KNOWN CONSEQUENCE, deliberately not worked around: a re-run
+            # produces its own independent cluster numbering, so any
+            # confirmations already recorded against the old ids are left
+            # pointing at clusters that may now be different people. The
+            # user is re-transcribing precisely because they consider the
+            # old result wrong, and silently carrying old confirmations onto
+            # new clusters would be the worse failure -- it would attach a
+            # real person's name to whichever voice happened to inherit
+            # their id. Re-confirming after a re-transcribe is intended.
+            # Next to the summary being rewritten, not recorder.output_dir:
+            # reprocess is handed an arbitrary summary path and the sidecar
+            # is looked up beside the note it belongs to.
+            _persist_speaker_sidecar(summary_path.parent, stem, transcribe_result)
 
         # Get transcript from the data
         transcript = existing_data.get('transcript', '')
@@ -4798,6 +4863,26 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     clusters, id_resolution = merge_same_channel_fragments(raw_clusters)
     resolved_id = id_resolution[diarization_speaker_id]
 
+    # Refused HERE rather than only hidden in the panel, because this is
+    # the point where the damage would become permanent and unattributable:
+    # a confirm turns the cluster's embedding into a stored SpeakerPrototype
+    # and, for every other person confirmed in this channel, into mutual
+    # hard-negative evidence. A blended two-voice centroid enrolled as one
+    # person degrades every future suggestion scored against that profile,
+    # in meetings that have nothing to do with this one, with nothing in
+    # the result pointing back at the cause. The panel's hiding is a
+    # convenience; this is the guarantee.
+    if clusters[resolved_id][1].contains_multiple_speakers:
+        print(json.dumps({
+            "success": False,
+            "error": (
+                f"Cluster {diarization_speaker_id!r} is marked as containing more than "
+                "one person, so it cannot be confirmed as a single person. Clear the "
+                "marking first if that was wrong."
+            ),
+        }))
+        sys.exit(1)
+
     config = get_config()
     if new_person:
         try:
@@ -4986,6 +5071,164 @@ def speaker_timestamps(meeting_stem, channel, diarization_speaker_id):
         print(f"  [{_format_timestamp(seg['start'])} - {_format_timestamp(seg['end'])}]")
 
 
+@cli.command(name='mark-speaker-cluster')
+@click.argument('meeting_stem')
+@click.argument('channel')
+@click.argument('diarization_speaker_id')
+@click.option(
+    '--multiple/--single', 'multiple', default=True,
+    help="--multiple (default) marks the cluster as holding more than one person; "
+         "--single clears the marking.",
+)
+def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple):
+    """Record that one diarized cluster holds MORE THAN ONE person -- the
+    one fact about a cluster that cannot be measured, only witnessed.
+
+    Diarizers fail in two directions. Splitting one person across several
+    clusters is recoverable from the data itself (see
+    merge_same_channel_fragments, which does it automatically at distance
+    <= 0.10). Merging several people INTO one cluster is not: measured
+    against a real three-person call, a cluster contaminated by someone
+    briefly talking over the main speaker sat at cosine distance 0.8270
+    from the person who contaminated it -- indistinguishable from any two
+    unrelated speakers. No threshold finds that, and the per-chunk
+    embeddings that might are not in the sidecar's contract. Somebody who
+    was in the room is the only instrument that detects it.
+
+    Marking a cluster takes it out of naming and out of voice
+    identification entirely: it is withheld from suggestions, refused by
+    `confirm-speaker`, and never enrolled as anyone's voice evidence. It
+    also raises the meeting's reported `minimum_speaker_count`, since a
+    mixed cluster is at least two people -- see that function on why
+    nothing consumes that number yet.
+    """
+    from src.config import get_data_dirs
+    from src.speaker_suggestions import (
+        merge_same_channel_fragments,
+        clusters_from_sidecar_channel,
+        minimum_speaker_count,
+        set_cluster_multi_speaker,
+    )
+
+    output_dir = get_data_dirs()["output"]
+    sidecar = set_cluster_multi_speaker(
+        output_dir, meeting_stem, channel, diarization_speaker_id, multiple,
+    )
+    if sidecar is None:
+        print(json.dumps({
+            "success": False,
+            "error": f"No cluster {diarization_speaker_id!r} in {channel!r} channel of {meeting_stem!r}",
+        }))
+        sys.exit(1)
+
+    # Report the marking's reach, not just the raw id it was written to: a
+    # cluster that merge_same_channel_fragments folded into another is
+    # reviewed and displayed under its primary's id, so marking any
+    # fragment withholds the whole merged cluster. Saying so here keeps
+    # the CLI honest about what just happened.
+    channel_data = (sidecar.get("channels") or {}).get(channel) or {}
+    _, id_resolution = merge_same_channel_fragments(
+        clusters_from_sidecar_channel(meeting_stem, channel_data)
+    )
+    print(json.dumps({
+        "success": True,
+        "meeting_id": meeting_stem,
+        "channel": channel,
+        "diarization_speaker_id": diarization_speaker_id,
+        "resolved_diarization_speaker_id": id_resolution.get(
+            diarization_speaker_id, diarization_speaker_id,
+        ),
+        "contains_multiple_speakers": multiple,
+        "minimum_speaker_count": minimum_speaker_count(sidecar.get("channels") or {}),
+    }))
+
+
+@cli.command(name='speaker-naming-status')
+@click.argument('meeting_stem')
+def speaker_naming_status(meeting_stem):
+    """How many of this meeting's speaker clusters still have no name.
+
+    Deliberately cheap and side-effect free -- no profile scoring, no
+    transcript reads, no ffmpeg -- because it is called to decide whether
+    to show one sentence in a delete confirmation, on a path where a slow
+    or failing check must never stand between a user and deleting their
+    own recording.
+
+    Why it exists: a CONFIRMED person survives deleting the meeting (their
+    prototype lives in config.json's person_profiles, bound to no meeting
+    -- verified against a real library, where 5 of 19 working prototypes
+    came from meetings deleted long ago). An UNNAMED cluster does not
+    survive it, and cannot be recovered afterwards by any means: naming a
+    voice requires hearing it, hearing it requires the source audio, and
+    the delete takes the audio. So the last moment at which an unnamed
+    cluster can still be named is just before the delete -- which is
+    exactly when nobody is thinking about it.
+
+    Reports `success: true` with zero counts for a meeting that has no
+    sidecar at all (not diarized, or diarized before sidecars existed):
+    nothing is at risk there, and a caller deciding whether to show a
+    warning wants "nothing to warn about", not an error to handle.
+    """
+    from src.config import get_config, get_data_dirs
+    from src.speaker_suggestions import (
+        MULTI_SPEAKER_KEY,
+        merge_same_channel_fragments,
+        clusters_from_sidecar_channel,
+        prototype_channel_matches,
+        read_speakers_sidecar,
+    )
+
+    dirs = get_data_dirs()
+    sidecar = read_speakers_sidecar(dirs["output"], meeting_stem)
+    if sidecar is None:
+        print(json.dumps({
+            "success": True, "meeting_id": meeting_stem, "has_sidecar": False,
+            "total_clusters": 0, "named_clusters": 0, "unnamed_clusters": 0,
+        }))
+        return
+
+    profiles = get_config().get_person_profiles()
+    total = 0
+    named = 0
+    for channel_name, channel_data in (sidecar.get("channels") or {}).items():
+        raw_clusters_by_id = channel_data.get("clusters") or {}
+        recording_type = channel_data.get("recording_type")
+        merged, _ = merge_same_channel_fragments(
+            clusters_from_sidecar_channel(meeting_stem, channel_data)
+        )
+        for sid, (_embedding, context) in merged.items():
+            # A cluster marked as mixed is not "waiting to be named" -- it
+            # is one a human has already looked at and ruled out, so
+            # counting it as unnamed would nag about the one row that can
+            # never be resolved.
+            if context.contains_multiple_speakers or any(
+                raw_clusters_by_id.get(fid, {}).get(MULTI_SPEAKER_KEY)
+                for fid in [sid, *context.merged_from]
+            ):
+                continue
+            total += 1
+            fragment_ids = [sid, *context.merged_from]
+            if any(
+                any(
+                    p.get("meeting_id") == meeting_stem
+                    and p.get("diarization_speaker_id") in fragment_ids
+                    and prototype_channel_matches(p, channel_name, recording_type)
+                    for p in (person.get("prototypes") or [])
+                )
+                for person in profiles
+            ):
+                named += 1
+
+    print(json.dumps({
+        "success": True,
+        "meeting_id": meeting_stem,
+        "has_sidecar": True,
+        "total_clusters": total,
+        "named_clusters": named,
+        "unnamed_clusters": total - named,
+    }))
+
+
 @cli.command(name='suggest-speakers')
 @click.argument('meeting_stem')
 def suggest_speakers(meeting_stem):
@@ -5004,7 +5247,9 @@ def suggest_speakers(meeting_stem):
         SUGGESTION_MIN_AVG_TURN_SECONDS,
         clusters_from_sidecar_channel,
         extract_sample_text,
+        extract_segment_samples,
         merge_same_channel_fragments,
+        minimum_speaker_count,
         prototype_channel_matches,
         read_speakers_sidecar,
         suggest_speakers_for_meeting,
@@ -5110,6 +5355,23 @@ def suggest_speakers(meeting_stem):
                     if pooled_segments else None
                 ),
                 "sample_text": extract_sample_text(transcript_path, pooled_segments),
+                # Several excerpts, chronological, each independently
+                # playable (see extract_segment_samples / sample_segments --
+                # `samples[i]` is what `get-speaker-sample-audio
+                # --segment-index i` plays). One excerpt is a single roll of
+                # the dice on whether the longest turn happens to contain
+                # anything recognizable; several spread across the recording
+                # are what let a human actually place a voice -- and hearing
+                # two different voices under one cluster is the only way the
+                # contamination behind `contains_multiple_speakers` becomes
+                # visible at all.
+                "samples": extract_segment_samples(transcript_path, pooled_segments),
+                # Set by `mark-speaker-cluster`, never derived: no measurable
+                # property of a centroid distinguishes one voice from two
+                # blended ones (0.8270 to the contaminating speaker in the
+                # real case this was built for). True means a human said so,
+                # and this cluster is out of naming for good.
+                "contains_multiple_speakers": context.contains_multiple_speakers,
                 # Same signal already used to gate suggestion status (real-
                 # data-validated this session against the echo/crosstalk
                 # artifact pattern) -- reused here to flag likely-artifact
@@ -5126,6 +5388,12 @@ def suggest_speakers(meeting_stem):
         "success": True,
         "meeting_id": meeting_stem,
         "recording_available": recording_path is not None,
+        # Clusters plus one extra for each cluster marked as mixed. Worth
+        # surfacing because the real ceiling is invisible in the output:
+        # Sortformer's four-slot architecture returns a five-person channel
+        # as four clusters with nothing indicating anything was dropped.
+        # No caller acts on this number today -- see minimum_speaker_count.
+        "minimum_speaker_count": minimum_speaker_count(sidecar.get("channels") or {}),
         "channels": channels_out,
     }))
 
@@ -5134,13 +5402,26 @@ def suggest_speakers(meeting_stem):
 @click.argument('meeting_stem')
 @click.argument('channel')
 @click.argument('diarization_speaker_id')
-def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id):
+@click.option(
+    '--segment-index', type=int, default=None,
+    help="Play this entry of the cluster's `samples` list (as returned by "
+         "suggest-speakers) instead of its longest turn.",
+)
+def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id, segment_index):
     """Extract a short audio clip of one diarized cluster, for the review
     UI's play button. Picks the cluster's single LONGEST pooled segment
     (primary + merged fragments) to avoid cross-voice contamination --
     mirrors pasrom/meeting-transcriber's SpeakerNamingView.swift and uses
     the exact same time range `suggest-speakers`' `sample_text` quotes, so
     what a human reads matches what they'd hear.
+
+    With `--segment-index i`, plays `samples[i]` from the same cluster's
+    `suggest-speakers` output instead -- the two commands derive that list
+    from identically-pooled segments via the shared `sample_segments`, so
+    the clip always matches the excerpt shown next to it. An out-of-range
+    index is an error rather than a silent fall back to the longest turn:
+    hearing the wrong excerpt with no indication is how someone concludes
+    two different speakers sound the same.
 
     Always fails gracefully (`{"success": false, "error": ...}`, never a
     non-JSON crash) when there's no source recording left on disk (the
@@ -5192,8 +5473,15 @@ def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id):
         for seg in (raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
     ]
 
-    output_path = Path(tempfile.gettempdir()) / f"steno_sample_{meeting_stem}_{channel}_{resolved_id}.wav"
-    ok = extract_speaker_sample_audio(recording_path, channel, pooled_segments, output_path)
+    suffix = "" if segment_index is None else f"_{segment_index}"
+    output_path = (
+        Path(tempfile.gettempdir())
+        / f"steno_sample_{meeting_stem}_{channel}_{resolved_id}{suffix}.wav"
+    )
+    ok = extract_speaker_sample_audio(
+        recording_path, channel, pooled_segments, output_path,
+        segment_index=segment_index,
+    )
     if not ok:
         print(json.dumps({"success": False, "error": "could not extract audio sample"}))
         return

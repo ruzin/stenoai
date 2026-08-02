@@ -369,7 +369,7 @@ class GetSpeakerSampleAudioCliTests(unittest.TestCase):
             self._seed_sidecar_and_recording(tmp)
             with mock.patch(
                 "src.speaker_suggestions.extract_speaker_sample_audio",
-                side_effect=lambda audio_path, channel, segments, output_path: (
+                side_effect=lambda audio_path, channel, segments, output_path, segment_index=None: (
                     output_path.write_bytes(b"wav-stub-bytes") or True
                 ),
             ):
@@ -384,7 +384,7 @@ class GetSpeakerSampleAudioCliTests(unittest.TestCase):
             self._seed_sidecar_and_recording(tmp)
             captured_path = {}
 
-            def fake_extract(audio_path, channel, segments, output_path):
+            def fake_extract(audio_path, channel, segments, output_path, segment_index=None):
                 captured_path["path"] = output_path
                 output_path.write_bytes(b"stub")
                 return True
@@ -461,7 +461,7 @@ class GetSpeakerSampleAudioCliTests(unittest.TestCase):
             (recordings_dir / "mtg001.wav").write_bytes(b"stub")
             captured = {}
 
-            def fake_extract(audio_path, channel, segments, output_path):
+            def fake_extract(audio_path, channel, segments, output_path, segment_index=None):
                 captured["output_path"] = output_path
                 captured["segments"] = segments
                 output_path.write_bytes(b"wav-stub")

@@ -208,6 +208,12 @@ class ClusterContext:
     # informational (for transparent "merged: X, Y, Z" reporting) — nothing
     # else reads it.
     merged_from: list = field(default_factory=list)
+    # A human marked this cluster as holding more than one person (see
+    # MULTI_SPEAKER_KEY). Unlike merged_from this IS read: a mixed cluster's
+    # centroid is a blend of two people's voices, so both naming it and
+    # enrolling it as anyone's voice evidence would poison the profile it
+    # was filed under and every future suggestion scored against it.
+    contains_multiple_speakers: bool = False
 
 
 @dataclass
@@ -288,6 +294,22 @@ def suggest_speaker(embedding: list, context: ClusterContext, profiles: list) ->
     an empty/malformed `profiles` list just yields status="none", matching
     src.transcriber._apply_voiceprint_matches's "never fail a meeting"
     contract."""
+    # A cluster a human marked as mixed is withheld from naming entirely,
+    # with NO candidates -- not merely downgraded to "possible". Candidates
+    # would be worse than nothing here: the ranking is computed from a
+    # centroid blended across two people, so its top entry is not a weak
+    # guess about one person, it is a confident guess about a voice that
+    # does not exist. Returning none also keeps this cluster from consuming
+    # a person via suggest_speakers_for_meeting's used_person_ids, so the
+    # cluster that really IS that person can still claim them.
+    if context.contains_multiple_speakers:
+        return SuggestionResult(
+            diarization_speaker_id=context.diarization_speaker_id,
+            status="none", suggested_person_id=None, suggested_name=None,
+            candidates=[],
+            reasons=["marked by a human as containing more than one person"],
+        )
+
     candidates = score_candidates(embedding, context, profiles)
     if not candidates:
         return SuggestionResult(
@@ -396,6 +418,11 @@ def suggest_speakers_for_meeting(
 
     def _best_distance(entry) -> float:
         _, _, embedding, context = entry
+        # A mixed cluster never claims a person (suggest_speaker returns
+        # "none" for it), so its blended centroid must not get to sort
+        # ahead of the real clusters and influence assignment order either.
+        if context.contains_multiple_speakers:
+            return float("inf")
         candidates = score_candidates(embedding, context, profiles)
         return candidates[0].distance if candidates else float("inf")
 
@@ -507,6 +534,15 @@ def merge_same_channel_fragments(clusters: dict) -> tuple:
                 speech_duration_seconds=total_duration,
                 segment_count=total_segments,
                 merged_from=others,
+                # Contamination is a property of the AUDIO, so it survives
+                # the merge: folding a mixed fragment into a clean one
+                # produces a mixed cluster, not a clean one. Marking any
+                # fragment therefore withholds the whole merged cluster
+                # from naming -- the fail-safe direction, since the
+                # alternative is enrolling a blended voice as a person.
+                contains_multiple_speakers=any(
+                    clusters[sid][1].contains_multiple_speakers for sid in members
+                ),
             ),
         )
 
@@ -556,6 +592,100 @@ def write_speakers_sidecar(
     return path
 
 
+# --- "this cluster holds more than one person" marking ------------------
+#
+# `merge_same_channel_fragments` already models the one direction diarizers
+# get wrong -- several clusters that are really ONE person. This is the
+# opposite direction, and unlike that one it cannot be derived from the
+# data: a cluster contaminated by someone briefly talking over the main
+# speaker was measured, against a real 3-person call, at cosine distance
+# 0.8270 to the person who contaminated it -- an entirely unremarkable
+# cross-speaker distance. There is no signal in a per-speaker centroid that
+# separates "one voice" from "one voice plus 4 seconds of another"; the
+# per-chunk embeddings that could show it are not in the sidecar's contract
+# (see this module's header). A human who was in the meeting is the only
+# available source of this fact, so it is recorded as one.
+#
+# Written into the cluster entry itself rather than a parallel structure,
+# so it travels with exactly the cluster it describes and cannot be
+# orphaned by an id change. Absent means "not marked" -- the key is only
+# written when true, so every pre-existing sidecar reads correctly.
+MULTI_SPEAKER_KEY = "contains_multiple_speakers"
+
+
+def cluster_ids_marked_multi_speaker(channel_data: dict) -> set:
+    """Every raw diarization_speaker_id in one channel marked as holding
+    more than one person."""
+    return {
+        sid
+        for sid, cluster in (channel_data.get("clusters") or {}).items()
+        if cluster.get(MULTI_SPEAKER_KEY)
+    }
+
+
+def set_cluster_multi_speaker(
+    output_dir: Path, meeting_stem: str, channel: str,
+    diarization_speaker_id: str, marked: bool,
+) -> Optional[dict]:
+    """Set/clear the marking on ONE raw cluster, rewriting the sidecar in
+    place (read-modify-write, atomic temp+rename -- the sidecar carries the
+    only copy of this meeting's voice embeddings, so a torn write would
+    destroy data no re-run can recover once the audio is gone).
+
+    Returns the updated sidecar, or None when the sidecar/channel/cluster
+    doesn't exist -- callers report that as an error rather than silently
+    marking nothing.
+    """
+    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    if sidecar is None:
+        return None
+    channel_data = (sidecar.get("channels") or {}).get(channel)
+    if channel_data is None:
+        return None
+    cluster = (channel_data.get("clusters") or {}).get(diarization_speaker_id)
+    if cluster is None:
+        return None
+
+    if marked:
+        cluster[MULTI_SPEAKER_KEY] = True
+    else:
+        cluster.pop(MULTI_SPEAKER_KEY, None)
+
+    path = speakers_sidecar_path(output_dir, meeting_stem)
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(json.dumps(sidecar, indent=2))
+    tmp_path.replace(path)
+    return sidecar
+
+
+def minimum_speaker_count(channels: dict) -> int:
+    """The smallest number of real people this meeting's diarization is
+    consistent with: every cluster is at least one person, and every
+    cluster a human marked as mixed is at least two.
+
+    Exists because the ceiling is REAL and invisible in the output --
+    FluidAudio's Sortformer has a hardcoded four-speaker-slot architecture
+    per channel (`SortformerConfig.numSpeakers`, see
+    diarize-sidecar/Sources/main.swift's header), so a five-person channel
+    is silently returned as four clusters with no indication anything was
+    lost. Confirmed by ear against a real six-person recording.
+
+    NOTHING DOWNSTREAM CONSUMES THIS NUMBER TODAY, and that is deliberate
+    rather than an oversight: Sortformer takes no speaker-count hint at
+    all, so there is no re-diarization call to feed it into. It is
+    reported so the gap is visible to the person reviewing the meeting
+    instead of silent, and so a future diarization path -- windowed
+    inference with cross-window clustering, or an engine that does accept
+    a count -- has ground truth to be measured against.
+    """
+    total = 0
+    for channel_data in (channels or {}).values():
+        clusters = channel_data.get("clusters") or {}
+        total += len(clusters)
+        total += sum(1 for c in clusters.values() if c.get(MULTI_SPEAKER_KEY))
+    return total
+
+
 def read_speakers_sidecar(output_dir: Path, meeting_stem: str) -> Optional[dict]:
     path = speakers_sidecar_path(output_dir, meeting_stem)
     if not path.exists():
@@ -582,6 +712,7 @@ def clusters_from_sidecar_channel(meeting_id: str, channel: dict) -> dict:
                 recording_type=recording_type,
                 speech_duration_seconds=cluster.get("speech_duration_seconds", 0.0),
                 segment_count=cluster.get("segment_count", 0),
+                contains_multiple_speakers=bool(cluster.get(MULTI_SPEAKER_KEY)),
             ),
         )
     return out
@@ -914,6 +1045,118 @@ def longest_segment(segments: list) -> Optional[dict]:
     return max(segments, key=lambda s: s.get("end", 0) - s.get("start", 0))
 
 
+# How many of a cluster's turns to offer as review samples. One excerpt
+# (what `extract_sample_text` alone gave the panel) is a single roll of the
+# dice: `longest_segment` picks the longest turn, which is the most likely
+# to be uninterrupted speech but says nothing about whether it happens to
+# contain anything recognizable -- a long turn can easily be someone
+# reading numbers aloud. Several spread across the recording give a human
+# a real chance to recognize the voice, and are also what makes a
+# contaminated cluster visible: hearing two different voices under one
+# cluster IS the evidence for the `MULTI_SPEAKER_KEY` marking.
+SAMPLE_SEGMENT_LIMIT = 5
+
+
+def sample_segments(segments: list, limit: int = SAMPLE_SEGMENT_LIMIT) -> list:
+    """The canonical ordered review-sample list for one cluster's pooled
+    segments: the `limit` LONGEST turns (same
+    avoid-cross-voice-contamination reasoning as `longest_segment`),
+    presented in CHRONOLOGICAL order so they read as a walk through the
+    recording rather than a duration ranking.
+
+    This ordering is a contract, not an implementation detail: it is what
+    an index into this list means. `suggest-speakers` renders the list and
+    `get-speaker-sample-audio --segment-index` plays one entry of it, and
+    the two must agree on which turn index 2 is, or the play button plays
+    audio from a different moment than the text beside it. Both call this
+    function on identically-pooled segments rather than each sorting for
+    themselves.
+    """
+    if not segments:
+        return []
+    longest = sorted(
+        segments, key=lambda s: s.get("end", 0) - s.get("start", 0), reverse=True,
+    )[:limit]
+    return sorted(longest, key=lambda s: s.get("start", 0))
+
+
+def _transcript_text_in_range(lines: list, start: float, end: float, max_chars: int) -> Optional[str]:
+    """Joined text of every non-"You" diarised transcript line whose
+    timestamp falls in [start, end] (same tolerance as relabeling)."""
+    matched = []
+    for line in lines:
+        match = _TRANSCRIPT_LINE_RE.match(line)
+        if not match:
+            continue
+        timestamp_str, label, text = match.groups()
+        if label == "You":
+            continue
+        try:
+            timestamp_seconds = _parse_transcript_timestamp(timestamp_str)
+        except ValueError:
+            continue
+        if (
+            start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+            <= timestamp_seconds
+            <= end + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+        ):
+            matched.append(text)
+    if not matched:
+        return None
+    combined = " ".join(matched).strip()
+    if len(combined) > max_chars:
+        combined = combined[:max_chars].rstrip() + "…"
+    return combined or None
+
+
+def extract_segment_samples(
+    transcript_path: Path,
+    segments: list,
+    limit: int = SAMPLE_SEGMENT_LIMIT,
+    max_chars: int = SAMPLE_TEXT_MAX_CHARS,
+) -> list:
+    """`[{"start", "end", "text"}]` for this cluster's review samples --
+    the multi-excerpt counterpart to `extract_sample_text`.
+
+    Deliberately built from `segments` (the diarizer's own per-cluster
+    timestamps) and the SAVED TRANSCRIPT, never from the sidecar's
+    `transcript_lines` turn manifest: that manifest is only written by the
+    live pipeline, so every sidecar produced by `backfill-speaker-embeddings`
+    has none at all, and a samples list sourced from it would come back
+    empty for exactly the historical meetings a human most needs help
+    identifying. `segments` are present in every sidecar by construction.
+
+    `text` is None for a segment no transcript line covers -- the entry is
+    still returned, because its audio is playable and a clip with no
+    quotable text is still useful to listen to. Never raises: a missing or
+    unreadable transcript yields text-less entries rather than an error.
+    """
+    chosen = sample_segments(segments, limit)
+    if not chosen:
+        return []
+
+    lines: list = []
+    if transcript_path.exists():
+        try:
+            lines = transcript_path.read_text(encoding="utf-8").split("\n")
+        except OSError:
+            lines = []
+
+    return [
+        {
+            "start": seg.get("start", 0),
+            "end": seg.get("end", 0),
+            "text": (
+                _transcript_text_in_range(
+                    lines, seg.get("start", 0), seg.get("end", 0), max_chars,
+                )
+                if lines else None
+            ),
+        }
+        for seg in chosen
+    ]
+
+
 def extract_sample_text(
     transcript_path: Path,
     segments: list,
@@ -976,6 +1219,7 @@ def extract_speaker_sample_audio(
     channel: str,
     segments: list,
     output_path: Path,
+    segment_index: Optional[int] = None,
 ) -> bool:
     """Extract a short audio clip covering this cluster's longest pooled
     segment from the ORIGINAL source recording, for the review UI's play
@@ -989,13 +1233,25 @@ def extract_speaker_sample_audio(
     same mapping as src.transcriber._split_stereo_to_channels, so a mono
     recording (channel index 0 only) also works correctly for "mic".
 
+    `segment_index`, when given, selects one entry of `sample_segments`
+    (this cluster's review-sample list) instead of the longest turn -- how
+    the panel plays the specific excerpt a human clicked rather than always
+    replaying the same one. Out-of-range values return False rather than
+    silently falling back to the longest segment: a caller asking for
+    excerpt 4 and hearing excerpt 1 would have no way to notice, and would
+    reasonably conclude the two speakers sound identical.
+
     Returns True on success (output_path written), False on any failure --
     no ffmpeg, no source recording (the common case for an older backfilled
     meeting with keep_recordings off), a bad time range, or an ffmpeg
     error. Never raises: this is a best-effort UI aid, never something that
     can fail the review panel.
     """
-    target = longest_segment(segments)
+    if segment_index is None:
+        target = longest_segment(segments)
+    else:
+        chosen = sample_segments(segments)
+        target = chosen[segment_index] if 0 <= segment_index < len(chosen) else None
     if target is None or not audio_filepath.exists():
         return False
 
