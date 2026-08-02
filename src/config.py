@@ -741,6 +741,11 @@ class Config:
             "storage_path": "",
             "keep_recordings": False,
             "auto_summarize_enabled": True,
+            # Obsidian vault sync (#413). Off by default — a note only ever
+            # leaves the app's own store when the user opts in and picks a
+            # vault folder. One-way (Steno -> vault); see app/obsidian-sync.js.
+            "obsidian_sync_enabled": False,
+            "obsidian_vault_path": "",
             # Default ON — when the app is idle and nothing is in flight, a
             # downloaded update installs itself and relaunches so the user
             # never has to click "Restart". The "update available/downloaded"
@@ -1127,6 +1132,45 @@ class Config:
     def set_auto_summarize_enabled(self, enabled: bool) -> bool:
         """Set whether notes are generated automatically after transcription."""
         self._config["auto_summarize_enabled"] = enabled
+        return self._save()
+
+    def get_obsidian_sync_enabled(self) -> bool:
+        """Whether notes are mirrored to an Obsidian vault folder (#413).
+        Default off — the mirror only runs when the user opts in AND has set
+        obsidian_vault_path. One-way, local; see app/obsidian-sync.js."""
+        return self._config.get("obsidian_sync_enabled", False)
+
+    def set_obsidian_sync_enabled(self, enabled: bool) -> bool:
+        """Enable/disable the Obsidian vault mirror."""
+        self._config["obsidian_sync_enabled"] = enabled
+        return self._save()
+
+    def get_obsidian_vault_path(self) -> str:
+        """Absolute path to the vault folder notes are mirrored into. Empty =
+        not configured (mirror stays inert even if the toggle is on)."""
+        return self._config.get("obsidian_vault_path", "")
+
+    def set_obsidian_vault_path(self, vault_path: str) -> bool:
+        """Set the Obsidian vault folder. Must be an absolute path (or empty to
+        clear). Mirrors set_storage_path's validation; the directory is created
+        if missing so the first sync has somewhere to write."""
+        if vault_path is None:
+            vault_path = ""
+        vault_path = vault_path.strip()
+
+        if vault_path:
+            vp = Path(vault_path)
+            if not vp.is_absolute():
+                logger.error(f"Obsidian vault path must be absolute: {vault_path}")
+                return False
+            # Ensure the target exists; on failure keep existing config unchanged.
+            try:
+                vp.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to initialize Obsidian vault path {vault_path}: {e}")
+                return False
+
+        self._config["obsidian_vault_path"] = vault_path
         return self._save()
 
     def get_silence_auto_stop_enabled(self) -> bool:
