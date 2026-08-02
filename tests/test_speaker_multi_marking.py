@@ -429,6 +429,84 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 [p for p in cfg.get_person_profiles() if p.get("prototypes")], [],
             )
 
+    def test_marking_withdraws_a_confirmation_already_made_on_that_cluster(self):
+        # The realistic order of events: someone confirms a cluster, then
+        # listens to a second excerpt and realises two people are in it. If
+        # marking only blocked FUTURE confirms, the blended embedding would
+        # stay enrolled as that person -- the exact state this exists to
+        # prevent -- and stays reachable from enroll-self-from-person and
+        # from every future suggestion scored against that profile.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            confirmed = self._run(
+                simple_recorder.confirm_speaker,
+                ["mtg001", "system", "SPEAKER_0", "--new-person", "Julian"], tmp, cfg=cfg,
+            )
+            self.assertTrue(_last_json(confirmed.output)["success"])
+            julian = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Julian")
+            self.assertEqual(len(julian["prototypes"]), 1)
+
+            marked = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
+            )
+            data = _last_json(marked.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+
+            julian = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Julian")
+            self.assertEqual(
+                julian["prototypes"], [],
+                "a blended two-voice embedding must not stay enrolled as a person",
+            )
+
+    def test_a_marked_cluster_is_not_used_as_hard_negative_evidence(self):
+        # "Speaker B is not the person in cluster A" is only meaningful when
+        # A is one person. If A is a blend of two voices, the negative is
+        # recorded against a voice nobody has, and it suppresses real
+        # matches for B in unrelated meetings.
+        #
+        # The marking is applied via set_cluster_multi_speaker DIRECTLY, not
+        # via the CLI, and that is the point of the test. The CLI also
+        # strips A's confirmation (see the test above), which normally keeps
+        # A out of the hard-negative loop for a second reason -- so driving
+        # it through the CLI would pass whether or not this filter exists.
+        # This reproduces the state the filter alone has to handle: a marked
+        # cluster whose confirmation survived, which is reachable for real
+        # when remove_speaker_evidence cannot match a legacy prototype that
+        # predates the `channel` field.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            self._run(
+                simple_recorder.confirm_speaker,
+                ["mtg001", "system", "SPEAKER_0", "--new-person", "Julian"], tmp, cfg=cfg,
+            )
+            julian = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Julian")
+            self.assertEqual(len(julian["prototypes"]), 1)
+
+            set_cluster_multi_speaker(output_dir, "mtg001", "system", "SPEAKER_0", True)
+
+            result = self._run(
+                simple_recorder.confirm_speaker,
+                ["mtg001", "system", "SPEAKER_1", "--new-person", "Max"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(
+                data["hard_negatives_added_against"], [],
+                "a mixed cluster must not be treated as confirmed-different evidence",
+            )
+
+            for person in cfg.get_person_profiles():
+                self.assertEqual(
+                    person.get("hard_negatives") or [], [],
+                    f"{person['display_name']} gained negative evidence from a mixed cluster",
+                )
+
     def test_confirm_speaker_still_accepts_an_unmarked_cluster(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)

@@ -789,17 +789,27 @@ function install({ ipcMain }) {
         return { success: false, error: `No cluster ${diarizationSpeakerId} in ${channel}` };
       }
       cluster.contains_multiple_speakers = Boolean(containsMultipleSpeakers);
+      const clearedFrom = [];
       if (cluster.contains_multiple_speakers) {
         cluster.prevSuggestion = {
           status: cluster.status,
           suggested_person_id: cluster.suggested_person_id,
           suggested_name: cluster.suggested_name,
           candidates: cluster.candidates,
+          confirmed_by_user: cluster.confirmed_by_user,
         };
         cluster.status = 'none';
         cluster.suggested_person_id = null;
         cluster.suggested_name = null;
         cluster.candidates = [];
+        // The real CLI also WITHDRAWS a confirmation already made on this
+        // cluster -- someone typically confirms first and only later, on a
+        // second excerpt, hears the second voice. Leaving it would keep a
+        // blended embedding enrolled as that person.
+        if (cluster.confirmed_by_user) {
+          clearedFrom.push(cluster.confirmed_by_user);
+          cluster.confirmed_by_user = null;
+        }
       } else if (cluster.prevSuggestion) {
         Object.assign(cluster, cluster.prevSuggestion);
         delete cluster.prevSuggestion;
@@ -808,6 +818,7 @@ function install({ ipcMain }) {
         success: true,
         resolved_diarization_speaker_id: diarizationSpeakerId,
         contains_multiple_speakers: cluster.contains_multiple_speakers,
+        cleared_confirmation_from: clearedFrom,
         minimum_speaker_count: 0,
       };
     },

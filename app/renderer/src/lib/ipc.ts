@@ -516,6 +516,11 @@ export interface MarkSpeakerClusterParams {
 export type MarkSpeakerClusterResponse = Result<{
   resolved_diarization_speaker_id: string;
   contains_multiple_speakers: boolean;
+  /** Display names whose confirmation of THIS cluster the marking withdrew.
+   *  Marking implies the name was wrong, so the prototype (a blended
+   *  two-voice embedding) and the hard negatives it created are removed
+   *  rather than left enrolled. */
+  cleared_confirmation_from: string[];
   minimum_speaker_count: number;
 }>;
 

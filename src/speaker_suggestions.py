@@ -40,8 +40,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
+import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -652,9 +654,28 @@ def set_cluster_multi_speaker(
         cluster.pop(MULTI_SPEAKER_KEY, None)
 
     path = speakers_sidecar_path(output_dir, meeting_stem)
-    tmp_path = path.with_name(path.name + ".tmp")
-    tmp_path.write_text(json.dumps(sidecar, indent=2))
-    tmp_path.replace(path)
+    # A UNIQUE temp name, unlike the fixed "<name>.tmp" the relabel helpers
+    # in this module use. Those rewrite a transcript, which can be
+    # regenerated; this rewrites the only copy of a meeting's voice
+    # embeddings, which cannot be once the source audio is gone. With a
+    # shared temp name, two concurrent marks race on ONE file: the second
+    # truncates it while the first is replacing the sidecar with it, and a
+    # crash or a full disk in that window leaves the real sidecar empty.
+    # Same directory as the target so the replace stays a rename within one
+    # filesystem, which is what makes it atomic.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp",
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(sidecar, fh, indent=2)
+        tmp_path.replace(path)
+    except OSError:
+        # Never leave a half-written temp file behind for someone to find
+        # later and mistake for a real sidecar.
+        tmp_path.unlink(missing_ok=True)
+        raise
     return sidecar
 
 

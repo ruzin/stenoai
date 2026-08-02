@@ -32,6 +32,7 @@ type StenoWindow = Window & {
         success: boolean;
         error?: string;
         contains_multiple_speakers?: boolean;
+        cleared_confirmation_from?: string[];
         minimum_speaker_count?: number;
       }>;
       confirm: (params: {
@@ -200,6 +201,66 @@ test('a marked cluster is withheld from naming, refused by confirm, and raises t
   await expect.poll(() =>
     'contains_multiple_speakers' in readJson(sidecarPath).channels.system.clusters.SPEAKER_0,
   ).toBe(false);
+
+  expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
+});
+
+test('marking a cluster that was already confirmed withdraws the name and its voiceprint', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const stem = 'e2e-multi-withdraw';
+  seedMeeting(userDataDir, stem);
+
+  const { page } = await launchApp();
+  const configPath = path.join(userDataDir, 'config.json');
+
+  // The realistic order: confirm first, then hear the second voice in a
+  // later excerpt and realise the cluster is mixed.
+  const confirmed = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Julian' },
+  );
+  expect(confirmed.success).toBe(true);
+  await expect.poll(() => {
+    const profiles = (readJson(configPath).person_profiles ?? []) as Array<{
+      display_name: string; prototypes: unknown[];
+    }>;
+    return profiles.find((p) => p.display_name === 'Julian')?.prototypes.length;
+  }).toBe(1);
+
+  const marked = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.markCluster(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', containsMultipleSpeakers: true },
+  );
+  expect(marked.success).toBe(true);
+  expect(marked.cleared_confirmation_from).toEqual(['Julian']);
+
+  // If marking only blocked FUTURE confirms, this blended two-voice
+  // embedding would stay enrolled as Julian -- the exact state the marking
+  // exists to prevent, and still reachable from enroll-self-from-person
+  // and from every future suggestion scored against his profile.
+  await expect.poll(() => {
+    const profiles = (readJson(configPath).person_profiles ?? []) as Array<{
+      display_name: string; prototypes: unknown[];
+    }>;
+    return profiles.find((p) => p.display_name === 'Julian')?.prototypes.length;
+  }).toBe(0);
+
+  // Confirming the neighbour afterwards must not pick up negative evidence
+  // derived from that mixed cluster.
+  const neighbour = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Max' },
+  );
+  expect(neighbour.success).toBe(true);
+  const profiles = (readJson(configPath).person_profiles ?? []) as Array<{
+    display_name: string; hard_negatives?: unknown[];
+  }>;
+  for (const person of profiles) {
+    expect(person.hard_negatives ?? []).toEqual([]);
+  }
 
   expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
 });
