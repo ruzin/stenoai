@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, unlinkSync } from 'fs';
 import path from 'path';
 
 /**
@@ -112,11 +112,12 @@ test('backfill writes a transcript-free note; rename moves it; external edits an
       { timeout: 20_000, intervals: [250] })
     .toBe(true);
 
-  // Externally edit the vault copy, then trigger another sync → NOT clobbered,
-  // and the conflict is recorded.
+  // Externally edit the vault copy, then re-run a sync. Re-setting the vault
+  // path re-triggers a backfill deterministically (an update-meeting with an
+  // unchanged title is a backend no-op). The edit must be preserved + flagged.
   const renamedPath = path.join(vault, renamedName);
   writeFileSync(renamedPath, 'HAND-EDITED IN OBSIDIAN', 'utf8');
-  await page.evaluate((f) => (window as StenoWin).stenoai.meetings.update(f, { name: 'Renamed Planning' }), summaryPath);
+  await page.evaluate((v) => (window as StenoWin).stenoai.settings.setObsidianVaultPath(v), vault);
   await expect
     .poll(async () => {
       const c = await page.evaluate(() => (window as StenoWin).stenoai.settings.getObsidianConflicts());
@@ -125,10 +126,10 @@ test('backfill writes a transcript-free note; rename moves it; external edits an
     .toBe(true);
   expect(readFileSync(renamedPath, 'utf8')).toBe('HAND-EDITED IN OBSIDIAN');
 
-  // Restore a clean vault copy so the delete isn't blocked by the conflict,
-  // then delete the note → its vault copy is removed on commit.
-  writeFileSync(renamedPath, NOTE_MD, 'utf8');
-  await page.evaluate((f) => (window as StenoWin).stenoai.meetings.update(f, { name: 'Renamed Planning' }), summaryPath);
+  // Clear the conflict by removing the vault copy, then re-sync to recreate a
+  // clean tracked copy, so the delete below isn't blocked by the conflict.
+  unlinkSync(renamedPath);
+  await page.evaluate((v) => (window as StenoWin).stenoai.settings.setObsidianVaultPath(v), vault);
   await expect
     .poll(() => vaultFiles(vault).includes(renamedName), { timeout: 20_000, intervals: [250] })
     .toBe(true);
