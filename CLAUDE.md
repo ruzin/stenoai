@@ -185,7 +185,7 @@ Match the rigor to the change — don't run the heavyweight loop on a one-line e
 
 The maintainer drives this with a private agent crew (`luffy` for the build-and-review
 loop, `nami` for taking a PR to green). Those aren't part of this repo, so use whatever
-tooling you have. The guidance above is what matters.
+tooling you have. The workflow above is the portable part.
 
 ## Git Commit Guidelines
 - Do NOT include "Generated with Claude Code" attribution in commit messages
