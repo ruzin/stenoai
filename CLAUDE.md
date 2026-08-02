@@ -50,8 +50,8 @@ model-free T2 spec that drives the `window.stenoai.<group>` preload bridge and
 asserts backend state on disk (config/files/JSON), using the existing specs +
 `e2e/fixtures/` helpers as templates — only reach for a UI/T1 spec when the
 interaction itself is the risk, and keep model/network-bearing assertions in the
-`@pipeline`/nightly lanes. This applies to luffy-built work too (CLAUDE.md
-overrides luffy's test-level defaults); the QA review lens checks for it.
+`@pipeline`/nightly lanes. This applies to agent-built work too: this file
+overrides an agent's own test-level defaults.
 
 - Run the whole suite: `cd app && npm run test:e2e` (needs the renderer built and,
   for T2, the backend bundle at `dist/stenoai/`).
@@ -164,20 +164,28 @@ Tokens live in `app/renderer/src/globals.css` under `:root` (light) and
 - Before creating a PR, run a self-review of the full branch diff (`git diff main...HEAD`):
   - Review backend code for security issues, error handling gaps, edge cases, and best practices
   - Review frontend code for layout bugs, CSS consistency, accessibility, and polish
-  - Use the frontend-design skill for UI-related changes
+  - Put UI changes through a design pass too, not just a correctness one
   - Categorize findings by severity (critical/medium/low) and fix critical issues before merging
 
-### When to use `luffy` / `nami` (guideline, not a mandate)
+### How much process a change earns (guideline, not a mandate)
 Match the rigor to the change — don't run the heavyweight loop on a one-line edit.
-- **`luffy`** (autonomous build → multi-agent QA/Design/Eng review loop → `/verify` → PR):
-  use for **new features, risky changes, or wide-blast-radius refactors**. It's
-  token-heavy; reserve it for work that earns the review panel.
-- **Lighter self-review** (implement → test/typecheck → `/verify` if there's a runtime
-  surface → PR): use for **mechanical refactors, dead-code cleanup, copy/docs**.
-- **`nami`** (push → open/update PR → drive CI + review comments to green): effectively
-  **always**, regardless of change size — every PR should be taken to green-and-reviewed,
-  and bot/human comments evaluated critically (fix real issues, push back with reasons on
-  wrong ones). Stop at green; a human merges.
+- **New features, risky changes, wide-blast-radius refactors**: build it, then put the
+  full branch diff through a real review pass (a multi-agent panel, a second model, or
+  a human) before opening the PR. This is the work that earns the extra round.
+- **Mechanical refactors, dead-code cleanup, copy/docs**: implement, run
+  test/typecheck, exercise the runtime surface if there is one, then PR.
+- **Whoever wrote the code shouldn't be the one to sign it off.** When an agent wrote
+  it, have a different model or a human review the diff. Shared blind spots are exactly
+  the ones that survive self-review.
+- **Every PR, whatever its size**: take it to green-and-reviewed. Evaluate bot and human
+  comments critically: fix the real issues, push back with reasons on the wrong ones.
+  Stop at green; a human merges.
+- **Show the evidence.** Don't report a check as passing without having run it, and say
+  which failures are caused by the change versus pre-existing, environmental, or flaky.
+
+The maintainer drives this with a private agent crew (`luffy` for the build-and-review
+loop, `nami` for taking a PR to green). Those aren't part of this repo, so use whatever
+tooling you have. The workflow above is the portable part.
 
 ## Git Commit Guidelines
 - Do NOT include "Generated with Claude Code" attribution in commit messages
