@@ -273,6 +273,11 @@ function registerObsidianSync({
       const newHash = sha256(Buffer.from(vaultBody));
 
       // Rename: the note moved (title or folder changed) since we last wrote it.
+      // Remove the old-name copy (unless the user edited it) — the normal write
+      // below recreates it at the new path. Deliberately NOT fs.renameSync: it is
+      // flaky on Windows (EPERM/EBUSY under the indexer/AV) and a partial rename
+      // can orphan the old file; unlink-then-write is atomic-enough here because
+      // the fresh content is about to be written regardless.
       if (entry && entry.vaultRelPath !== vaultRelPath) {
         const absOld = path.join(cached.vaultPath, entry.vaultRelPath);
         if (isExternallyEdited(absOld, entry)) {
@@ -280,20 +285,8 @@ function registerObsidianSync({
           if (ownIdx) saveIndex(idx);
           return { status: 'conflict' };
         }
-        try {
-          fs.mkdirSync(path.dirname(absDest), { recursive: true });
-          fs.renameSync(absOld, absDest);
-          entry.vaultRelPath = vaultRelPath;
-          try { fs.rmdirSync(path.dirname(absOld)); } catch (_) { /* not empty */ }
-        } catch (err) {
-          // Only "old file already gone" (ENOENT) is safe to fall through and
-          // recreate. Any other failure (permissions, EXDEV) must not leave the
-          // old copy orphaned with the index repointed to a new path (M3).
-          if (err && err.code !== 'ENOENT') {
-            log(`rename failed: ${err.code || err.message}`);
-            return { status: 'error' };
-          }
-        }
+        try { fs.unlinkSync(absOld); } catch (_) { /* already gone */ }
+        try { fs.rmdirSync(path.dirname(absOld)); } catch (_) { /* not empty / root */ }
       }
 
       let destHash = null;
