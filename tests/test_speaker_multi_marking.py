@@ -363,6 +363,59 @@ class SampleSegmentsTests(unittest.TestCase):
             self.assertEqual(samples[0]["start"], 10.0)
             self.assertEqual(samples[0]["end"], 30.0)  # capped at SAMPLE_MAX_SECONDS
 
+    def test_two_turns_in_the_same_displayed_second_never_widen_the_clip(self):
+        # Found by review, and it is the same failure class as the one
+        # reported from real use. Transcript timestamps render as [MM:SS],
+        # so two turns inside ONE second carry the SAME value -- next_start
+        # then equals start, the bounded segment set comes back empty, and
+        # an earlier "window of N seconds around the timestamp" fallback
+        # took over. That window covered the NEXT speaker, i.e. it played
+        # somebody else under this speaker's name.
+        #
+        # Here Alice speaks 10.1-10.5 and Bob starts at 10.8; both lines
+        # render as [00:10]. Alice's clip must stay inside Alice's segment.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Speaker 2] alice speaking\n"
+                "[00:10] [Speaker 3] bob speaking\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 10.1, "end": 10.5}],
+                turn_manifest=[
+                    {"start": 10.1, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 10.8, "channel": "system", "diarization_speaker_id": "SPEAKER_1"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(samples[0]["text"], "alice speaking")
+            self.assertEqual((samples[0]["start"], samples[0]["end"]), (10.1, 10.5))
+            self.assertLess(
+                samples[0]["end"], 10.8,
+                "the clip must not reach the next speaker's segment",
+            )
+
+    def test_a_turn_with_no_segment_of_its_own_yields_no_playable_range(self):
+        # When nothing of this cluster sits at or after the line, there is
+        # no honest clip to offer. A zero-length range makes
+        # extract_speaker_sample_audio refuse (duration <= 0) rather than
+        # cutting arbitrary audio around the timestamp.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text("[01:00] [Speaker 2] said something\n", encoding="utf-8")
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 5.0, "end": 8.0}],   # entirely before the line
+                turn_manifest=[
+                    {"start": 60.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(samples[0]["text"], "said something")
+            self.assertEqual(samples[0]["start"], samples[0]["end"])
+
     def test_a_clip_never_runs_into_the_next_speakers_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.txt"

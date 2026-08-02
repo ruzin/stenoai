@@ -1234,9 +1234,6 @@ def _join_texts(texts: list, max_chars: int) -> Optional[str]:
 # uninterrupted). Nobody listens to five minutes to recognise a voice, and
 # an unbounded clip would also mean an unbounded ffmpeg extraction.
 SAMPLE_MAX_SECONDS = 20.0
-# Used only when a turn has no diarization segment inside its bounds at all
-# (possible when the transcript and the sidecar came from different runs).
-SAMPLE_FALLBACK_SECONDS = 6.0
 
 
 def _turn_audio_range(segments: list, start: float, next_start: Optional[float]) -> tuple:
@@ -1248,28 +1245,48 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
     -- the earlier design -- cannot: src.transcriber merges consecutive
     segments of one speaker into a single turn carrying only the FIRST
     segment's timestamp, so every later segment of that turn contains no
-    line start at all. In practice that produced exactly two symptoms, both
-    reported from real use: most excerpts had no text, and the ones that
-    did played a clip cut at a segment boundary while the text was the
-    whole merged turn.
+    line start at all.
+
+    Every fallback here stays inside THIS CLUSTER'S OWN SEGMENTS. There is
+    deliberately no "window of N seconds around the timestamp" path, and
+    that is a correction: one existed, and a review found it reachable.
+    Transcript timestamps render as [MM:SS], so two turns inside the same
+    second carry the SAME value; `next_start` then equals `start`, the
+    bounded set comes back empty, and the window took over -- playing the
+    next speaker under this speaker's name, the exact failure this whole
+    function exists to prevent. Audio we cannot place is not played.
     """
     upper = next_start if next_start is not None else float("inf")
     own = [
         seg for seg in segments
         if start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS <= seg.get("start", 0) < upper
     ]
-    if own:
-        begin = min(seg.get("start", 0) for seg in own)
-        end = max(seg.get("end", 0) for seg in own)
-    else:
-        begin, end = start, start + SAMPLE_FALLBACK_SECONDS
-    # Never run into the next speaker's line, and never past the cap.
-    if next_start is not None:
+    if not own:
+        # Bounds hold none of this cluster's segments: same displayed
+        # second as the next line, or a manifest that disagrees with the
+        # segments. Use this cluster's nearest segment at or after the line
+        # instead -- still its own audio, unlike a blind window.
+        following = [
+            seg for seg in segments
+            if seg.get("end", 0) > start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+        ]
+        if not following:
+            return start, start
+        own = [min(following, key=lambda seg: seg.get("start", 0))]
+
+    begin = min(seg.get("start", 0) for seg in own)
+    end = max(seg.get("end", 0) for seg in own)
+
+    # Never run into the next speaker's line. Guarded on `next_start > begin`
+    # so a next line sharing this one's displayed second cannot clip the
+    # range to nothing and re-open the fallback.
+    if next_start is not None and next_start > begin:
         end = min(end, next_start)
     end = min(end, begin + SAMPLE_MAX_SECONDS)
-    if end <= begin:
-        end = begin + SAMPLE_FALLBACK_SECONDS
-    return begin, end
+    # No inventing length: a collapsed range means there is nothing this
+    # cluster demonstrably said here, and extract_speaker_sample_audio
+    # refuses a non-positive duration rather than cutting arbitrary audio.
+    return (begin, end) if end > begin else (begin, begin)
 
 
 def extract_segment_samples(
