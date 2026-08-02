@@ -88,9 +88,13 @@ jobs:
         run: npm run build:renderer
 
       # Electron is headless-hostile on Linux — run under a virtual framebuffer.
+      # `@perf` is excluded: it is a measurement harness, not a gate, and
+      # wall-clock work on a shared runner is not a number to block a PR on.
+      # Run it by hand before and after a change to the live transcript
+      # rendering (`--project=t1 --grep @perf`).
       - name: Run T1 under xvfb
         working-directory: app
-        run: xvfb-run -a npm run test:e2e -- --project=t1
+        run: xvfb-run -a npm run test:e2e -- --project=t1 --grep-invert @perf
 
       - name: Upload report on failure
         if: failure()
