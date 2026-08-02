@@ -987,6 +987,31 @@ class LongestSegmentTests(unittest.TestCase):
 
 
 class ExtractSampleTextTests(unittest.TestCase):
+    """Excerpt text is attributed by the sidecar's turn manifest ONLY.
+
+    This class used to assert timestamp-proximity matching plus a blanket
+    "never quote a line labeled You" rule. Both were changed after a real
+    three-person call showed what they produce together: the device owner's
+    own mic cluster quoted ANOTHER participant's sentences. The owner's
+    turns are exactly the lines labeled "You", so skipping them left that
+    cluster with none of its own speech, and proximity then supplied
+    whatever overlapped in time on the other channel.
+
+    Measured on that recording, label against which channel's segments
+    covered the line's timestamp:
+
+        label      in-mic  in-sys  in-both  in-neither
+        You             0       3        7           1
+        <other>         4      13        4           0
+
+    Not one owner line in a mic segment alone; four of the other
+    participants' lines in one. Proximity was inverted, not noisy -- a
+    backfilled sidecar re-diarizes in its own run, so its boundaries were
+    never the ones the saved transcript's timestamps came from, and a call
+    taken without headphones puts the remote voices into the mic channel
+    too. See cluster_transcript_lines.
+    """
+
     def _write_transcript(self, tmp, body):
         path = Path(tmp) / "mtg001_transcript.txt"
         path.write_text(
@@ -995,12 +1020,23 @@ class ExtractSampleTextTests(unittest.TestCase):
         )
         return path
 
+    @staticmethod
+    def _manifest(*entries):
+        return [
+            {"start": start, "channel": channel, "diarization_speaker_id": sid}
+            for start, channel, sid in entries
+        ]
+
     def test_extracts_text_at_the_longest_segment(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(
                 tmp, "[00:05] [Speaker 2] hello there, how are you doing today",
             )
-            text = extract_sample_text(path, [{"start": 4.0, "end": 6.0}])
+            text = extract_sample_text(
+                path, [{"start": 4.0, "end": 6.0}],
+                turn_manifest=self._manifest((5.0, "system", "SPEAKER_0")),
+                target_ids={("system", "SPEAKER_0")},
+            )
             self.assertEqual(text, "hello there, how are you doing today")
 
     def test_picks_the_longest_segment_when_several_given(self):
@@ -1015,20 +1051,50 @@ class ExtractSampleTextTests(unittest.TestCase):
             )
             text = extract_sample_text(
                 path, [{"start": 4.0, "end": 6.0}, {"start": 299.0, "end": 339.0}],
+                turn_manifest=self._manifest(
+                    (5.0, "system", "SPEAKER_0"), (300.0, "system", "SPEAKER_0"),
+                ),
+                target_ids={("system", "SPEAKER_0")},
             )
             self.assertEqual(text, "this is the real substantial turn that should be quoted")
 
-    def test_never_quotes_you(self):
+    def test_the_owners_own_line_IS_quoted_for_the_owners_own_cluster(self):
+        # The correction. A "You" line is the owner speaking, so it is
+        # exactly what the mic cluster should quote -- refusing it is what
+        # made the owner's row show someone else's words.
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [You] this is the device owner talking")
-            text = extract_sample_text(path, [{"start": 4.0, "end": 6.0}])
+            text = extract_sample_text(
+                path, [{"start": 4.0, "end": 6.0}],
+                turn_manifest=self._manifest((5.0, "mic", "SPEAKER_0")),
+                target_ids={("mic", "SPEAKER_0")},
+            )
+            self.assertEqual(text, "this is the device owner talking")
+
+    def test_another_channels_line_is_never_quoted_for_this_cluster(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] someone else entirely")
+            text = extract_sample_text(
+                path, [{"start": 4.0, "end": 6.0}],
+                turn_manifest=self._manifest((5.0, "system", "SPEAKER_0")),
+                target_ids={("mic", "SPEAKER_0")},
+            )
             self.assertIsNone(text)
+
+    def test_no_manifest_means_no_text_rather_than_a_guess(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            self.assertIsNone(extract_sample_text(path, [{"start": 4.0, "end": 6.0}]))
 
     def test_truncates_long_text_with_ellipsis(self):
         with tempfile.TemporaryDirectory() as tmp:
             long_text = "word " * 60
             path = self._write_transcript(tmp, f"[00:05] [Speaker 2] {long_text.strip()}")
-            text = extract_sample_text(path, [{"start": 4.0, "end": 6.0}], max_chars=20)
+            text = extract_sample_text(
+                path, [{"start": 4.0, "end": 6.0}], max_chars=20,
+                turn_manifest=self._manifest((5.0, "system", "SPEAKER_0")),
+                target_ids={("system", "SPEAKER_0")},
+            )
             self.assertLessEqual(len(text), 21)  # 20 + ellipsis char
             self.assertTrue(text.endswith("…"))
 
@@ -1045,7 +1111,11 @@ class ExtractSampleTextTests(unittest.TestCase):
     def test_returns_none_when_nothing_overlaps(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:50] [Speaker 2] hello there")
-            self.assertIsNone(extract_sample_text(path, [{"start": 4.0, "end": 6.0}]))
+            self.assertIsNone(extract_sample_text(
+                path, [{"start": 4.0, "end": 6.0}],
+                turn_manifest=self._manifest((50.0, "system", "SPEAKER_0")),
+                target_ids={("system", "SPEAKER_0")},
+            ))
 
 
 class ExtractSpeakerSampleAudioTests(unittest.TestCase):

@@ -1101,30 +1101,114 @@ def sample_segments(segments: list, limit: int = SAMPLE_SEGMENT_LIMIT) -> list:
     return sorted(longest, key=lambda s: s.get("start", 0))
 
 
-def _transcript_text_in_range(lines: list, start: float, end: float, max_chars: int) -> Optional[str]:
-    """Joined text of every non-"You" diarised transcript line whose
-    timestamp falls in [start, end] (same tolerance as relabeling)."""
-    matched = []
-    for line in lines:
+def _covers(segments: list, timestamp_seconds: float) -> bool:
+    return any(
+        seg.get("start", 0) - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+        <= timestamp_seconds
+        <= seg.get("end", 0) + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+        for seg in segments
+    )
+
+
+def cluster_transcript_lines(
+    transcript_path: Path,
+    turn_manifest: Optional[list] = None,
+    target_ids: Optional[set] = None,
+) -> list:
+    """`[(timestamp_seconds, text)]` of the saved transcript's lines that
+    belong to ONE diarized cluster. Never raises; returns [] when the
+    transcript is missing or has no diarised lines.
+
+    Deliberately does NOT skip lines labeled "You", unlike the relabel
+    functions in this module. Not skipping them is the whole point: on the
+    MIC channel the device owner's own turns are exactly the lines labeled
+    "You", so excluding them left the owner's cluster with none of its own
+    speech and filled its excerpts with whatever happened to overlap in
+    time on the system channel -- i.e. a different person's words shown
+    while a human decides whose voice this is. Found against a real
+    three-person call, where all 11 of the owner's lines were dropped this
+    way. The exclusion was inherited from `relabel_transcript_speaker`,
+    where it IS correct (never rewrite the owner's label); reading and
+    rewriting simply want opposite rules.
+
+    Two ways to decide ownership, best first:
+
+    `turn_manifest` + `target_ids` (the sidecar's "transcript_lines", one
+    entry per diarised line in order): exact recorded provenance, the same
+    mechanism confirm-speaker prefers. No ambiguity to resolve at all. A
+    manifest whose length doesn't match the transcript's diarised-line
+    count is refused rather than mispaired, same as
+    `relabel_transcript_exact`.
+
+    WITHOUT a manifest this returns NOTHING, deliberately, rather than
+    falling back to timestamp proximity. Measured against a real
+    three-person call whose sidecar came from `backfill-speaker-embeddings`:
+
+        label      in-mic  in-sys  in-both  in-neither
+        You             0       3        7           1
+        <other>         4      13        4           0
+
+    Not one of the owner's eleven lines falls inside a mic segment alone,
+    while four of the other participants' lines do. Proximity here is not
+    merely noisy, it is INVERTED, and no exclusion rule recovers from that.
+    Two causes, both structural: a backfill re-diarizes the audio in a
+    separate run, so its segment boundaries were never the ones the saved
+    transcript's timestamps came from; and on a call taken without
+    headphones the mic channel also carries the remote voices through the
+    speakers, so mic segments genuinely cover the remote speaker's turns.
+
+    The cost of guessing is not a missing quote. It is a quote from a
+    DIFFERENT PERSON displayed under this speaker's name, at the exact
+    moment a human is deciding whose voice this is -- the failure that
+    prompted this function. The play button is unaffected and stays the
+    honest half: it cuts audio at this cluster's own segments, which are
+    internally consistent with the run that produced them.
+    """
+    if not transcript_path.exists():
+        return []
+    try:
+        content = transcript_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    parsed = []
+    for line in content.split("\n"):
         match = _TRANSCRIPT_LINE_RE.match(line)
         if not match:
             continue
-        timestamp_str, label, text = match.groups()
-        if label == "You":
-            continue
+        timestamp_str, _label, text = match.groups()
         try:
-            timestamp_seconds = _parse_transcript_timestamp(timestamp_str)
+            parsed.append((_parse_transcript_timestamp(timestamp_str), text))
         except ValueError:
-            continue
-        if (
-            start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-            <= timestamp_seconds
-            <= end + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        ):
-            matched.append(text)
-    if not matched:
+            # A line whose timestamp will not parse still occupies a
+            # manifest position, so keep it in the sequence rather than
+            # silently shifting every later pairing by one.
+            parsed.append((None, text))
+
+    if not turn_manifest or not target_ids:
+        return []
+    if len(turn_manifest) != len(parsed):
+        # Same refusal as relabel_transcript_exact: a manifest that does not
+        # line up with the transcript cannot be paired by position, and
+        # guessing a pairing is how a line ends up under the wrong speaker.
+        logger.warning(
+            "cluster_transcript_lines: %s has %d diarised lines but turn_manifest has "
+            "%d entries -- refusing to guess a pairing, no excerpt text.",
+            transcript_path, len(parsed), len(turn_manifest),
+        )
+        return []
+    return [
+        (ts, text)
+        for (ts, text), entry in zip(parsed, turn_manifest)
+        if (entry.get("channel"), entry.get("diarization_speaker_id")) in target_ids
+        and ts is not None
+    ]
+
+
+def _join_texts(texts: list, max_chars: int) -> Optional[str]:
+    if not texts:
         return None
-    combined = " ".join(matched).strip()
+    combined = " ".join(texts).strip()
     if len(combined) > max_chars:
         combined = combined[:max_chars].rstrip() + "…"
     return combined or None
@@ -1135,6 +1219,8 @@ def extract_segment_samples(
     segments: list,
     limit: int = SAMPLE_SEGMENT_LIMIT,
     max_chars: int = SAMPLE_TEXT_MAX_CHARS,
+    turn_manifest: Optional[list] = None,
+    target_ids: Optional[set] = None,
 ) -> list:
     """`[{"start", "end", "text"}]` for this cluster's review samples --
     the multi-excerpt counterpart to `extract_sample_text`.
@@ -1156,22 +1242,16 @@ def extract_segment_samples(
     if not chosen:
         return []
 
-    lines: list = []
-    if transcript_path.exists():
-        try:
-            lines = transcript_path.read_text(encoding="utf-8").split("\n")
-        except OSError:
-            lines = []
+    owned = cluster_transcript_lines(
+        transcript_path, turn_manifest=turn_manifest, target_ids=target_ids,
+    )
 
     return [
         {
             "start": seg.get("start", 0),
             "end": seg.get("end", 0),
-            "text": (
-                _transcript_text_in_range(
-                    lines, seg.get("start", 0), seg.get("end", 0), max_chars,
-                )
-                if lines else None
+            "text": _join_texts(
+                [text for ts, text in owned if _covers([seg], ts)], max_chars,
             ),
         }
         for seg in chosen
@@ -1182,50 +1262,29 @@ def extract_sample_text(
     transcript_path: Path,
     segments: list,
     max_chars: int = SAMPLE_TEXT_MAX_CHARS,
+    turn_manifest: Optional[list] = None,
+    target_ids: Optional[set] = None,
 ) -> Optional[str]:
-    """A short quoted excerpt of what this cluster actually said, read from
-    the saved transcript at the cluster's longest segment's timestamp range
-    -- gives a human reviewing an "Unidentified speaker" row something to
-    recognize them by without leaving the app. Read-only counterpart to
-    `relabel_transcript_speaker`'s timestamp-matching (never "You" lines,
-    same tolerance). Returns None (never raises) if the transcript is
-    missing/unreadable, has no segments to match, or no line overlaps the
-    longest segment's range -- a soft, best-effort aid, not a hard
+    """A short quoted excerpt of what this cluster actually said, taken from
+    its longest (most trustworthy) segment -- gives a human reviewing an
+    "Unidentified speaker" row something to recognize them by without
+    leaving the app.
+
+    Ownership of a transcript line is decided by `cluster_transcript_lines`,
+    not by the line's label: this used to skip every line labeled "You",
+    which silently guaranteed that the device owner's own mic cluster
+    quoted somebody ELSE (see that function). Returns None (never raises)
+    when the transcript is missing, there are no segments, or no line this
+    cluster owns falls in the longest one -- a best-effort aid, never a
     requirement for the row to render.
     """
     target = longest_segment(segments)
-    if target is None or not transcript_path.exists():
+    if target is None:
         return None
-    try:
-        content = transcript_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-
-    matched_texts = []
-    for line in content.split("\n"):
-        match = _TRANSCRIPT_LINE_RE.match(line)
-        if not match:
-            continue
-        timestamp_str, label, text = match.groups()
-        if label == "You":
-            continue
-        try:
-            timestamp_seconds = _parse_transcript_timestamp(timestamp_str)
-        except ValueError:
-            continue
-        if (
-            target.get("start", 0) - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-            <= timestamp_seconds
-            <= target.get("end", 0) + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        ):
-            matched_texts.append(text)
-
-    if not matched_texts:
-        return None
-    combined = " ".join(matched_texts).strip()
-    if len(combined) > max_chars:
-        combined = combined[:max_chars].rstrip() + "…"
-    return combined or None
+    owned = cluster_transcript_lines(
+        transcript_path, turn_manifest=turn_manifest, target_ids=target_ids,
+    )
+    return _join_texts([text for ts, text in owned if _covers([target], ts)], max_chars)
 
 
 # Small buffer around the longest segment's exact boundaries so a clip

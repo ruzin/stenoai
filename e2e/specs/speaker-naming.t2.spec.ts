@@ -214,11 +214,19 @@ test('identification aids: sample_text/is_likely_artifact/recording_available an
         },
       },
     },
-  });
+  }, [
+    // The turn manifest is what makes sample_text attributable at all: one
+    // entry per diarised transcript line, in order, naming the exact
+    // cluster that produced it. Without it the backend returns no text
+    // rather than matching by timestamp -- a backfilled sidecar's segments
+    // come from a different diarization run than the transcript's [MM:SS]
+    // markers, and matching across the two put a different participant's
+    // words under the owner's own cluster on a real recording.
+    { start: 1.0, channel: 'mic', diarization_speaker_id: 'SPEAKER_0' },
+  ]);
   // Timestamp must land inside the segment's [start, end] +/- the 0.5s
-  // relabel/sample-text tolerance -- SPEAKER_0's segment is [0.5, 2.5], so
-  // [00:01] (1s) is safely within range (unlike 0s, which would be just
-  // outside the 0.2s lower bound).
+  // sample tolerance -- SPEAKER_0's segment is [0.5, 2.5], so [00:01] (1s)
+  // is safely within range (unlike 0s, which would be just outside).
   writeTranscriptFile(userDataDir, stem, '[00:01] [Speaker 2] this is a real substantial turn');
 
   const { page } = await launchApp();

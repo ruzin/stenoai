@@ -1,7 +1,7 @@
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { writeSpeakersSidecar, writeTranscriptFile, writeMeetingMarkdown } from '../fixtures/user-config';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import path from 'path';
 
 /**
@@ -54,6 +54,7 @@ type StenoWindow = Window & {
               suggested_name: string | null;
               candidates: unknown[];
               contains_multiple_speakers?: boolean;
+              sample_text?: string | null;
               samples?: Array<{ start: number; end: number; text: string | null }>;
             }
           >
@@ -104,20 +105,42 @@ function seedMeeting(userDataDir: string, stem: string) {
         },
       },
     },
-  });
+  }, [
+    // One entry per diarised transcript line, in order -- exact recorded
+    // provenance. Three of the four lines belong to SPEAKER_0, and they
+    // are the lines labeled "You": on the mic channel those are the
+    // owner's own turns, and an earlier version skipped every "You" line,
+    // which left the owner's cluster quoting somebody else.
+    { start: 10.0, channel: 'system', diarization_speaker_id: 'SPEAKER_0' },
+    { start: 60.0, channel: 'system', diarization_speaker_id: 'SPEAKER_0' },
+    { start: 120.0, channel: 'system', diarization_speaker_id: 'SPEAKER_0' },
+    { start: 200.0, channel: 'system', diarization_speaker_id: 'SPEAKER_1' },
+  ]);
   writeTranscriptFile(
     userDataDir,
     stem,
     [
-      '[00:10] [Speaker 2] the longest turn in the meeting',
+      '[00:10] [You] the longest turn in the meeting',
       '',
-      '[01:00] [Speaker 2] a short interjection',
+      '[01:00] [You] a short interjection',
       '',
-      '[02:00] [Speaker 2] the middle length turn',
+      '[02:00] [You] the middle length turn',
       '',
       '[03:20] [Speaker 3] someone else entirely',
     ].join('\n'),
   );
+}
+
+/** The same meeting WITHOUT a turn manifest -- the shape every sidecar
+ * written by backfill-speaker-embeddings has. Excerpt text is withheld
+ * entirely for these, because the transcript's timestamps came from a
+ * different diarization run than these segments. */
+function seedMeetingWithoutManifest(userDataDir: string, stem: string) {
+  seedMeeting(userDataDir, stem);
+  const sidecarPath = path.join(userDataDir, 'output', `${stem}_speakers.json`);
+  const sidecar = readJson(sidecarPath);
+  delete sidecar.transcript_lines;
+  writeFileSync(sidecarPath, JSON.stringify(sidecar, null, 2));
 }
 
 test('a marked cluster is withheld from naming, refused by confirm, and raises the minimum speaker count', async ({
@@ -287,17 +310,48 @@ test('a cluster offers several chronological excerpts, and each index plays its 
   // getSampleAudio(..., i) plays, so a duration-ordered list would make
   // every play button play a different moment than the text beside it.
   expect(samples.map((s) => s.start)).toEqual([10.0, 60.0, 120.0]);
+  // The lines are labeled "You" on purpose. Those are the device owner's
+  // own turns, and an earlier version skipped every "You" line, which left
+  // the owner's own cluster quoting a DIFFERENT participant -- found on a
+  // real three-person call.
   expect(samples.map((s) => s.text)).toEqual([
     'the longest turn in the meeting',
     'a short interjection',
     'the middle length turn',
   ]);
 
-  // Sourced from the saved transcript by timestamp, not from the sidecar's
-  // `transcript_lines` manifest -- this seeded sidecar has none, exactly
-  // like every sidecar backfill-speaker-embeddings writes.
-  const sidecar = readJson(path.join(userDataDir, 'output', `${stem}_speakers.json`));
-  expect(sidecar.transcript_lines).toBeUndefined();
+  expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
+});
+
+test('without a turn manifest the moments stay playable but carry no attributed text', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const stem = 'e2e-multi-nomanifest';
+  seedMeetingWithoutManifest(userDataDir, stem);
+
+  const { page } = await launchApp();
+
+  const result = await page.evaluate(
+    (s) => (window as StenoWindow).stenoai.speakers.suggestForMeeting(s), stem,
+  );
+  const row = result.channels.system.SPEAKER_0;
+  const samples = row.samples ?? [];
+
+  // Still three moments to listen to -- the timestamps and the audio come
+  // from the same run as the segments, so those stay trustworthy.
+  expect(samples).toHaveLength(3);
+  expect(samples.map((s) => s.start)).toEqual([10.0, 60.0, 120.0]);
+
+  // But no text is attributed. This is the shape every sidecar written by
+  // backfill-speaker-embeddings has, and for those the transcript's
+  // timestamps came from a different diarization run than these segments.
+  // Measured on a real call, matching across the two put another
+  // participant's sentences under the owner's own cluster -- so nothing is
+  // shown rather than something possibly wrong.
+  expect(samples.map((s) => s.text)).toEqual([null, null, null]);
+  expect(row.sample_text ?? null).toBeNull();
 
   expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
 });

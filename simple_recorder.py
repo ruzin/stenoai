@@ -5351,6 +5351,16 @@ def suggest_speakers(meeting_stem):
     recording_path = _find_recording_file(dirs["recordings"], meeting_stem)
     transcript_path = dirs["transcripts"] / f"{meeting_stem}_transcript.txt"
 
+    # Exact per-line provenance, present only on meetings recorded after the
+    # manifest existed. Without it no excerpt TEXT is shown at all: a
+    # backfill-produced sidecar re-diarized the audio in its own run, so its
+    # segment timestamps were never the ones the saved transcript's [MM:SS]
+    # markers came from, and matching text by proximity across the two put a
+    # DIFFERENT participant's sentences under the owner's own mic cluster
+    # (measured -- see cluster_transcript_lines). The play buttons are
+    # unaffected; they cut audio at this run's own segments.
+    turn_manifest = sidecar.get("transcript_lines")
+
     profiles = get_config().get_person_profiles()
     # Merge fragments per channel first, then suggest for ALL channels in
     # one call -- used-person exclusivity is meeting-wide (a person can't
@@ -5384,6 +5394,7 @@ def suggest_speakers(meeting_stem):
                 context.speech_duration_seconds / context.segment_count
                 if context.segment_count else 0.0
             )
+            target_ids = {(channel_name, fid) for fid in fragment_ids}
             # Whether a human has ALREADY confirmed this exact cluster,
             # derived from real persisted state (an existing prototype),
             # not transient UI state -- a suggestion's status/tier can stay
@@ -5430,7 +5441,10 @@ def suggest_speakers(meeting_stem):
                     _format_timestamp(min(seg["start"] for seg in pooled_segments))
                     if pooled_segments else None
                 ),
-                "sample_text": extract_sample_text(transcript_path, pooled_segments),
+                "sample_text": extract_sample_text(
+                    transcript_path, pooled_segments,
+                    turn_manifest=turn_manifest, target_ids=target_ids,
+                ),
                 # Several excerpts, chronological, each independently
                 # playable (see extract_segment_samples / sample_segments --
                 # `samples[i]` is what `get-speaker-sample-audio
@@ -5441,7 +5455,10 @@ def suggest_speakers(meeting_stem):
                 # two different voices under one cluster is the only way the
                 # contamination behind `contains_multiple_speakers` becomes
                 # visible at all.
-                "samples": extract_segment_samples(transcript_path, pooled_segments),
+                "samples": extract_segment_samples(
+                    transcript_path, pooled_segments,
+                    turn_manifest=turn_manifest, target_ids=target_ids,
+                ),
                 # Set by `mark-speaker-cluster`, never derived: no measurable
                 # property of a centroid distinguishes one voice from two
                 # blended ones (0.8270 to the contaminating speaker in the

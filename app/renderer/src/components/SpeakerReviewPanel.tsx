@@ -583,6 +583,22 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   style={{ borderColor: 'var(--border-subtle)' }}
                   data-testid={`speaker-samples-${key}`}
                 >
+                  {/* Said once, not repeated per row. A meeting whose
+                      speakers sidecar was produced by the backfill has no
+                      turn manifest, and its transcript timestamps come from
+                      a different diarization run -- so no line can be
+                      attributed to a cluster with confidence, and none is
+                      shown. Listening still works, and is the reliable half
+                      anyway: the clip is cut at this cluster's own segments. */}
+                  {samples.length > 0 && !samples.some((s) => s.text) && (
+                    <span
+                      className="text-[11.5px]"
+                      style={{ color: 'var(--fg-2)' }}
+                      data-testid={`speaker-samples-textless-${key}`}
+                    >
+                      Transcript text can’t be matched to a speaker in this recording. Play to listen.
+                    </span>
+                  )}
                   {samples.map((sample, index) => (
                     <div
                       key={`${sample.start}-${index}`}
@@ -610,11 +626,18 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                         style={{ color: 'var(--fg-2)' }}
                         title={sample.text ?? undefined}
                       >
-                        {/* A segment no transcript line covers still gets a
+                        {/* A moment with no attributable line still gets a
                             row: the clip is playable, and dropping it would
                             put every later excerpt's play button out of step
-                            with its index. */}
-                        {sample.text ? `“${sample.text}”` : 'No transcript for this moment'}
+                            with its index. Left blank when the whole cluster
+                            has no text -- the one explanation above already
+                            says why, and repeating it per row reads as five
+                            separate failures. */}
+                        {sample.text
+                          ? `“${sample.text}”`
+                          : samples.some((s) => s.text)
+                            ? 'No transcript for this moment'
+                            : ''}
                       </span>
                     </div>
                   ))}

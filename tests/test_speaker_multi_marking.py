@@ -247,12 +247,15 @@ class SampleSegmentsTests(unittest.TestCase):
                          [{"start": 1.0, "end": 2.0}])
         self.assertEqual(sample_segments([], limit=5), [])
 
-    def test_samples_survive_a_sidecar_with_no_turn_manifest(self):
+    def test_a_sidecar_without_a_turn_manifest_yields_playable_but_TEXTLESS_samples(self):
         # Every sidecar written by backfill-speaker-embeddings has no
-        # transcript_lines at all -- only the live pipeline writes one. A
-        # samples list sourced from that manifest would come back empty for
-        # exactly the historical meetings a human most needs help with, so
-        # this reads the saved transcript by timestamp instead.
+        # transcript_lines, and for those the transcript's [MM:SS] markers
+        # came from a DIFFERENT diarization run than the segments here.
+        # Measured on a real three-person call: not one of the owner's
+        # eleven lines fell inside a mic segment alone, while four of the
+        # other participants' lines did -- proximity was inverted, not just
+        # noisy. So no text is attributed at all. The timestamps and the
+        # audio stay, because those come from the same run as the segments.
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.txt"
             transcript.write_text(
@@ -263,22 +266,58 @@ class SampleSegmentsTests(unittest.TestCase):
             samples = extract_segment_samples(
                 transcript, [{"start": 8.0, "end": 20.0}, {"start": 48.0, "end": 55.0}],
             )
-            self.assertEqual([s["text"] for s in samples],
-                             ["first excerpt here", "second excerpt here"])
+            self.assertEqual(len(samples), 2, "the moments are still offered to listen to")
+            self.assertEqual([s["text"] for s in samples], [None, None])
+            self.assertEqual([s["start"] for s in samples], [8.0, 48.0])
 
-    def test_segment_with_no_transcript_line_still_yields_a_playable_entry(self):
+    def test_a_turn_manifest_attributes_each_line_to_its_own_cluster(self):
+        # With exact provenance there is nothing to match: the i-th diarised
+        # line pairs with turn_manifest[i]. Crucially this INCLUDES lines
+        # labeled "You" -- on the mic channel the owner's own turns are
+        # exactly those, and the earlier code skipped them, which left the
+        # owner's cluster quoting whoever happened to overlap in time.
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.txt"
-            transcript.write_text("[00:10] [Speaker 2] only line\n", encoding="utf-8")
-            samples = extract_segment_samples(
-                transcript, [{"start": 8.0, "end": 20.0}, {"start": 900.0, "end": 910.0}],
+            transcript.write_text(
+                "[00:10] [You] the owner speaking\n"
+                "[00:20] [Others] someone else speaking\n"
+                "[00:30] [You] the owner again\n",
+                encoding="utf-8",
             )
-            self.assertEqual(len(samples), 2)
-            self.assertIsNone(samples[1]["text"])
-            # Kept rather than dropped: the clip is still playable, and a
-            # dropped entry would shift every later index out of step with
-            # get-speaker-sample-audio --segment-index.
-            self.assertEqual(samples[1]["start"], 900.0)
+            manifest = [
+                {"start": 10.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 20.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 30.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            mic = extract_segment_samples(
+                transcript, [{"start": 8.0, "end": 15.0}, {"start": 28.0, "end": 35.0}],
+                turn_manifest=manifest, target_ids={("mic", "SPEAKER_0")},
+            )
+            self.assertEqual(
+                [s["text"] for s in mic],
+                ["the owner speaking", "the owner again"],
+                "the owner's own lines must reach the owner's own cluster",
+            )
+
+            system = extract_segment_samples(
+                transcript, [{"start": 18.0, "end": 25.0}],
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual([s["text"] for s in system], ["someone else speaking"])
+
+    def test_a_manifest_that_does_not_line_up_is_refused_rather_than_mispaired(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [You] one\n[00:20] [Others] two\n[00:30] [You] three\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript, [{"start": 8.0, "end": 15.0}],
+                turn_manifest=[{"start": 10.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"}],
+                target_ids={("mic", "SPEAKER_0")},
+            )
+            self.assertEqual([s["text"] for s in samples], [None])
 
     def test_segment_index_selects_the_matching_excerpt_and_refuses_out_of_range(self):
         # The single point where "play excerpt 3" turns into a time range.

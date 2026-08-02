@@ -228,6 +228,13 @@ class SuggestSpeakersCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "output"
             output_dir.mkdir(parents=True, exist_ok=True)
+            # A turn_manifest is what makes the quote attributable at all.
+            # Without one the CLI returns no text rather than matching by
+            # timestamp -- a backfilled sidecar's segments come from a
+            # different diarization run than the transcript's [MM:SS]
+            # markers, and matching across the two put another
+            # participant's words under the owner's own cluster on a real
+            # recording (see cluster_transcript_lines).
             write_speakers_sidecar(output_dir, "mtg001", {
                 "system": {
                     "recording_type": "remote",
@@ -238,7 +245,9 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                         },
                     },
                 },
-            })
+            }, turn_manifest=[
+                {"start": 5.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+            ])
             transcripts_dir = Path(tmp) / "transcripts"
             transcripts_dir.mkdir(parents=True, exist_ok=True)
             (transcripts_dir / "mtg001_transcript.txt").write_text(
