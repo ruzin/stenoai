@@ -588,6 +588,18 @@
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 
+  /* One bubble in the live transcript. The panel is a 200px viewport onto a
+     list that grows for the whole meeting, so the great majority of rows are
+     scrolled out of sight - content-visibility lets the browser skip their
+     style, layout and paint while a partial arrives up to ~5x a second.
+     `contain-intrinsic-size: auto` reserves a plausible height for a row that
+     has never been rendered and remembers the real one afterwards, which keeps
+     the scrollbar and the scroll-to-bottom honest. */
+  .live-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 44px;
+  }
+
   /* Not itself clickable — only the copy/minimize buttons inside are, via
      .mv-chat-tool's own hover. No cursor/hover here so the row doesn't imply
      the whole header is a click target. */

@@ -3,7 +3,7 @@ import { ChevronUp, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRecording } from '@/hooks/useRecording';
-import { useLiveTranscript } from '@/hooks/useLiveTranscript';
+import { useLiveTranscriptStatus } from '@/hooks/useLiveTranscript';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { useLiveTranscriptAvailable } from '@/hooks/useModels';
 
@@ -37,7 +37,11 @@ export function LiveDock() {
   // Gated to Parakeet via `liveAvailable` — Whisper never spawns the live
   // sidecar, so its status would sit at 'loading' forever. Only meaningful
   // while actively recording.
-  const live = useLiveTranscript(liveAvailable ? recording.sessionName : null);
+  //
+  // Status-only subscription on purpose: the pill is mounted for the entire
+  // meeting, and the full hook would keep a second complete copy of every
+  // segment just to decide whether to show one label.
+  const live = useLiveTranscriptStatus(liveAvailable ? recording.sessionName : null);
   const loadingModel = isRecording && live.status === 'loading';
   // Delay the label by ~500ms so a warm-cache load (the common case after
   // the offline-loading fix) goes straight to the timer with no
