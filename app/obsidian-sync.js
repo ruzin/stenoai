@@ -41,6 +41,28 @@ function sha256(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
+// Windows transiently locks a freshly-written file (AV / search indexer), so a
+// same-instant unlink or rename can throw EPERM/EBUSY. Retry briefly with a real
+// synchronous sleep — mirrors the app's own delete path (commitPendingDelete).
+// (fs.rmSync's maxRetries is ignored for single files, so we roll our own.)
+function sleepMs(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) {}
+}
+function retryTransient(fn, tries = 6) {
+  for (let i = 0; ; i++) {
+    try { return fn(); }
+    catch (err) {
+      const transient = err && ['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'].includes(err.code);
+      if (i >= tries - 1 || !transient) throw err;
+      sleepMs(40);
+    }
+  }
+}
+function rmWithRetry(p) {
+  try { retryTransient(() => fs.unlinkSync(p)); } catch (_) { /* ENOENT / gave up */ }
+}
+function renameWithRetry(from, to) { retryTransient(() => fs.renameSync(from, to)); }
+
 // Parse Steno's line-by-line frontmatter (NOT nested YAML — `folders:` is a
 // one-line JSON array). Returns { fm, body }. Mirrors report_store._split_frontmatter.
 function parseFrontmatter(raw) {
@@ -200,7 +222,7 @@ function registerObsidianSync({
     const tmp = path.join(path.dirname(dest),
       `.tmp-${path.basename(dest)}-${process.pid}-${Date.now()}`);
     fs.writeFileSync(tmp, data);
-    fs.renameSync(tmp, dest); // atomic on one volume
+    renameWithRetry(tmp, dest); // atomic on one volume (Windows-retry on lock)
   }
 
   function saveIndex(idx) {
@@ -285,7 +307,7 @@ function registerObsidianSync({
           if (ownIdx) saveIndex(idx);
           return { status: 'conflict' };
         }
-        try { fs.unlinkSync(absOld); } catch (_) { /* already gone */ }
+        rmWithRetry(absOld);
         try { fs.rmdirSync(path.dirname(absOld)); } catch (_) { /* not empty / root */ }
       }
 
@@ -342,7 +364,7 @@ function registerObsidianSync({
         saveIndex(idx);
         return { status: 'conflict' };
       }
-      try { fs.unlinkSync(abs); } catch (_) { /* already gone */ }
+      rmWithRetry(abs);
       try { fs.rmdirSync(path.dirname(abs)); } catch (_) { /* not empty / root */ }
       delete idx.notes[stem];
       delete idx.conflicts[stem];
@@ -406,7 +428,7 @@ function registerObsidianSync({
             const entry = idx.notes[stem];
             const abs = path.join(cached.vaultPath, entry.vaultRelPath);
             if (!isExternallyEdited(abs, entry)) {
-              try { fs.unlinkSync(abs); } catch (_) {}
+              rmWithRetry(abs);
               try { fs.rmdirSync(path.dirname(abs)); } catch (_) {}
               delete idx.notes[stem];
             }
