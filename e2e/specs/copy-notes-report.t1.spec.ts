@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/electron';
+import { openShareMenu } from '../fixtures/share-menu';
 import type { Page } from '@playwright/test';
 
 /**
@@ -47,7 +48,7 @@ test('Copy notes copies the open report, and the Standard note when none is open
   await page.evaluate((f) => {
     window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
   }, SUMMARY_FILE);
-  await expect(page.getByRole('button', { name: 'Copy notes' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
 
   // The seeded report lives in the view-toggle's template dropdown (opened
   // from the right side of the split pill).
@@ -58,7 +59,7 @@ test('Copy notes copies the open report, and the Standard note when none is open
   await page.keyboard.press('Escape');
 
   // Standard note open (active_report is null) → the structured-note copy.
-  await page.getByRole('button', { name: 'Copy notes' }).click();
+  await (await openShareMenu(page)).getByRole('button', { name: 'Copy notes' }).click();
   let writes = await clipboardWrites(page);
   expect(writes).toHaveLength(1);
   expect(writes[0]).toContain('Epsilon Planning');
@@ -70,7 +71,7 @@ test('Copy notes copies the open report, and the Standard note when none is open
   await page.getByTestId('note-view-menu-trigger').click();
   await menu.getByRole('button', { name: /^Status Report/ }).click();
   await expect(page.getByText('Pipeline healthy')).toBeVisible();
-  await page.getByRole('button', { name: 'Copy notes' }).click();
+  await (await openShareMenu(page)).getByRole('button', { name: 'Copy notes' }).click();
   writes = await clipboardWrites(page);
   expect(writes).toHaveLength(2);
   expect(writes[1]).toContain('Epsilon Planning');
@@ -84,7 +85,7 @@ test('Copy notes copies the open report, and the Standard note when none is open
   // Switching back to Summary (Standard) restores the structured-note copy.
   await page.getByTestId('note-view-menu-trigger').click();
   await menu.getByRole('button', { name: 'Summary' }).click();
-  await page.getByRole('button', { name: 'Copy notes' }).click();
+  await (await openShareMenu(page)).getByRole('button', { name: 'Copy notes' }).click();
   writes = await clipboardWrites(page);
   expect(writes).toHaveLength(3);
   expect(writes[2]).toContain('PARTICIPANTS');

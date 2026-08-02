@@ -20,11 +20,12 @@ import {
   Mic,
   PencilLine,
   RefreshCw,
+  Share,
   Trash2,
   Users,
 } from 'lucide-react';
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { Select, SelectContent, SelectItem, SelectSeparator } from '@/components/ui/select';
@@ -69,6 +70,7 @@ import { useActiveMeeting } from '@/lib/askBarContext';
 import { ipc, type Meeting, type Report, type Template } from '@/lib/ipc';
 import { buildTranscriptBundle, defaultExportFilename } from '@/lib/transcriptBundle';
 import { buildNotesCopyText, type StructuredNoteSections } from '@/lib/notesCopy';
+import { buildNotesMarkdown } from '@/lib/notesMarkdown';
 import { buildNotesHtml, hasNotesContent } from '@/lib/notesPdf';
 import { unwrap } from '@/lib/result';
 import { cn } from '@/lib/utils';
@@ -80,6 +82,28 @@ import { useRecording } from '@/hooks/useRecording';
 import { useAutoSummarizeSetting } from '@/hooks/useSettings';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
+
+// The `…` popover's entry markup, lifted to a constant so the Share menu is
+// visually the same control rather than a near-copy that drifts from it. Both
+// popovers are plain `Popover` + buttons (no roving focus); giving them
+// keyboard navigation is an improvement to that shared pattern, not part of the
+// Share menu.
+const MENU_ENTRY_CLASS =
+  'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50';
+
+// Group separator inside the Share menu. aria-hidden with role="none": it is
+// pure visual grouping, and a `separator` role in a popover that is not a real
+// menu would announce structure the keyboard cannot navigate.
+function MenuDivider() {
+  return (
+    <div
+      role="none"
+      aria-hidden="true"
+      className="mx-2 my-1 h-px"
+      style={{ background: 'var(--border-subtle)' }}
+    />
+  );
+}
 
 // Cross-process sentinel: the export-transcript handler returns this exact error
 // when the user dismisses the save dialog, which we treat as a silent no-op
@@ -534,15 +558,19 @@ function DetailContent({
   // rejected clipboard (permission denied, no focus) must not show a false
   // success. The transcript bundle is large and the only thing a user pastes
   // into an LLM, so a silent miscopy is worse here than for the small notes copy.
+  // Returns whether the copy actually landed, so the Share menu only
+  // self-closes on success and a failure keeps the error line in view.
   const copyTranscriptForAi = async () => {
-    if (!transcriptBundle) return;
+    if (!transcriptBundle) return false;
     setExportError(null);
     try {
       await navigator.clipboard.writeText(transcriptBundle);
       setCopiedTranscript(true);
       setTimeout(() => setCopiedTranscript(false), 1500);
+      return true;
     } catch (error) {
       setExportError(`Couldn't copy transcript: ${getErrorMessage(error)}`);
+      return false;
     }
   };
 
@@ -593,26 +621,38 @@ function DetailContent({
     ? Boolean(stripReasoning(activeReport.content).trim())
     : hasNotesContent(noteSections);
 
-  // Branded-PDF export of whichever note is on screen — the open template
-  // report when one is selected, otherwise the Standard structured note. The
-  // report's markdown is serialised with the SAME renderer the view above uses
+  // Branded PDF of whichever note is on screen — the open template report when
+  // one is selected, otherwise the Standard structured note. The report's
+  // markdown is serialised with the SAME renderer the view above uses
   // (react-markdown), so the PDF can't drift from what the user is looking at.
-  // Hands finished HTML to the export-note-pdf IPC, which rasterises + writes it.
-  const saveNotesPdf = async () => {
-    if (!canExportNotesPdf) return;
-    setExportError(null);
-    try {
-      const reportForPdf = activeReport
+  //
+  // Both PDF surfaces go through here — "Save notes as PDF" below and "Share
+  // notes as PDF" in the share menu. They are two adjacent actions on the same
+  // document, and #426 exists because one of them was left exporting the
+  // Standard note while a report was open; a single builder is what keeps them
+  // from disagreeing again. Called on click, never on render: the branded shell
+  // is ~45KB with its base64 font.
+  const buildNotesPdfHtml = () =>
+    buildNotesHtml(
+      noteSections,
+      activeReport
         ? {
             templateName: activeReport.template_name,
             contentHtml: renderToStaticMarkup(
               <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>,
             ),
           }
-        : null;
+        : null
+    );
+
+  // Hands finished HTML to the export-note-pdf IPC, which rasterises + writes it.
+  const saveNotesPdf = async () => {
+    if (!canExportNotesPdf) return;
+    setExportError(null);
+    try {
       const res = await ipc().meetings.exportNotePdf(
         defaultExportFilename(meeting, 'pdf'),
-        buildNotesHtml(noteSections, reportForPdf)
+        buildNotesPdfHtml()
       );
       if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
         setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
@@ -632,6 +672,127 @@ function DetailContent({
     void navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // The active report, reasoning stripped, in the shape the note builders take.
+  // Same selection as copyNotes: whichever note is on screen is what leaves.
+  const reportForExport = activeReport
+    ? { content: stripReasoning(activeReport.content) }
+    : null;
+
+  // Notes exports are off while a summary/report stream is on screen, for the
+  // same reason Copy notes is: otherwise the pre-stream note is written out
+  // while its replacement is still arriving.
+  const notesExportBlocked = streamPhase !== 'idle';
+
+  // Notes and transcript must not suggest the same filename. Both are .md, and
+  // on the share path they land in ONE directory where the second write would
+  // silently replace the first - including under an already-open mail draft,
+  // whose attachment would then quietly become the other document.
+  const notesMarkdownFilename = () =>
+    defaultExportFilename(meeting, 'md').replace(/\.md$/, '-notes.md');
+
+  // Markdown export of the note. Needs no main-process code of its own:
+  // export-transcript already takes an arbitrary string and filters to .md.
+  const saveNotesMarkdown = async () => {
+    if (!canExportNotesPdf || notesExportBlocked) return;
+    setExportError(null);
+    try {
+      const res = await ipc().meetings.exportTranscript(
+        notesMarkdownFilename(),
+        buildNotesMarkdown(noteSections, reportForExport)
+      );
+      if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
+        setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't save notes: ${getErrorMessage(error)}`);
+    }
+  };
+
+  // The Share menu is controlled so a copy can leave its "Copied" label on
+  // screen for a beat before dismissing itself. Inside a menu the old checkmark
+  // feedback would vanish with the popover before it registered.
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const shareCloseTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Identifies the current menu instance. An auto-close belongs to the instance
+  // the copy happened in, and cancelling on open/close is not enough on its own:
+  // the transcript copy awaits the clipboard first, so a menu closed and
+  // reopened during that await has no timer yet to cancel, and the resolving
+  // promise would then schedule one against the new instance. Both the
+  // scheduling and the firing therefore check the epoch.
+  const shareEpoch = React.useRef(0);
+  const cancelShareClose = () => {
+    if (shareCloseTimer.current) {
+      clearTimeout(shareCloseTimer.current);
+      shareCloseTimer.current = null;
+    }
+  };
+  const closeShareAfterCopy = (epoch: number) => {
+    if (shareEpoch.current !== epoch) return;
+    cancelShareClose();
+    shareCloseTimer.current = setTimeout(() => {
+      if (shareEpoch.current === epoch) setShareOpen(false);
+    }, 800);
+  };
+  const onShareOpenChange = (open: boolean) => {
+    cancelShareClose();
+    shareEpoch.current += 1;
+    setShareOpen(open);
+  };
+  React.useEffect(() => cancelShareClose, []);
+
+  // Is there a native share sheet here at all. A capability answered by the main
+  // process, NOT the renderer's isMac: that is a navigator.platform constant
+  // frozen at import, so it can neither be flipped at runtime nor exercised in
+  // both directions by a test - and the absent branch is the one that keeps
+  // Windows from reaching a ShareMenu that does not exist there.
+  // `=== true` means an unresolved query counts as false, so the group never
+  // flashes in before it is known to exist. Cached across notes: the answer
+  // cannot change while the app runs.
+  const shareCapability = useQuery({
+    queryKey: ['share', 'canShare'],
+    queryFn: () => ipc().share.canShare(),
+    staleTime: Infinity,
+  });
+  const canShareToSheet = shareCapability.data === true;
+
+  // Which share is in flight, or null. Unlike the save actions there is no
+  // dialog to react to a click: up to 15 seconds pass before the sheet appears,
+  // and in that gap everyone clicks a second time. So the clicked entry says so,
+  // and only one share may be in flight across all three.
+  type ShareEntry = 'notes-pdf' | 'notes-md' | 'transcript';
+  const [sharing, setSharing] = React.useState<ShareEntry | null>(null);
+
+  const runShare = async (
+    entry: ShareEntry,
+    kind: 'pdf' | 'text',
+    what: 'notes' | 'transcript',
+    filename: string,
+    payload: string,
+    trigger: HTMLElement,
+  ) => {
+    // The disabled attribute already blocks the second click; this is what
+    // actually holds if a re-render lands between the click and the state
+    // update.
+    if (sharing) return;
+    // Read the anchor BEFORE the await: the entry re-renders as "Preparing…"
+    // and the menu can reflow, so a rectangle read afterwards would point at
+    // something else. The sheet is anchored under the clicked entry.
+    const rect = trigger.getBoundingClientRect();
+    const anchor = { x: Math.round(rect.left), y: Math.round(rect.bottom) };
+    setSharing(entry);
+    setExportError(null);
+    try {
+      const res = await ipc().share.shareFile(kind, filename, payload, anchor);
+      if (!res.success) {
+        setExportError(`Couldn't share ${what}: ${res.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      setExportError(`Couldn't share ${what}: ${getErrorMessage(error)}`);
+    } finally {
+      setSharing(null);
+    }
   };
 
   const summary = meeting.summary?.trim();
@@ -752,39 +913,6 @@ function DetailContent({
             Home
           </button>
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* Disabled while a summary/report stream is on screen — the
-                    clipboard would otherwise get the old note while the body
-                    shows the in-flux streamed text. */}
-                <ActionIconButton
-                  label={copied ? 'Copied' : 'Copy notes'}
-                  onClick={copyNotes}
-                  disabled={streamPhase !== 'idle'}
-                >
-                  {copied ? <Check className="size-[13px]" /> : <Copy className="size-[13px]" />}
-                </ActionIconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy notes'}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <ActionIconButton
-                  label={copiedTranscript ? 'Copied' : 'Copy transcript'}
-                  onClick={() => void copyTranscriptForAi()}
-                  disabled={!transcriptBundle}
-                >
-                  {copiedTranscript ? (
-                    <Check className="size-[13px]" />
-                  ) : (
-                    <FileText className="size-[13px]" />
-                  )}
-                </ActionIconButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {copiedTranscript ? 'Copied!' : 'Copy transcript'}
-              </TooltipContent>
-            </Tooltip>
             {/* Re-runs summarisation on the existing transcript. A
                 transcription-failure note has no transcript, so reprocess
                 would exit non-zero and strand the UI on a spinner — hide it
@@ -814,6 +942,159 @@ function DetailContent({
                 <TooltipContent side="bottom">Generate notes</TooltipContent>
               </Tooltip>
             )}
+            {/* Everything that carries this note OUT of the app, in one place:
+                the two clipboard actions, the file saves, and (macOS only) the
+                native share sheet. The org share deliberately stays in the `…`
+                menu next to Delete: it uploads to a server and has an inverse
+                action, where every entry here is a one-off local act. */}
+            <Popover open={shareOpen} onOpenChange={onShareOpenChange}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Share"
+                  title="Share"
+                  className="inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  <Share className="size-[14px]" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-60 p-1" data-testid="note-share-menu">
+                {/* Disabled while a summary/report stream is on screen - the
+                    clipboard would otherwise get the old note while the body
+                    shows the in-flux streamed text. */}
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => {
+                    copyNotes();
+                    closeShareAfterCopy(shareEpoch.current);
+                  }}
+                  disabled={notesExportBlocked}
+                >
+                  <Copy className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  {copied ? 'Copied' : 'Copy notes'}
+                </button>
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => {
+                    // Captured BEFORE the await: if the menu is dismissed and
+                    // reopened while the clipboard write is in flight, this copy
+                    // no longer owns the menu that is on screen.
+                    const epoch = shareEpoch.current;
+                    void copyTranscriptForAi().then((ok) => {
+                      if (ok) closeShareAfterCopy(epoch);
+                    });
+                  }}
+                  disabled={!transcriptBundle}
+                >
+                  <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  {copiedTranscript ? 'Copied' : 'Copy transcript'}
+                </button>
+                <MenuDivider />
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveNotesPdf()}
+                  disabled={!canExportNotesPdf}
+                >
+                  <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save notes as PDF…
+                </button>
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveNotesMarkdown()}
+                  disabled={!canExportNotesPdf || notesExportBlocked}
+                >
+                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save notes as .md…
+                </button>
+                <button
+                  type="button"
+                  className={MENU_ENTRY_CLASS}
+                  style={{ color: 'var(--fg-1)' }}
+                  onClick={() => void saveTranscript()}
+                  disabled={!transcriptBundle}
+                >
+                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                  Save transcript as .md…
+                </button>
+                {/* Native share sheet (AirDrop, Mail, Messages, Notes). macOS
+                    only, and rendered only when the main process says a sheet
+                    exists. Share transcript stands as its own entry rather than
+                    riding along inside a combined action: it puts the full
+                    verbatim transcript into an outbound channel, and that
+                    deserves a deliberate click. */}
+                {canShareToSheet && (
+                  <>
+                    <MenuDivider />
+                    <button
+                      type="button"
+                      className={MENU_ENTRY_CLASS}
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={(e) =>
+                        void runShare(
+                          'notes-pdf',
+                          'pdf',
+                          'notes',
+                          defaultExportFilename(meeting, 'pdf'),
+                          buildNotesPdfHtml(),
+                          e.currentTarget
+                        )
+                      }
+                      disabled={!canExportNotesPdf || notesExportBlocked || sharing !== null}
+                    >
+                      <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {sharing === 'notes-pdf' ? 'Preparing…' : 'Share notes as PDF…'}
+                    </button>
+                    <button
+                      type="button"
+                      className={MENU_ENTRY_CLASS}
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={(e) =>
+                        void runShare(
+                          'notes-md',
+                          'text',
+                          'notes',
+                          notesMarkdownFilename(),
+                          buildNotesMarkdown(noteSections, reportForExport),
+                          e.currentTarget
+                        )
+                      }
+                      disabled={!canExportNotesPdf || notesExportBlocked || sharing !== null}
+                    >
+                      <Share className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {sharing === 'notes-md' ? 'Preparing…' : 'Share notes as .md…'}
+                    </button>
+                    <button
+                      type="button"
+                      className={MENU_ENTRY_CLASS}
+                      style={{ color: 'var(--fg-1)' }}
+                      onClick={(e) =>
+                        void runShare(
+                          'transcript',
+                          'text',
+                          'transcript',
+                          defaultExportFilename(meeting),
+                          transcriptBundle ?? '',
+                          e.currentTarget
+                        )
+                      }
+                      disabled={!transcriptBundle || sharing !== null}
+                    >
+                      <FileText className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
+                      {sharing === 'transcript' ? 'Preparing…' : 'Share transcript…'}
+                    </button>
+                  </>
+                )}
+              </PopoverContent>
+            </Popover>
             <Popover>
               <PopoverTrigger asChild>
                 <button
@@ -838,26 +1119,6 @@ function DetailContent({
                 >
                   <FolderIcon className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
                   View containing folder
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                  style={{ color: 'var(--fg-1)' }}
-                  onClick={() => void saveTranscript()}
-                  disabled={!transcriptBundle}
-                >
-                  <Download className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                  Save transcript as .md…
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
-                  style={{ color: 'var(--fg-1)' }}
-                  onClick={() => void saveNotesPdf()}
-                  disabled={!canExportNotesPdf}
-                >
-                  <FileDown className="size-[13px] shrink-0" style={{ color: 'var(--fg-2)' }} />
-                  Save notes as PDF…
                 </button>
                 {/* Re-transcribe (#266): only when the source recording still
                     exists (keep-recordings was on). Disabled while a stream is on

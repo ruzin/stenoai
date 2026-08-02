@@ -92,7 +92,7 @@ test('hides the floating Generate notes button for a normal (summarised) note', 
   await openMeeting(page, 'epsilon_summary.json');
 
   // The meeting detail resolved (its transcript action is present)…
-  await expect(page.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
   // …but the note has no notes_generated:false marker, so no floating CTA.
   await expect(page.getByTestId('generate-notes-dock-button')).toHaveCount(0);
 });

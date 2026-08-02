@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/electron';
+import { openShareMenu } from '../fixtures/share-menu';
 import type { Page } from '@playwright/test';
 import { readFileSync, rmSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
@@ -20,7 +21,7 @@ async function openDetail(page: Page, summaryFile = SUMMARY_FILE) {
   await page.evaluate((f) => {
     window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
   }, summaryFile);
-  await expect(page.getByRole('button', { name: 'Copy transcript' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
 }
 
 test('Save notes as PDF passes the renderer-built branded HTML to export-note-pdf', async ({
@@ -36,8 +37,8 @@ test('Save notes as PDF passes the renderer-built branded HTML to export-note-pd
   try {
     await openDetail(page);
 
-    await page.getByRole('button', { name: 'More options' }).click();
-    await page.getByRole('button', { name: /Save notes as PDF/ }).click();
+    const menu = await openShareMenu(page);
+    await menu.getByRole('button', { name: /Save notes as PDF/ }).click();
 
     await expect
       .poll(
@@ -70,8 +71,8 @@ test('Save notes as PDF passes the renderer-built branded HTML to export-note-pd
 test('Save notes as PDF is enabled for a note with structured content', async ({ launchApp }) => {
   const { page } = await launchApp({ mockIpc: true, env: { STENOAI_E2E_SEED_MEETING: '1' } });
   await openDetail(page);
-  await page.getByRole('button', { name: 'More options' }).click();
-  await expect(page.getByRole('button', { name: /Save notes as PDF/ })).toBeEnabled();
+  const menu = await openShareMenu(page);
+  await expect(menu.getByRole('button', { name: /Save notes as PDF/ })).toBeEnabled();
 });
 
 test('Save notes as PDF is disabled for a transcript-only note (no structured content)', async ({
@@ -85,9 +86,10 @@ test('Save notes as PDF is disabled for a transcript-only note (no structured co
     env: { STENOAI_E2E_SEED_PENDING_NOTE: '1' },
   });
   await openDetail(page, 'pending_summary.md');
-  await page.getByRole('button', { name: 'More options' }).click();
-  await expect(page.getByRole('button', { name: /Save notes as PDF/ })).toBeDisabled();
-  await expect(page.getByRole('button', { name: /Save transcript as \.md/ })).toBeEnabled();
+  const menu = await openShareMenu(page);
+  await expect(menu.getByRole('button', { name: /Save notes as PDF/ })).toBeDisabled();
+  await expect(menu.getByRole('button', { name: /Save notes as \.md/ })).toBeDisabled();
+  await expect(menu.getByRole('button', { name: /Save transcript as \.md/ })).toBeEnabled();
 });
 
 /**
@@ -119,8 +121,10 @@ test('Save notes as PDF exports the open template report, not the Standard note'
     await menu.getByRole('button', { name: /^Status Report/ }).click();
     await expect(page.getByText('Pipeline healthy')).toBeVisible();
 
-    await page.getByRole('button', { name: 'More options' }).click();
-    await page.getByRole('button', { name: /Save notes as PDF/ }).click();
+    // Same menu as the first case above: this branch moves the save entries out
+    // of the "…" menu into Share, so reach them through the Share fixture.
+    const shareMenu = await openShareMenu(page);
+    await shareMenu.getByRole('button', { name: /Save notes as PDF/ }).click();
 
     await expect
       .poll(
