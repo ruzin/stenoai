@@ -325,6 +325,10 @@ export function useRecordingEvents() {
         // user already manually started or is mid-meeting.
         if (status === 'recording' || status === 'paused') return;
         void startRecording(sessionName ?? undefined, 'notification_click');
+        // "Take Notes" is an explicit intent to write notes, so open the
+        // live-note editor (main already brought the window forward). Mirrors
+        // the toolbar New-note button.
+        navigate('/recording');
       }),
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording
@@ -350,11 +354,12 @@ export function useRecordingEvents() {
         if (status === 'recording' || status === 'paused') void stopRecording();
       }),
       bridge.on.generateNotesRequested(({ summaryFile, name }) => {
-        // User tapped "Generate notes" on the transcript-ready notification.
-        // Run the same reprocess path as GenerateNotesBar, in the background —
-        // main tracks it in activeReprocessJobs so the badge shows, and its
-        // completion fires processing-complete with notesGenerated:true → the
-        // real "Note ready" notification (#bug2/#bug3).
+        // User tapped "Summarise" on the transcript-ready notification. Run the
+        // same reprocess path as GenerateNotesBar in the BACKGROUND (no
+        // navigate/focus) — main tracks it in activeReprocessJobs so the badge
+        // shows, and its completion fires processing-complete with
+        // notesGenerated:true → the "Note ready" notification, whose click opens
+        // the note. That's where the user is brought in. (#bug2/#bug3)
         if (summaryFile) {
           // `name` here is only the processing-badge label (reprocess never
           // passes it to the CLI, so it can't blank the note's title).
