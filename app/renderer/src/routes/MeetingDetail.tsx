@@ -616,26 +616,38 @@ function DetailContent({
     ? Boolean(stripReasoning(activeReport.content).trim())
     : hasNotesContent(noteSections);
 
-  // Branded-PDF export of whichever note is on screen — the open template
-  // report when one is selected, otherwise the Standard structured note. The
-  // report's markdown is serialised with the SAME renderer the view above uses
+  // Branded PDF of whichever note is on screen — the open template report when
+  // one is selected, otherwise the Standard structured note. The report's
+  // markdown is serialised with the SAME renderer the view above uses
   // (react-markdown), so the PDF can't drift from what the user is looking at.
-  // Hands finished HTML to the export-note-pdf IPC, which rasterises + writes it.
-  const saveNotesPdf = async () => {
-    if (!canExportNotesPdf) return;
-    setExportError(null);
-    try {
-      const reportForPdf = activeReport
+  //
+  // Both PDF surfaces go through here — "Save notes as PDF" below and "Share
+  // notes as PDF" in the share menu. They are two adjacent actions on the same
+  // document, and #426 exists because one of them was left exporting the
+  // Standard note while a report was open; a single builder is what keeps them
+  // from disagreeing again. Called on click, never on render: the branded shell
+  // is ~45KB with its base64 font.
+  const buildNotesPdfHtml = () =>
+    buildNotesHtml(
+      noteSections,
+      activeReport
         ? {
             templateName: activeReport.template_name,
             contentHtml: renderToStaticMarkup(
               <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>,
             ),
           }
-        : null;
+        : null
+    );
+
+  // Hands finished HTML to the export-note-pdf IPC, which rasterises + writes it.
+  const saveNotesPdf = async () => {
+    if (!canExportNotesPdf) return;
+    setExportError(null);
+    try {
       const res = await ipc().meetings.exportNotePdf(
         defaultExportFilename(meeting, 'pdf'),
-        buildNotesHtml(noteSections, reportForPdf)
+        buildNotesPdfHtml()
       );
       if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
         setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
@@ -1027,7 +1039,7 @@ function DetailContent({
                           'pdf',
                           'notes',
                           defaultExportFilename(meeting, 'pdf'),
-                          buildNotesHtml(noteSections),
+                          buildNotesPdfHtml(),
                           e.currentTarget
                         )
                       }

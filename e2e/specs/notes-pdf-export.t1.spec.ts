@@ -121,8 +121,10 @@ test('Save notes as PDF exports the open template report, not the Standard note'
     await menu.getByRole('button', { name: /^Status Report/ }).click();
     await expect(page.getByText('Pipeline healthy')).toBeVisible();
 
-    await page.getByRole('button', { name: 'More options' }).click();
-    await page.getByRole('button', { name: /Save notes as PDF/ }).click();
+    // Same menu as the first case above: this branch moves the save entries out
+    // of the "…" menu into Share, so reach them through the Share fixture.
+    const shareMenu = await openShareMenu(page);
+    await shareMenu.getByRole('button', { name: /Save notes as PDF/ }).click();
 
     await expect
       .poll(

@@ -347,3 +347,62 @@ test('a share in flight shows Preparing and swallows a second click', async ({ l
     rmSync(outDir, { recursive: true, force: true });
   }
 });
+
+/**
+ * "Share notes as PDF" and "Save notes as PDF" are two entries in the same menu
+ * for the same document. #426 fixed the save entry to export whichever note is
+ * on screen; the share entry arrived on this branch in parallel and had no way
+ * to know about it, so integrating main was the moment the two could silently
+ * disagree again — the exact failure #426 was filed for, one entry lower.
+ *
+ * Asserting the shared PAYLOAD rather than the call shape is the point: both
+ * entries produce a branded HTML document, so a wrong one still passes every
+ * kind/filename/doctype check above.
+ */
+test('Share notes as PDF shares the open template report, like the save entry', async ({
+  launchApp,
+}) => {
+  const outDir = mkdtempSync(path.join(tmpdir(), 'steno-share-report-t1-'));
+  const logFile = path.join(outDir, 'share-calls.jsonl');
+  const payloadFile = path.join(outDir, 'shared-notes.html');
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_MEETING: '1',
+      STENOAI_E2E_SEED_REPORT: '1',
+      STENOAI_E2E_SHARE_CAPABLE: '1',
+      STENOAI_E2E_SHARE_LOG: logFile,
+      STENOAI_E2E_SHARE_PAYLOAD_PATH: payloadFile,
+    },
+  });
+
+  try {
+    await openDetail(page);
+
+    // Open the seeded report from the view-toggle's template dropdown, so the
+    // screen is showing the report and not the Standard note.
+    const viewMenu = page.getByTestId('note-view-menu');
+    await page.getByTestId('note-view-menu-trigger').click();
+    await viewMenu.getByRole('button', { name: /^Status Report/ }).click();
+    await expect(page.getByText('Pipeline healthy')).toBeVisible();
+
+    const menu = await openShareMenu(page);
+    await menu.getByRole('button', { name: /Share notes as PDF/ }).click();
+    await expect.poll(() => shareCalls(logFile).length, { timeout: 10_000 }).toBe(1);
+
+    const html = readFileSync(payloadFile, 'utf8');
+
+    // The report arrives RENDERED, the same react-markdown output the detail
+    // view shows and the save path writes.
+    expect(html).toContain('<li>Pipeline healthy</li>');
+    expect(html).toContain('>Status Report</h2>');
+    // The Standard note's sections did NOT ride along instead.
+    expect(html).not.toContain('>Key Topics</h2>');
+    // Reasoning stays stripped on the way into an outbound channel.
+    expect(html).not.toContain('secret chain of thought');
+    // Brand chrome is the save path's, unchanged.
+    expect(html).toContain('<h1>Epsilon Planning</h1>');
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});

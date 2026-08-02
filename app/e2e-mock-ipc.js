@@ -510,6 +510,12 @@ function install({ ipcMain }) {
     // materialised and no sheet is popped: that is the real handler's job and
     // the T2 spec's assertion. STENOAI_E2E_SHARE_DELAY_MS holds the call open so
     // the "Preparing…" state is observable without racing the clock.
+    //
+    // STENOAI_E2E_SHARE_PAYLOAD_PATH writes the payload VERBATIM, the same seam
+    // STENOAI_E2E_EXPORT_PATH gives the save path. The log's 200-char head is
+    // enough to tell a PDF from markdown, but a branded PDF's first 200 chars
+    // are doctype and font CSS — the note itself is thousands of characters in,
+    // so asserting WHICH note was shared needs the whole payload.
     'share-note-file': async (_event, kind, defaultFilename, payload, anchor) => {
       const logPath = process.env.STENOAI_E2E_SHARE_LOG;
       if (logPath) {
@@ -524,6 +530,10 @@ function install({ ipcMain }) {
           }) + '\n',
           'utf-8',
         );
+      }
+      const payloadPath = process.env.STENOAI_E2E_SHARE_PAYLOAD_PATH;
+      if (payloadPath && typeof payload === 'string') {
+        fs.writeFileSync(payloadPath, payload, 'utf-8');
       }
       const delay = Number(process.env.STENOAI_E2E_SHARE_DELAY_MS || 0);
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
