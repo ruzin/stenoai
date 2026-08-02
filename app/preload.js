@@ -206,8 +206,10 @@ const stenoai = {
     createProfile: (displayName) => invoke('create-person-profile', displayName),
     renameProfile: (id, displayName) => invoke('rename-person-profile', id, displayName),
     deleteProfile: (id) => invoke('delete-person-profile', id),
-    getSampleAudio: (meetingStem, channel, diarizationSpeakerId) =>
-      invoke('get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId),
+    getSampleAudio: (meetingStem, channel, diarizationSpeakerId, segmentIndex) =>
+      invoke('get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId, segmentIndex),
+    markCluster: (params) => invoke('mark-speaker-cluster', params),
+    namingStatus: (meetingStem) => invoke('speaker-naming-status', meetingStem),
   },
 
   models: {

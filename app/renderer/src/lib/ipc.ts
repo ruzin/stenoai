@@ -446,6 +446,11 @@ export interface SpeakerCandidate {
    *  relative: negative evidence must rival the positive to suppress). */
   negative_distance: number | null;
 }
+export interface SpeakerSample {
+  start: number;
+  end: number;
+  text: string | null;
+}
 export interface SpeakerSuggestion {
   status: 'confirmed' | 'possible' | 'none';
   suggested_person_id: string | null;
@@ -463,6 +468,19 @@ export interface SpeakerSuggestion {
   /** Quoted excerpt of what this cluster said, at its longest (most
    *  trustworthy) segment -- null if no saved transcript overlaps it. */
   sample_text: string | null;
+  /** Several excerpts, chronological, each independently playable. Index i
+   *  here is exactly what `getSampleAudio(..., i)` plays -- both sides
+   *  derive the list from the shared `sample_segments`, so the clip always
+   *  matches the text beside it. `text` is null for a segment no transcript
+   *  line covers; the entry stays, because its audio is still playable and
+   *  dropping it would shift every later index. */
+  samples: SpeakerSample[];
+  /** A human marked this cluster as holding more than one person. Never
+   *  derived -- no measurable property of a blended centroid distinguishes
+   *  one voice from two (0.8270 to the contaminating speaker in the real
+   *  case this exists for). True takes the cluster out of naming entirely:
+   *  no suggestion, no candidates, and confirm-speaker refuses it. */
+  contains_multiple_speakers: boolean;
   /** True when duration/segment-count shape matches the real-data-validated
    *  echo/crosstalk artifact pattern (SUGGESTION_MIN_AVG_TURN_SECONDS) --
    *  a UI hint only, never excludes the cluster from confirm-speaker. */
@@ -479,7 +497,36 @@ export type SuggestSpeakersResponse = Result<{
    *  defaults off, so this is false for most older backfilled meetings) --
    *  checked once per meeting; gates whether a play button can render. */
   recording_available: boolean;
+  /** Clusters, plus one extra for each cluster marked as holding more than
+   *  one person. Surfaced because the ceiling is real and invisible in the
+   *  output: Sortformer's four-slot architecture returns a five-person
+   *  channel as four clusters with nothing indicating anything was lost.
+   *  Nothing consumes this number today -- Sortformer takes no speaker-count
+   *  hint, so there is no re-diarization call to feed it into. */
+  minimum_speaker_count: number;
   channels: Record<string, Record<string, SpeakerSuggestion>>;
+}>;
+
+export interface MarkSpeakerClusterParams {
+  meetingStem: string;
+  channel: string;
+  diarizationSpeakerId: string;
+  containsMultipleSpeakers: boolean;
+}
+export type MarkSpeakerClusterResponse = Result<{
+  resolved_diarization_speaker_id: string;
+  contains_multiple_speakers: boolean;
+  minimum_speaker_count: number;
+}>;
+
+/** Feeds the one sentence shown before a delete. `has_sidecar: false` means
+ *  this meeting was never diarized -- nothing is at risk, no warning. */
+export type SpeakerNamingStatusResponse = Result<{
+  meeting_id: string;
+  has_sidecar: boolean;
+  total_clusters: number;
+  named_clusters: number;
+  unnamed_clusters: number;
 }>;
 
 export interface ConfirmSpeakerParams {
@@ -1049,9 +1096,11 @@ export interface StenoaiBridge {
     renameProfile: RequestFn<[id: string, displayName: string], Result<Record<string, never>>>;
     deleteProfile: RequestFn<[id: string], Result<Record<string, never>>>;
     getSampleAudio: RequestFn<
-      [meetingStem: string, channel: string, diarizationSpeakerId: string],
+      [meetingStem: string, channel: string, diarizationSpeakerId: string, segmentIndex?: number],
       GetSpeakerSampleAudioResponse
     >;
+    markCluster: RequestFn<[params: MarkSpeakerClusterParams], MarkSpeakerClusterResponse>;
+    namingStatus: RequestFn<[meetingStem: string], SpeakerNamingStatusResponse>;
   };
 
   models: {

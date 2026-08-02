@@ -4305,6 +4305,23 @@ ipcMain.handle('delete-meeting', async (event, meetingData) => {
       }
       ancillaryCandidates.push(path.join(outputDir, sidecarBase));
     }
+    // Speakers sidecar: <stem>_speakers.json. Same class of miss as the
+    // reports sidecar was -- a per-meeting file added later that the delete
+    // enumeration never learned about. Reproduced end to end: the note,
+    // transcript and audio went, and an 84 KB file of VOICE EMBEDDINGS
+    // stayed behind, which is the worst thing in the set to leave on disk
+    // after someone deletes a meeting. It is stem-bound like the others, so
+    // it inherits the same containment checks and the same undo window.
+    //
+    // Note this removes only the meeting's per-cluster embeddings. A person
+    // CONFIRMED from this meeting keeps their voice profile in config.json,
+    // deliberately: those are bound to the person, not the meeting, and are
+    // what makes recognition work across recordings (verified against a real
+    // library, where working prototypes came from meetings deleted long ago).
+    // Deleting a person is its own explicit action in the Speakers panel.
+    if (stem) {
+      ancillaryCandidates.push(path.join(outputDir, `${stem}_speakers.json`));
+    }
     // Derive the transcript + recording from the summary stem (FACT A). A normal
     // .md note carries ONLY summary_file, so without this the transcript and the
     // RECORDING would be orphaned, defeating the whole point of #234 (protect the
@@ -7941,13 +7958,44 @@ ipcMain.handle('delete-person-profile', async (_e, id) => {
   }
 });
 
-ipcMain.handle('get-speaker-sample-audio', async (_e, meetingStem, channel, diarizationSpeakerId) => {
+ipcMain.handle('get-speaker-sample-audio', async (_e, meetingStem, channel, diarizationSpeakerId, segmentIndex) => {
+  try {
+    const args = ['get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId];
+    // Only forwarded when the caller actually asked for a specific excerpt.
+    // Number.isInteger (not a truthiness check) because index 0 is the
+    // first excerpt and must not be dropped as falsy.
+    if (Number.isInteger(segmentIndex)) args.push('--segment-index', String(segmentIndex));
+    const out = await runPythonScript('simple_recorder.py', args);
+    return JSON.parse(out);
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('mark-speaker-cluster', async (_e, params) => {
   try {
     const out = await runPythonScript('simple_recorder.py', [
-      'get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId,
+      'mark-speaker-cluster',
+      params.meetingStem,
+      params.channel,
+      params.diarizationSpeakerId,
+      params.containsMultipleSpeakers ? '--multiple' : '--single',
     ]);
     return JSON.parse(out);
   } catch (error) {
+    return parsePythonFailureJson(error);
+  }
+});
+
+ipcMain.handle('speaker-naming-status', async (_e, meetingStem) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', ['speaker-naming-status', meetingStem]);
+    return JSON.parse(out);
+  } catch (error) {
+    // Never surfaced to the user and never allowed to matter: this only
+    // decides whether one extra sentence appears in a delete confirmation.
+    // A failure here must not stand between someone and deleting their own
+    // recording, so it degrades to "nothing to warn about".
     return { success: false, error: error.message };
   }
 });
