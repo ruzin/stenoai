@@ -2762,11 +2762,31 @@ def list_meetings():
     # captures, .m4a/.mp3 imports), so only the stem is meaningful.
     def _recorded_stems(recordings_dir) -> set:
         try:
-            return {Path(name).stem for name in os.listdir(recordings_dir)}
+            # FILES only. A directory that happens to be named like a
+            # recording (`recordings/note.wav/`) would otherwise report the
+            # note as having audio it does not have. scandir keeps this a
+            # single listing -- the is_file() check comes from the entry
+            # already returned, not from an extra stat per name.
+            return {
+                Path(entry.name).stem
+                for entry in os.scandir(recordings_dir)
+                if entry.is_file()
+            }
         except OSError:
             # No recordings dir yet (fresh install) is not an error -- it
             # just means nothing has audio.
             return set()
+
+    def _summary_stem(summary_path) -> str:
+        """`<stem>_summary.{md,json}` -> `<stem>`, stripping only a TRAILING
+        marker. `str.replace` removes every occurrence, so a note whose own
+        name contains the marker (`client_summary.v1_summary.md`) came back
+        as `client.v1`. That was harmless while the stem only fed the
+        dedup set, where a wrong-but-consistent key still dedups; matching
+        it against real filenames on disk is what makes it visible. Same
+        rule reprocess and app/main.js's delete path already use."""
+        name = summary_path.stem
+        return name[:-len('_summary')] if name.endswith('_summary') else name
 
     audio_stems = _recorded_stems(dirs["recordings"])
 
@@ -2777,7 +2797,7 @@ def list_meetings():
     # JSON first — if both .json and .md exist, JSON wins (it has structured data)
     for pattern in ("*_summary.json", "*_summary.md"):
         for f in output_dir.glob(pattern):
-            stem = f.stem.replace('_summary', '')
+            stem = _summary_stem(f)
             if stem not in seen_stems:
                 summaries.append((f, stem))
                 seen_files.add(f.resolve())
@@ -2798,7 +2818,7 @@ def list_meetings():
             audio_stems |= _recorded_stems(default_output.parent / "recordings")
             for pattern in ("*_summary.json", "*_summary.md"):
                 for f in default_output.glob(pattern):
-                    stem = f.stem.replace('_summary', '')
+                    stem = _summary_stem(f)
                     if f.resolve() not in seen_files and stem not in seen_stems:
                         summaries.append((f, stem))
                         seen_files.add(f.resolve())

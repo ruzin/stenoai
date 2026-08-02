@@ -94,24 +94,47 @@ class ListMeetingsHasAudioTests(unittest.TestCase):
             _write_recording(tmp, "note-2.wav")
             self.assertFalse(_run(tmp)[0]["has_audio"])
 
+    def test_a_directory_named_like_a_recording_does_not_count(self):
+        # os.listdir returns directories too, so a folder called
+        # "note.wav" would otherwise report audio that does not exist.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_note(tmp, "note", "Note")
+            (Path(tmp) / "recordings" / "note.wav").mkdir(parents=True)
+            self.assertFalse(_run(tmp)[0]["has_audio"])
+
+    def test_a_note_whose_own_name_contains_the_summary_marker(self):
+        # `str.replace` strips EVERY occurrence, so
+        # "client_summary.v1_summary.md" used to yield the stem
+        # "client.v1" -- harmless while the stem only fed the dedup set,
+        # wrong the moment it is matched against real filenames.
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_note(tmp, "client_summary.v1", "Client")
+            _write_recording(tmp, "client_summary.v1.wav")
+            meetings = _run(tmp)
+            self.assertEqual(len(meetings), 1)
+            self.assertTrue(
+                meetings[0]["has_audio"],
+                "the stem must keep everything but a TRAILING _summary",
+            )
+
     def test_the_recordings_dir_is_listed_once_not_once_per_meeting(self):
         # The guard on the "optimized for fast loading" promise: a
         # per-meeting existence check would make cold start scale with
-        # library size. Counting listdir calls is what actually holds the
-        # implementation to a single listing.
+        # library size. Counting the directory listings is what actually
+        # holds the implementation to a single one.
         with tempfile.TemporaryDirectory() as tmp:
             for i in range(12):
                 _write_note(tmp, f"note{i}", f"Note {i}")
             _write_recording(tmp, "note3.wav")
 
-            real_listdir = os.listdir
+            real_scandir = os.scandir
             calls = []
 
-            def counting_listdir(path):
+            def counting_scandir(path):
                 calls.append(str(path))
-                return real_listdir(path)
+                return real_scandir(path)
 
-            with mock.patch("os.listdir", side_effect=counting_listdir):
+            with mock.patch("os.scandir", side_effect=counting_scandir):
                 meetings = _run(tmp)
 
             recordings_dir = str(Path(tmp) / "recordings")
