@@ -5527,6 +5527,7 @@ def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id, segm
     from src.config import get_data_dirs
     from src.speaker_suggestions import (
         clusters_from_sidecar_channel,
+        extract_segment_samples,
         extract_speaker_sample_audio,
         merge_same_channel_fragments,
         read_speakers_sidecar,
@@ -5566,6 +5567,26 @@ def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id, segm
         for seg in (raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
     ]
 
+    # Resolve the index against the SAME list suggest-speakers rendered, so
+    # the clip and the text beside it are the same moment. Built here rather
+    # than inside the extractor because the list depends on the sidecar's
+    # turn manifest, which only this command has loaded.
+    target = None
+    if segment_index is not None:
+        samples = extract_segment_samples(
+            dirs["transcripts"] / f"{meeting_stem}_transcript.txt",
+            pooled_segments,
+            turn_manifest=sidecar.get("transcript_lines"),
+            target_ids={(channel, fid) for fid in [resolved_id, *context.merged_from]},
+        )
+        if not 0 <= segment_index < len(samples):
+            print(json.dumps({
+                "success": False,
+                "error": f"No sample {segment_index} for {diarization_speaker_id!r}",
+            }))
+            return
+        target = {"start": samples[segment_index]["start"], "end": samples[segment_index]["end"]}
+
     suffix = "" if segment_index is None else f"_{segment_index}"
     output_path = (
         Path(tempfile.gettempdir())
@@ -5573,7 +5594,7 @@ def get_speaker_sample_audio(meeting_stem, channel, diarization_speaker_id, segm
     )
     ok = extract_speaker_sample_audio(
         recording_path, channel, pooled_segments, output_path,
-        segment_index=segment_index,
+        segment_index=target,
     )
     if not ok:
         print(json.dumps({"success": False, "error": "could not extract audio sample"}))

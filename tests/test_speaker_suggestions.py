@@ -1108,14 +1108,24 @@ class ExtractSampleTextTests(unittest.TestCase):
             path = Path(tmp) / "nonexistent.txt"
             self.assertIsNone(extract_sample_text(path, [{"start": 4.0, "end": 6.0}]))
 
-    def test_returns_none_when_nothing_overlaps(self):
+    def test_the_manifest_wins_when_the_segments_disagree_with_it(self):
+        # The manifest records which cluster produced each line at the
+        # moment the line was written; the segments are the same run's
+        # acoustics. When they disagree -- here the only segment sits at
+        # 4-6s while the owned line is at 50s -- the manifest is the more
+        # precise record, so the quote stands and the clip falls back to a
+        # window at the line's own timestamp. Withholding the text instead
+        # would drop a line this cluster demonstrably spoke.
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:50] [Speaker 2] hello there")
-            self.assertIsNone(extract_sample_text(
-                path, [{"start": 4.0, "end": 6.0}],
-                turn_manifest=self._manifest((50.0, "system", "SPEAKER_0")),
-                target_ids={("system", "SPEAKER_0")},
-            ))
+            self.assertEqual(
+                extract_sample_text(
+                    path, [{"start": 4.0, "end": 6.0}],
+                    turn_manifest=self._manifest((50.0, "system", "SPEAKER_0")),
+                    target_ids={("system", "SPEAKER_0")},
+                ),
+                "hello there",
+            )
 
 
 class ExtractSpeakerSampleAudioTests(unittest.TestCase):

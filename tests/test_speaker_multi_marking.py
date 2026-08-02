@@ -28,6 +28,7 @@ import simple_recorder
 from src.config import Config
 from src.speaker_suggestions import (
     MULTI_SPEAKER_KEY,
+    extract_sample_text,
     ClusterContext,
     clusters_from_sidecar_channel,
     extract_segment_samples,
@@ -318,6 +319,94 @@ class SampleSegmentsTests(unittest.TestCase):
                 target_ids={("mic", "SPEAKER_0")},
             )
             self.assertEqual([s["text"] for s in samples], [None])
+
+    def test_a_multi_segment_turn_still_gets_its_text_and_a_matching_clip(self):
+        # The defect this pins, reported from real use: "the clips do not
+        # match the text 1:1, and often there is no text at all".
+        #
+        # src.transcriber merges consecutive segments of one speaker into a
+        # single TURN carrying only the FIRST segment's timestamp
+        # (transcriber.py: `if turns and turns[-1][1] == speaker:
+        # turns[-1][2].append(text)`). Selecting the longest SEGMENTS and
+        # then hunting for a line starting inside each one therefore misses
+        # every segment that is not a turn's first -- which is most of them.
+        #
+        # Here one turn at 10s spans three segments, the longest of which
+        # (30-45s) contains no line start at all. Segment-driven selection
+        # would offer that segment with no text; turn-driven selection
+        # offers the turn, with its text, and a clip covering the whole turn.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] one long uninterrupted turn\n"
+                "[01:00] [You] a reply from the owner\n",
+                encoding="utf-8",
+            )
+            segments = [
+                {"start": 10.0, "end": 20.0},
+                {"start": 21.0, "end": 29.0},
+                {"start": 30.0, "end": 45.0},   # longest, and holds no line start
+            ]
+            manifest = [
+                {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 60.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            samples = extract_segment_samples(
+                transcript, segments,
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+
+            self.assertEqual(len(samples), 1, "one turn, not three segments")
+            self.assertEqual(samples[0]["text"], "one long uninterrupted turn")
+            # The clip spans the WHOLE turn, not just one of its segments,
+            # so what is heard is what is written beside it.
+            self.assertEqual(samples[0]["start"], 10.0)
+            self.assertEqual(samples[0]["end"], 30.0)  # capped at SAMPLE_MAX_SECONDS
+
+    def test_a_clip_never_runs_into_the_next_speakers_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] first speaker\n[00:15] [You] second speaker\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                # The segment overruns the next line's start by 10s.
+                [{"start": 10.0, "end": 25.0}],
+                turn_manifest=[
+                    {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 15.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(samples[0]["end"], 15.0,
+                             "playing past the next line means playing the other person")
+
+    def test_the_collapsed_quote_is_one_of_the_expanded_excerpts(self):
+        # Two independent derivations of "the most representative thing this
+        # speaker said" drift apart, and the visible symptom is a collapsed
+        # row quoting a moment that expanding never offers.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] short one\n"
+                "[00:20] [Others] the substantially longer turn here\n"
+                "[02:00] [You] owner\n",
+                encoding="utf-8",
+            )
+            segments = [{"start": 10.0, "end": 12.0}, {"start": 20.0, "end": 40.0}]
+            manifest = [
+                {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 20.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 120.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            kwargs = dict(turn_manifest=manifest, target_ids={("system", "SPEAKER_0")})
+            samples = extract_segment_samples(transcript, segments, **kwargs)
+            quote = extract_sample_text(transcript, segments, **kwargs)
+
+            self.assertIn(quote, [s["text"] for s in samples])
+            self.assertEqual(quote, "the substantially longer turn here")
 
     def test_segment_index_selects_the_matching_excerpt_and_refuses_out_of_range(self):
         # The single point where "play excerpt 3" turns into a time range.

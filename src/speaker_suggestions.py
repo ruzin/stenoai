@@ -1197,9 +1197,24 @@ def cluster_transcript_lines(
             transcript_path, len(parsed), len(turn_manifest),
         )
         return []
+    # (start, next_line_start, text) per owned line. The third element is
+    # what makes a turn bounded at all: a transcript line carries only ONE
+    # timestamp, its START, because src.transcriber merges consecutive
+    # segments of the same speaker into one turn
+    # (`if turns and turns[-1][1] == speaker: turns[-1][2].append(text)`).
+    # The next line's start is therefore the only available upper bound on
+    # where this turn's speech stops.
+    next_starts = []
+    for index in range(len(parsed)):
+        following = next(
+            (parsed[j][0] for j in range(index + 1, len(parsed)) if parsed[j][0] is not None),
+            None,
+        )
+        next_starts.append(following)
+
     return [
-        (ts, text)
-        for (ts, text), entry in zip(parsed, turn_manifest)
+        (ts, next_start, text)
+        for (ts, text), next_start, entry in zip(parsed, next_starts, turn_manifest)
         if (entry.get("channel"), entry.get("diarization_speaker_id")) in target_ids
         and ts is not None
     ]
@@ -1214,6 +1229,49 @@ def _join_texts(texts: list, max_chars: int) -> Optional[str]:
     return combined or None
 
 
+# A review clip is never longer than this, even when the next transcript
+# line is minutes away (a long pause, or the speaker holding the floor
+# uninterrupted). Nobody listens to five minutes to recognise a voice, and
+# an unbounded clip would also mean an unbounded ffmpeg extraction.
+SAMPLE_MAX_SECONDS = 20.0
+# Used only when a turn has no diarization segment inside its bounds at all
+# (possible when the transcript and the sidecar came from different runs).
+SAMPLE_FALLBACK_SECONDS = 6.0
+
+
+def _turn_audio_range(segments: list, start: float, next_start: Optional[float]) -> tuple:
+    """The time range of ONE turn's speech by this cluster: the span of its
+    own diarization segments between this line's start and the next line's.
+
+    This is the piece that makes a clip and the text beside it describe the
+    same thing. Selecting by SEGMENT and then hunting for a line inside it
+    -- the earlier design -- cannot: src.transcriber merges consecutive
+    segments of one speaker into a single turn carrying only the FIRST
+    segment's timestamp, so every later segment of that turn contains no
+    line start at all. In practice that produced exactly two symptoms, both
+    reported from real use: most excerpts had no text, and the ones that
+    did played a clip cut at a segment boundary while the text was the
+    whole merged turn.
+    """
+    upper = next_start if next_start is not None else float("inf")
+    own = [
+        seg for seg in segments
+        if start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS <= seg.get("start", 0) < upper
+    ]
+    if own:
+        begin = min(seg.get("start", 0) for seg in own)
+        end = max(seg.get("end", 0) for seg in own)
+    else:
+        begin, end = start, start + SAMPLE_FALLBACK_SECONDS
+    # Never run into the next speaker's line, and never past the cap.
+    if next_start is not None:
+        end = min(end, next_start)
+    end = min(end, begin + SAMPLE_MAX_SECONDS)
+    if end <= begin:
+        end = begin + SAMPLE_FALLBACK_SECONDS
+    return begin, end
+
+
 def extract_segment_samples(
     transcript_path: Path,
     segments: list,
@@ -1222,40 +1280,44 @@ def extract_segment_samples(
     turn_manifest: Optional[list] = None,
     target_ids: Optional[set] = None,
 ) -> list:
-    """`[{"start", "end", "text"}]` for this cluster's review samples --
-    the multi-excerpt counterpart to `extract_sample_text`.
+    """`[{"start", "end", "text"}]` -- the moments offered for review, in
+    chronological order, each independently playable.
 
-    Deliberately built from `segments` (the diarizer's own per-cluster
-    timestamps) and the SAVED TRANSCRIPT, never from the sidecar's
-    `transcript_lines` turn manifest: that manifest is only written by the
-    live pipeline, so every sidecar produced by `backfill-speaker-embeddings`
-    has none at all, and a samples list sourced from it would come back
-    empty for exactly the historical meetings a human most needs help
-    identifying. `segments` are present in every sidecar by construction.
+    Driven by this cluster's TURNS when the sidecar carries a manifest, and
+    only by its segments otherwise. The distinction is the whole point: a
+    turn is a unit of speech that has text, a segment is a unit of acoustics
+    that usually does not, and pairing a clip with a quote requires the
+    former (see `_turn_audio_range`).
 
-    `text` is None for a segment no transcript line covers -- the entry is
-    still returned, because its audio is playable and a clip with no
-    quotable text is still useful to listen to. Never raises: a missing or
-    unreadable transcript yields text-less entries rather than an error.
+    Without a manifest there are no turns to attribute, so the entries carry
+    the cluster's longest segments and `text: None`. Those are still worth
+    offering -- the audio is this cluster's own, and listening is what
+    identifies a voice; a quote was always the lesser half.
     """
-    chosen = sample_segments(segments, limit)
-    if not chosen:
-        return []
-
     owned = cluster_transcript_lines(
         transcript_path, turn_manifest=turn_manifest, target_ids=target_ids,
     )
 
-    return [
-        {
-            "start": seg.get("start", 0),
-            "end": seg.get("end", 0),
-            "text": _join_texts(
-                [text for ts, text in owned if _covers([seg], ts)], max_chars,
-            ),
-        }
-        for seg in chosen
-    ]
+    if not owned:
+        return [
+            {"start": seg.get("start", 0), "end": seg.get("end", 0), "text": None}
+            for seg in sample_segments(segments, limit)
+        ]
+
+    candidates = []
+    for start, next_start, text in owned:
+        begin, end = _turn_audio_range(segments, start, next_start)
+        candidates.append({
+            "start": begin,
+            "end": end,
+            "text": _join_texts([text], max_chars),
+        })
+
+    # The longest turns, then chronological -- same reasoning as
+    # sample_segments (a long uninterrupted turn is the most likely to be
+    # genuine, unmixed speech), now applied to units that have text.
+    chosen = sorted(candidates, key=lambda c: c["end"] - c["start"], reverse=True)[:limit]
+    return sorted(chosen, key=lambda c: c["start"])
 
 
 def extract_sample_text(
@@ -1265,26 +1327,33 @@ def extract_sample_text(
     turn_manifest: Optional[list] = None,
     target_ids: Optional[set] = None,
 ) -> Optional[str]:
-    """A short quoted excerpt of what this cluster actually said, taken from
-    its longest (most trustworthy) segment -- gives a human reviewing an
-    "Unidentified speaker" row something to recognize them by without
-    leaving the app.
+    """A short quoted excerpt of what this cluster actually said -- the one
+    line shown on the collapsed row, so a human scanning the panel has
+    something to recognise a voice by without expanding anything.
 
-    Ownership of a transcript line is decided by `cluster_transcript_lines`,
-    not by the line's label: this used to skip every line labeled "You",
-    which silently guaranteed that the device owner's own mic cluster
-    quoted somebody ELSE (see that function). Returns None (never raises)
-    when the transcript is missing, there are no segments, or no line this
-    cluster owns falls in the longest one -- a best-effort aid, never a
+    Deliberately the SAME text as `extract_segment_samples`' first-ranked
+    entry, obtained by asking that function rather than repeating its
+    selection: two independent derivations of "the most representative
+    thing this speaker said" drift apart, and the visible symptom is a
+    collapsed row quoting one moment while expanding it offers five others
+    that never include it.
+
+    Ownership comes from the sidecar's turn manifest, never from a line's
+    label: an earlier version skipped every line labeled "You", which
+    silently guaranteed that the device owner's own mic cluster quoted
+    somebody ELSE (see cluster_transcript_lines). Returns None, never
+    raises, when there is nothing attributable -- a best-effort aid, not a
     requirement for the row to render.
     """
-    target = longest_segment(segments)
-    if target is None:
-        return None
-    owned = cluster_transcript_lines(
-        transcript_path, turn_manifest=turn_manifest, target_ids=target_ids,
+    samples = extract_segment_samples(
+        transcript_path, segments, max_chars=max_chars,
+        turn_manifest=turn_manifest, target_ids=target_ids,
     )
-    return _join_texts([text for ts, text in owned if _covers([target], ts)], max_chars)
+    longest = max(
+        (s for s in samples if s["text"]),
+        key=lambda s: s["end"] - s["start"], default=None,
+    )
+    return longest["text"] if longest else None
 
 
 # Small buffer around the longest segment's exact boundaries so a clip
@@ -1299,7 +1368,7 @@ def extract_speaker_sample_audio(
     channel: str,
     segments: list,
     output_path: Path,
-    segment_index: Optional[int] = None,
+    segment_index=None,
 ) -> bool:
     """Extract a short audio clip covering this cluster's longest pooled
     segment from the ORIGINAL source recording, for the review UI's play
@@ -1313,13 +1382,14 @@ def extract_speaker_sample_audio(
     same mapping as src.transcriber._split_stereo_to_channels, so a mono
     recording (channel index 0 only) also works correctly for "mic".
 
-    `segment_index`, when given, selects one entry of `sample_segments`
-    (this cluster's review-sample list) instead of the longest turn -- how
-    the panel plays the specific excerpt a human clicked rather than always
-    replaying the same one. Out-of-range values return False rather than
-    silently falling back to the longest segment: a caller asking for
-    excerpt 4 and hearing excerpt 1 would have no way to notice, and would
-    reasonably conclude the two speakers sound identical.
+    `segment_index` selects WHICH moment to cut. It accepts either an
+    explicit `{"start", "end"}` range -- what the CLI passes, taken straight
+    from the entry the user clicked -- or an integer index into
+    `sample_segments` for callers that have only segments. Out-of-range
+    integers return False rather than silently falling back to the longest
+    segment: a caller asking for excerpt 4 and hearing excerpt 1 would have
+    no way to notice, and would reasonably conclude the two speakers sound
+    identical.
 
     Returns True on success (output_path written), False on any failure --
     no ffmpeg, no source recording (the common case for an older backfilled
@@ -1327,7 +1397,14 @@ def extract_speaker_sample_audio(
     error. Never raises: this is a best-effort UI aid, never something that
     can fail the review panel.
     """
-    if segment_index is None:
+    if isinstance(segment_index, dict):
+        # An explicit {"start", "end"} range, which is how the CLI passes the
+        # entry the user actually clicked. Re-deriving the list here instead
+        # would mean two independent selections of "sample i" that must agree
+        # forever -- and they would not, since the list is built from TURNS
+        # when a manifest exists and from segments when it does not.
+        target = segment_index
+    elif segment_index is None:
         target = longest_segment(segments)
     else:
         chosen = sample_segments(segments)
