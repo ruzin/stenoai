@@ -146,8 +146,15 @@ export function NotificationToast() {
           </button>
 
           <div className="flex items-center min-w-0">
+            {/* Leading Steno brand mark so every toast is identifiable as Steno
+                — the action/status toasts otherwise show a button or a ✓ in the
+                right slot and nothing said "Steno", especially floating top-right
+                with the window hidden. */}
+            <div className="shrink-0 ml-1 text-gray-800 dark:text-gray-100">
+              <AppIcon size={20} color="currentColor" />
+            </div>
             <div
-              className="h-8 w-1 rounded-full ml-1 shrink-0"
+              className="h-8 w-1 rounded-full ml-2 shrink-0"
               style={{ backgroundColor: barColor }}
             ></div>
             <div className="flex flex-col justify-center ml-3 min-w-0">

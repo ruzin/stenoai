@@ -2,42 +2,43 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyCompletionNotification,
   meetingAlreadyHasNotes,
-  completionRouteAction,
+  completionActions,
 } from './completionNotification';
 
 const NOTE = '/meetings/abc_summary.md';
 const PROCESSING = '/meetings/processing';
-const routeAction = (currentRoute: string, windowVisible: boolean) =>
-  completionRouteAction({
+const actions = (currentRoute: string, windowFocused: boolean) =>
+  completionActions({
     currentRoute,
     finishedMeetingRoute: NOTE,
     processingRoute: PROCESSING,
-    windowVisible,
+    windowFocused,
   });
 
-describe('completionRouteAction (#bug1/#bug3 visibility-aware guard)', () => {
-  it('BLOCKER case: on the note route but window HIDDEN → notify (wrap-up flow)', () => {
-    // stopRecording navigated to the note's route in a hidden tray-only window;
-    // a route-only guard suppressed the prompt — this is the fix.
-    expect(routeAction(NOTE, false)).toBe('notify');
+describe('completionActions (navigate + notify guard)', () => {
+  it('on /processing, NOT focused → navigate AND notify (never stranded, and told)', () => {
+    // The regression: previously this returned only "notify", so /processing was
+    // never advanced and got stuck on "Analyzing transcript". Now it always
+    // navigates off /processing, and notifies because the user isn't watching.
+    expect(actions(PROCESSING, false)).toEqual({ navigate: true, notify: true });
   });
 
-  it('on the note route AND visible → suppress (user sees the summary)', () => {
-    expect(routeAction(NOTE, true)).toBe('suppress');
+  it('on /processing, focused → navigate, no notify (watching it finish)', () => {
+    expect(actions(PROCESSING, true)).toEqual({ navigate: true, notify: false });
   });
 
-  it('on the processing page AND visible → navigate into the note', () => {
-    expect(routeAction(PROCESSING, true)).toBe('navigate');
+  it('on the note route, NOT focused → notify, no navigate (auto-stop behind the meeting)', () => {
+    expect(actions(NOTE, false)).toEqual({ navigate: false, notify: true });
   });
 
-  it('on the processing page but HIDDEN → notify (not silently navigate)', () => {
-    expect(routeAction(PROCESSING, false)).toBe('notify');
+  it('on the note route, focused → suppress both (user is looking at it)', () => {
+    expect(actions(NOTE, true)).toEqual({ navigate: false, notify: false });
   });
 
-  it('on any other route → notify (visible or hidden)', () => {
-    expect(routeAction('/', true)).toBe('notify');
-    expect(routeAction('/chat', false)).toBe('notify');
-    expect(routeAction('/meetings/other_summary.md', true)).toBe('notify');
+  it('on any other route → notify only, never navigate', () => {
+    expect(actions('/', true)).toEqual({ navigate: false, notify: true });
+    expect(actions('/chat', false)).toEqual({ navigate: false, notify: true });
+    expect(actions('/meetings/other_summary.md', true)).toEqual({ navigate: false, notify: true });
   });
 });
 

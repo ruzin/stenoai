@@ -57,29 +57,33 @@ export function meetingAlreadyHasNotes(
 }
 
 /**
- * What to do when a job finishes, based on where the user is AND whether the
- * window is actually visible (#bug1). The visibility gate matters because an
- * auto-detected recording can run with the window HIDDEN (tray-only), and
- * "Wrap up" navigates to the note's own route — so route alone would say "the
- * user is looking at it" when the window is hidden and they aren't, suppressing
- * the very prompt this feature exists to send.
+ * On job completion, decide two INDEPENDENT things: whether to NAVIGATE off the
+ * transient /processing screen, and whether to NOTIFY. They're independent
+ * because a backgrounded user sitting on /processing must be BOTH moved to the
+ * note (so they're never stranded on a stuck "Analyzing transcript" screen —
+ * the regression this fixes) AND notified.
  *
- * - `navigate`: user is watching the processing page (visible) → open the note.
- * - `suppress`: user is already viewing this note (visible) → the static
- *   summary is right there, a banner would be noise.
- * - `notify`: anywhere else, OR this note's route but the window is
- *   hidden/minimised → fire a notification.
+ * - `navigate`: true whenever the user is on /processing. That screen is
+ *   transient; leaving them there after completion strands them, so we always
+ *   advance to the note regardless of focus. (A background navigate is harmless;
+ *   when they return they're on the note, not a stuck spinner.) When they stay
+ *   focused on /processing it also completes fine — this just makes the
+ *   not-focused case behave the same.
+ * - `notify`: true unless the user is actively LOOKING at the result right now —
+ *   focused on this note, or focused on /processing watching it finish. Focus,
+ *   not visibilityState: `visibilityState` stays 'visible' for a window shown
+ *   behind the meeting app (wrongly suppressing); `hasFocus()` is false whenever
+ *   Steno isn't the active window.
  */
-export type CompletionRouteAction = 'navigate' | 'notify' | 'suppress';
-
-export function completionRouteAction(input: {
+export function completionActions(input: {
   currentRoute: string;
   finishedMeetingRoute: string;
   processingRoute: string;
-  windowVisible: boolean;
-}): CompletionRouteAction {
-  const { currentRoute, finishedMeetingRoute, processingRoute, windowVisible } = input;
-  if (currentRoute === processingRoute && windowVisible) return 'navigate';
-  if (currentRoute === finishedMeetingRoute && windowVisible) return 'suppress';
-  return 'notify';
+  windowFocused: boolean;
+}): { navigate: boolean; notify: boolean } {
+  const { currentRoute, finishedMeetingRoute, processingRoute, windowFocused } = input;
+  const onProcessing = currentRoute === processingRoute;
+  const focusedOnThisNote = currentRoute === finishedMeetingRoute && windowFocused;
+  const userIsWatching = focusedOnThisNote || (onProcessing && windowFocused);
+  return { navigate: onProcessing, notify: !userIsWatching };
 }

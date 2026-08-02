@@ -369,6 +369,19 @@ class Notification extends EventEmitter {
       height: 70,
       x: x + width - 425,
       y: y + 1,
+      // Create HIDDEN and only ever show via showInactive() in ready-to-show
+      // below. Without this, `show` defaults to true, so the constructor shows
+      // the window with the *activating* show() — which brings the whole app to
+      // the foreground (firing app.on('activate') → mainWindow.show()/focus()),
+      // so a passive toast appearing wrongly refocuses Steno. focusable:false
+      // stops the toast taking key focus but does NOT stop app activation; only
+      // show:false + showInactive() keeps the app in the background.
+      show: false,
+      // Because the toast now stays in a backgrounded app, a click on its
+      // buttons would otherwise be swallowed as the app-activating click (so the
+      // user has to click twice — once to activate, once to act). acceptFirstMouse
+      // makes that first click register as a real click on the button.
+      acceptFirstMouse: true,
       frame: false,
       transparent: true,
       alwaysOnTop: true,
@@ -6661,7 +6674,7 @@ const MEETING_END_DEBOUNCE_MS = 3_000;
 // brief device switch — since auto-resume cancels the auto-stop if the mic
 // returns within it. Because a released mic reliably means the call ended (not
 // mute), we finalize automatically after this rather than prompting the user.
-const MEETING_END_AUTOSTOP_GRACE_MS = 20_000;
+const MEETING_END_AUTOSTOP_GRACE_MS = 10_000;
 
 let micMonitorProc = null;
 let micMonitorRespawnTimer = null;
@@ -6778,6 +6791,12 @@ async function handleMicEvent(line) {
         clearTimeout(autoStartedSession.autoStopTimer);
         autoStartedSession.autoStopTimer = null;
       }
+      // Meeting came back — dismiss the "Meeting ended — Summarise?" prompt so a
+      // stale one can't finalize a live meeting.
+      if (autoStartedSession.endNotif) {
+        try { autoStartedSession.endNotif.close(); } catch (_) {}
+        autoStartedSession.endNotif = null;
+      }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('auto-resume-requested');
       }
@@ -6832,21 +6851,53 @@ function handleMicStop(evt) {
       mainWindow.webContents.send('auto-pause-requested');
     }
     sendDebugLog(`[auto-detect] meeting ended (paused): ${autoStartedSession.appName}`);
-    // Don't finalize immediately — the mic can briefly drop on a device switch.
-    // Hold paused for a short grace; if the mic comes back, handleMicEvent above
-    // cancels this timer and auto-resumes. Otherwise the meeting has genuinely
-    // ended (a released mic ≠ mute — Zoom/Meet/Teams keep the stream open while
-    // muted, see MEETING_END_DEBOUNCE_MS), so auto-stop and let the pipeline run.
-    // No "Wrap up" prompt: mic-release is a reliable end signal, so we finalize
-    // automatically and the user's only end-of-meeting prompt is the
-    // post-transcription "Summarise" / "Note ready".
+    // Fire the meeting-end "Summarise?" notification NOW, from this reliable
+    // mic-monitor signal — a single deterministic event, unlike the
+    // post-transcription notification whose firing depended on renderer route +
+    // window focus at completion time (fragile: the meeting app closing shuffles
+    // focus, the auto-stop navigates, etc.). Tapping "Summarise" finalizes + runs
+    // the pipeline (transcribe → summarise) now.
+    autoStartedSession.endNotif = showMeetingEndedNotification(autoStartedSession.appName);
+    // Safety net: if the mic comes back within the grace, handleMicEvent above
+    // cancels this timer + dismisses the notification and auto-resumes. Otherwise
+    // the meeting has genuinely ended (a released mic ≠ mute — Zoom/Meet/Teams
+    // keep the stream open while muted, see MEETING_END_DEBOUNCE_MS), so we
+    // auto-stop even if the notification was never tapped — a meeting is never
+    // left stranded paused.
     if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
     autoStartedSession.autoStopTimer = setTimeout(() => {
       autoStartedSession.autoStopTimer = null;
       sendDebugLog(`[auto-detect] auto-stopping ended meeting: ${autoStartedSession.appName}`);
-      autoStopEndedMeeting();
+      autoStopEndedMeeting(false);
     }, MEETING_END_AUTOSTOP_GRACE_MS);
   }, MEETING_END_DEBOUNCE_MS);
+}
+
+// The meeting-end prompt (reliable mic-monitor trigger). Passive toast (no
+// focus-steal via the show:false/showInactive window); tapping "Summarise"
+// finalizes the auto-paused recording and runs the shared pipeline (transcribe
+// → summarise). A body tap opens Steno so the user can decide. This is separate
+// from — and more reliable than — the post-transcription "Note ready" toast.
+function showMeetingEndedNotification(appName) {
+  const notif = new Notification({
+    title: 'Meeting ended',
+    // NB: `appName` is the detected app (e.g. "Safari"/"Chrome"/"Zoom"), NOT the
+    // meeting name — so never put it in the body ("Summarise Safari?" is wrong).
+    body: 'Summarise this meeting?',
+    actions: [{ type: 'button', text: 'Summarise' }],
+  });
+  // `true` = the user explicitly asked to summarise → force note generation even
+  // when auto-summarize is off (which is now the default).
+  notif.on('action', (_evt, _index) => autoStopEndedMeeting(true));
+  notif.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  trackNotificationLifecycle(notif, 'meeting_ended');
+  notif.show();
+  return notif;
 }
 
 function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
@@ -6886,6 +6937,7 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
     paused: false,
     pauseTimer: null,
     autoStopTimer: null,
+    endNotif: null,
   };
 
   // Tapping "Take Notes" is an explicit "I'm going to take notes" — so bring
@@ -6907,9 +6959,13 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
 // not here. Sent on the `auto-summarise-requested` channel (whose renderer
 // handler already just stops the recording); the channel name predates the
 // auto-stop rework and is kept to avoid 4-file churn.
-function autoStopEndedMeeting() {
+// summarise=true means the user explicitly tapped the meeting-end "Summarise"
+// prompt → force note generation even when auto-summarize is off (the new
+// default). summarise=false is the untapped auto-stop fallback: finalize the
+// recording, but respect the auto-summarize setting (transcript-only if off).
+function autoStopEndedMeeting(summarise = false) {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('auto-summarise-requested');
+    mainWindow.webContents.send('auto-summarise-requested', { summarise });
   }
   clearAutoStartedSession();
 }
@@ -6918,6 +6974,9 @@ function clearAutoStartedSession() {
   if (!autoStartedSession) return;
   if (autoStartedSession.pauseTimer) clearTimeout(autoStartedSession.pauseTimer);
   if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
+  if (autoStartedSession.endNotif) {
+    try { autoStartedSession.endNotif.close(); } catch (_) {}
+  }
   autoStartedSession = null;
 }
 
