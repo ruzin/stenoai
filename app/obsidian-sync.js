@@ -46,15 +46,18 @@ function sha256(buf) {
 // synchronous sleep — mirrors the app's own delete path (commitPendingDelete).
 // (fs.rmSync's maxRetries is ignored for single files, so we roll our own.)
 function sleepMs(ms) {
-  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) {}
+  // Busy-wait, deliberately: SharedArrayBuffer/Atomics can be unavailable in the
+  // Electron main process, and this only runs on a rare Windows lock retry.
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* spin */ }
 }
-function retryTransient(fn, tries = 6) {
+function retryTransient(fn, tries = 8) {
   for (let i = 0; ; i++) {
     try { return fn(); }
     catch (err) {
       const transient = err && ['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'].includes(err.code);
       if (i >= tries - 1 || !transient) throw err;
-      sleepMs(40);
+      sleepMs(50 * (i + 1)); // escalating backoff, up to ~1.8s total
     }
   }
 }

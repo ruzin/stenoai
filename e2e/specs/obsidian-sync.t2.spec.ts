@@ -107,10 +107,14 @@ test('backfill writes a transcript-free note; rename moves it; external edits an
   // Rename via update-meeting → vault file renames, no orphan.
   await page.evaluate((f) => (window as StenoWin).stenoai.meetings.update(f, { name: 'Renamed Planning' }), summaryPath);
   const renamedName = '2026-07-20 Renamed Planning.md';
+  // Wait for the new name to appear, then assert the old is gone — with the
+  // actual vault contents in the message so a failure is diagnosable.
+  let files: string[] = [];
   await expect
-    .poll(() => vaultFiles(vault).includes(renamedName) && !vaultFiles(vault).includes(targetName),
+    .poll(() => { files = vaultFiles(vault); return files.includes(renamedName); },
       { timeout: 20_000, intervals: [250] })
     .toBe(true);
+  expect(files, `vault after rename: ${JSON.stringify(files)}`).not.toContain(targetName);
 
   // Externally edit the vault copy, then re-run a sync. Re-setting the vault
   // path re-triggers a backfill deterministically (an update-meeting with an
