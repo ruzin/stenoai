@@ -599,7 +599,7 @@ function install({ ipcMain }) {
           updateAvailable: true,
           currentVersion: '0.0.0-e2e',
           latestVersion: '9.9.9',
-          releaseUrl: 'https://github.com/ruzin/stenoai/releases/latest',
+          releaseUrl: 'https://github.com/stenolabs/stenoai/releases/latest',
           releaseName: 'Version 9.9.9',
           downloadUrl: null,
           osUpdateEligible: false,

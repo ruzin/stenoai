@@ -1910,7 +1910,7 @@ if (!gotSingleInstanceLock) {
     const helpSubmenu = {
       role: 'help',
       submenu: [
-        { label: 'Learn More', click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
+        { label: 'Learn More', click: () => shell.openExternal('https://github.com/stenolabs/stenoai') },
         { label: 'Report a Bug', click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
       ]
     };
@@ -9301,7 +9301,7 @@ async function findOllamaExecutable() {
 // named constant so the repo path has a single source of truth (and is the one
 // line to change if the repo is renamed/transferred — though the redirect
 // following below means an old build keeps working through GitHub's 301 too).
-const UPDATE_CHECK_URL = 'https://api.github.com/repos/ruzin/stenoai/releases/latest';
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/stenolabs/stenoai/releases/latest';
 
 // Update checking functionality. Follows HTTP redirects (301/302/307/308):
 // GitHub's REST API returns a 301 to the new owner/repo path when a repo is
