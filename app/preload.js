@@ -379,6 +379,10 @@ const stenoai = {
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),
     updateError: (cb) => subscribe('update-error', cb),
+    // Main cleared a failure the About tab may still be showing (a cycle that
+    // came back clean). Without this the banner would linger on a mounted tab
+    // until the user navigated away and back.
+    updateErrorCleared: (cb) => subscribe('update-error-cleared', cb),
     googleAuthChanged: (cb) => subscribe('google-auth-changed', cb),
     outlookAuthChanged: (cb) => subscribe('outlook-auth-changed', cb),
     shortcutStartRecording: (cb) => subscribe('shortcut-start-recording', cb),
