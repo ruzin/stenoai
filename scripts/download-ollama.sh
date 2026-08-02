@@ -5,7 +5,11 @@
 set -e
 
 OLLAMA_VERSION="v0.31.1"
-BIN_DIR="$(cd "$(dirname "$0")/.." && pwd)/bin"
+# Resolve both paths up front: the script cd's into $BIN_DIR further down, after
+# which a relative path no longer resolves. BASH_SOURCE rather than $0 so this
+# still points at the script when it is sourced instead of executed.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/bin"
 
 # Assert an extracted artifact exists and is not implausibly small, then report it.
 # `curl --fail` only rejects an HTTP error status: a transfer that dies mid-flight
@@ -172,4 +176,11 @@ assert_binary "$OLLAMA_BIN" "$MIN_OLLAMA_BYTES"
 find . -maxdepth 3 -name '*.bak' -delete
 
 echo "Ollama downloaded to $BIN_DIR"
+
+# Ollama's darwin tarball is universal (x86_64 + arm64) and additionally carries
+# the x86_64-only llama.cpp CPU runners for Intel Macs. The mac build is arm64-only
+# since v0.4.0, so strip both out before bundling (#427) — ~90 MB. No-op on
+# non-darwin hosts and on non-arm64 targets.
+"$SCRIPT_DIR/thin-macos-bin.sh"
+
 ls -la "$BIN_DIR"

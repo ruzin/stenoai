@@ -106,6 +106,17 @@ jobs:
         file bin/ffmpeg
         file bin/ffmpeg | grep -q "arm64"
 
+    - name: Thin bundled binaries to ${{ matrix.arch }}
+      run: |
+        chmod +x scripts/thin-macos-bin.sh
+        # Idempotent — download-ollama.sh already ran it for the host arch. Run it
+        # again with the explicit target arch so a cached or hand-populated bin/
+        # can't smuggle x86_64 code into the signed bundle (#427). The script
+        # exits non-zero if any non-arm64 Mach-O survives.
+        ./scripts/thin-macos-bin.sh ${{ matrix.arch }}
+        file bin/ollama
+        file bin/ollama | grep -q "arm64"
+
     - name: Build mic-monitor helper (Swift)
       run: |
         chmod +x scripts/build-mic-monitor.sh
