@@ -12,6 +12,7 @@ import { AiTab } from './settings/AiTab';
 import { TemplatesTab } from './settings/TemplatesTab';
 import { OrganisationTab } from './settings/OrganisationTab';
 import { AdvancedTab } from './settings/AdvancedTab';
+import { IntegrationsTab } from './settings/IntegrationsTab';
 import { DeveloperTab } from './settings/DeveloperTab';
 import { AboutTab } from './settings/AboutTab';
 
@@ -227,6 +228,7 @@ export function Settings() {
             {tab === 'ai' && <AiTab />}
             {tab === 'templates' && <TemplatesTab onEditingChange={setTemplateEditorOpen} />}
             {tab === 'organisation' && <OrganisationTab />}
+            {tab === 'integrations' && <IntegrationsTab />}
             {tab === 'advanced' && <AdvancedTab />}
             {tab === 'developer' && <DeveloperTab />}
             {tab === 'about' && <AboutTab />}

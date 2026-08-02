@@ -56,6 +56,8 @@ const { createDebugLog } = require('./debug-log');
 const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
+const { registerObsidianSync } = require('./obsidian-sync');
+const { registerObsidianIpc } = require('./obsidian-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
 const { describeUpdateError, updateErrorPhase } = require('./update-error-copy');
 const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
@@ -1024,6 +1026,17 @@ function getAllowedBaseDirs() {
   return dirs;
 }
 
+// Obsidian vault sync engine (#413). Closures capture the (hoisted) path
+// helpers; the mirror stays inert until initObsidianSync() loads the cached
+// config at startup. folders.json sits beside the output dir.
+const obsidianSync = registerObsidianSync({
+  getUserDataDir,
+  getAllowedBaseDirs,
+  validateSafeFilePath,
+  resolveFoldersJsonPath: () => path.join(path.dirname(getOutputDir()), 'folders.json'),
+  sendDebugLog,
+});
+
 // Sync resolver for the audio recordings folder. Mirrors the path order used
 // by the async `get-recordings-dir` handler (custom storage > packaged data
 // dir > dev scratch). Use this anywhere we need the path inside an IPC
@@ -1414,6 +1427,11 @@ function commitPendingDelete(id) {
     );
     return;
   }
+  // The note is now permanently gone — mirror the deletion into the Obsidian
+  // vault (#413) if sync is on. Runs at the single commit choke point so the
+  // timer, explicit-dismiss and quit paths all mirror; preserves an
+  // externally-edited vault copy (skip + flag) rather than clobbering it.
+  try { obsidianSync.removeNoteBySummaryPath(entry.originalSummaryPath); } catch (_) {}
   // Ancillary files (transcript / recording(s) / reports sidecar) are hygiene,
   // not the note itself: a rare permanently-locked orphan is accepted (fail-safe
   // direction — never risk the note over a stray file). Log any that survived.
@@ -2213,6 +2231,24 @@ if (!gotSingleInstanceLock) {
       console.warn('pending-delete recovery on launch failed (non-fatal):', e?.message);
     }
 
+    // Load the Obsidian sync config into the engine's cache (so per-note hooks
+    // never shell Python) and reconcile any index drift from changes made while
+    // the app was closed (#413). After the storage-path + pending-delete steps
+    // so getAllowedBaseDirs() is complete. Best-effort — never blocks launch.
+    try {
+      const [osEnabled, osVault] = await Promise.all([
+        runPythonScript('simple_recorder.py', ['get-obsidian-sync'], true),
+        runPythonScript('simple_recorder.py', ['get-obsidian-vault-path'], true),
+      ]);
+      obsidianSync.setCachedConfig({
+        enabled: !!JSON.parse(osEnabled.trim()).obsidian_sync_enabled,
+        vaultPath: JSON.parse(osVault.trim()).obsidian_vault_path || '',
+      });
+      obsidianSync.reconcileOnLaunch();
+    } catch (e) {
+      console.warn('Obsidian sync init failed (non-fatal):', e?.message);
+    }
+
     // Clear any .import reservation markers orphaned by a crash mid-import. No
     // import is in flight at startup, so a leftover marker is always stale and
     // would otherwise force every future import of that stem to bump to -N.
@@ -2962,6 +2998,9 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
         watchdog.clear();
         if (code === 0) {
           console.log(`✅ Completed reprocessing: ${sessionName}`);
+          // Reprocess / generate-notes / re-transcribe rewrote the note — mirror
+          // it into the vault (#413) if sync is on. Best-effort.
+          try { if (summaryFile) obsidianSync.syncNoteBySummaryPath(summaryFile); } catch (_) {}
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('processing-complete', {
               success: true,
@@ -4100,6 +4139,10 @@ ipcMain.handle('update-meeting', async (event, summaryFilePath, updates) => {
       }
 
       fs.writeFileSync(realPath, updatedRaw, 'utf8');
+
+      // Title/notes edits fire no processing-complete, so mirror explicitly
+      // (#413). A title change here drives the vault-file rename via the index.
+      try { obsidianSync.syncNoteBySummaryPath(realPath); } catch (_) {}
 
       data = {
         session_info: {
@@ -5509,6 +5552,13 @@ async function processNextInQueue() {
         if (code === 0) {
           console.log(`✅ Completed streaming processing: ${currentProcessingJob.sessionName}`);
           const sessionNameAtClose = currentProcessingJob.sessionName;
+          // Mirror the finished note into an Obsidian vault when sync is on
+          // (#413). Best-effort — a vault write must never affect processing.
+          try {
+            const finishedSummary = savedSummaryFile
+              || (currentProcessingJob && currentProcessingJob.summaryFile);
+            if (finishedSummary) obsidianSync.syncNoteBySummaryPath(finishedSummary);
+          } catch (_) {}
           // Notify frontend that streaming is done and meeting is saved
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('summary-complete', {
@@ -7496,6 +7546,21 @@ registerFoldersIpc({
   getUserDataDir,
   validateMeetingFilePath,
   setCachedCustomStoragePath: (v) => { _cachedCustomStoragePath = v; },
+  // A folder add/remove rewrites the note's `folders:` frontmatter but fires no
+  // processing-complete — mirror it so the vault subfolder tracks (#413).
+  onNoteFoldersChanged: (summaryPath) => {
+    try { obsidianSync.syncNoteBySummaryPath(summaryPath); } catch (_) {}
+  },
+});
+
+// Obsidian vault sync IPC (#413): config toggle + vault picker + conflicts read.
+registerObsidianIpc({
+  ipcMain,
+  runPythonScript,
+  dialog,
+  getMainWindow: () => mainWindow,
+  obsidianSync,
+  sendDebugLog,
 });
 
 ipcMain.handle('get-ai-prompts', async () => {

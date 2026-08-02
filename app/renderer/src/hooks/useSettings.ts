@@ -26,6 +26,9 @@ export const settingsKeys = {
   // factory like every other setting rather than two hand-written arrays.
   keepRecordings: () => [...settingsKeys.all, 'keepRecordings'] as const,
   autoSummarize: () => [...settingsKeys.all, 'autoSummarize'] as const,
+  obsidianSync: () => [...settingsKeys.all, 'obsidianSync'] as const,
+  obsidianVaultPath: () => [...settingsKeys.all, 'obsidianVaultPath'] as const,
+  obsidianConflicts: () => [...settingsKeys.all, 'obsidianConflicts'] as const,
 };
 
 /**
@@ -413,6 +416,60 @@ export function useSetAutoSummarize() {
   return useToggleSetting(settingsKeys.autoSummarize(), async (v) =>
     unwrap(await ipc().settings.setAutoSummarize(v)),
   );
+}
+
+/** Obsidian vault sync (#413): a toggle, a vault-folder path + picker, and a
+ * read of any external-edit conflicts to surface in the Integrations tab. */
+export function useObsidianSyncSetting() {
+  return useQuery({
+    queryKey: settingsKeys.obsidianSync(),
+    queryFn: async () => unwrap(await ipc().settings.getObsidianSync()).obsidian_sync_enabled,
+  });
+}
+
+export function useSetObsidianSync() {
+  const qc = useQueryClient();
+  const toggle = useToggleSetting(settingsKeys.obsidianSync(), async (v) =>
+    unwrap(await ipc().settings.setObsidianSync(v)),
+  );
+  // Enabling kicks a backfill in main; refresh the conflicts view shortly after.
+  return {
+    ...toggle,
+    mutate: (v: boolean) => toggle.mutate(v, {
+      onSettled: () => qc.invalidateQueries({ queryKey: settingsKeys.obsidianConflicts() }),
+    }),
+  };
+}
+
+export function useObsidianVaultPath() {
+  return useQuery({
+    queryKey: settingsKeys.obsidianVaultPath(),
+    queryFn: async () => unwrap(await ipc().settings.getObsidianVaultPath()).obsidian_vault_path,
+  });
+}
+
+export function useSetObsidianVaultPath() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (path: string) => unwrap(await ipc().settings.setObsidianVaultPath(path)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: settingsKeys.obsidianVaultPath() });
+      qc.invalidateQueries({ queryKey: settingsKeys.obsidianConflicts() });
+    },
+  });
+}
+
+export function usePickObsidianVaultFolder() {
+  return useMutation({
+    mutationFn: async () => unwrap(await ipc().settings.pickObsidianVaultFolder()).folderPath,
+  });
+}
+
+export function useObsidianConflicts() {
+  return useQuery({
+    queryKey: settingsKeys.obsidianConflicts(),
+    queryFn: async () => unwrap(await ipc().settings.getObsidianConflicts()).conflicts,
+  });
 }
 
 /** Toggle + duration for the renderer-side silence detector. Defaults
