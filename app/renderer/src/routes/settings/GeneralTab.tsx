@@ -20,7 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { isMac } from '@/lib/utils';
+import { isMac, shortcut } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
   useAutoDetectMeetingsSetting,
@@ -30,12 +30,14 @@ import {
   useMicrophoneSetting,
   useNotificationsSetting,
   usePremeetingNotificationsSetting,
+  useRecordHotkeySetting,
   useSetAutoDetectMeetings,
   useSetAutoInstallWhenIdle,
   useSetDockIcon,
   useSetLaunchOnLogin,
   useSetMicrophone,
   useSetNotifications,
+  useSetRecordHotkey,
   useSetPremeetingNotifications,
   useSetShowMenuBarIcon,
   useSetSilenceAutoStopEnabled,
@@ -93,6 +95,9 @@ export function GeneralTab() {
   const setLaunchOnLogin = useSetLaunchOnLogin();
   const autoInstallWhenIdle = useAutoInstallWhenIdleSetting();
   const setAutoInstallWhenIdle = useSetAutoInstallWhenIdle();
+  const recordHotkey = useRecordHotkeySetting();
+  const setRecordHotkey = useSetRecordHotkey();
+  const recordAccel = shortcut('⌘⇧R', 'Ctrl+Shift+R');
   const silenceAutoStop = useSilenceAutoStopSetting();
   const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
@@ -542,6 +547,31 @@ export function GeneralTab() {
           />
         </SettingRow>
       )}
+
+      <SectionHeading>Keyboard shortcut</SectionHeading>
+
+      <SettingRow
+        label="Global record shortcut"
+        description={
+          <>
+            Start or stop recording from anywhere with {recordAccel}. Turn off if it
+            conflicts with another app.
+            {recordHotkey.data?.enabled === true &&
+              recordHotkey.data.registered === false && (
+                <span className="mt-1 block" style={{ color: 'var(--fg-2)' }}>
+                  Couldn't register — another app may be using this shortcut.
+                </span>
+              )}
+          </>
+        }
+        noBorder
+      >
+        <Switch
+          checked={recordHotkey.data?.enabled ?? true}
+          onCheckedChange={(v) => setRecordHotkey.mutate(v)}
+          disabled={recordHotkey.data === undefined}
+        />
+      </SettingRow>
     </section>
   );
 }
