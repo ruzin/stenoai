@@ -173,7 +173,7 @@ export function Processing() {
           <button
             type="button"
             onClick={() => navigate('/')}
-            className="mb-6 inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent text-[13px] transition-colors hover:text-[color:var(--fg-1)]"
+            className="mb-6 inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 py-1 text-[13px] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
             style={{ color: 'var(--fg-2)' }}
             aria-label="Back to home"
           >
