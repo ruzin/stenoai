@@ -262,6 +262,7 @@ const stenoai = {
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),
     showSilenceAutoStopNotification: (payload) => invoke('show-silence-auto-stop-notification', payload),
     showNoteReadyNotification: (payload) => invoke('show-note-ready-notification', payload),
+    showTranscriptReadyNotification: (payload) => invoke('show-transcript-ready-notification', payload),
     showSystemAudioMicOnlyNotification: () => invoke('show-system-audio-mic-only-notification'),
     // Design-for-test seam: the production fire path is the main-side scheduler
     // timer; this lets e2e drive the gate + suppression deterministically.
@@ -395,6 +396,7 @@ const stenoai = {
     autoPauseRequested: (cb) => subscribe('auto-pause-requested', cb),
     autoResumeRequested: (cb) => subscribe('auto-resume-requested', cb),
     autoSummariseRequested: (cb) => subscribe('auto-summarise-requested', cb),
+    generateNotesRequested: (cb) => subscribe('generate-notes-requested', cb),
     navigateToMeeting: (cb) => subscribe('navigate-to-meeting', cb),
     trayOpenSettings: (cb) => subscribe('tray-open-settings', cb),
     showQuitDialog: (cb) => subscribe('show-quit-dialog', cb),

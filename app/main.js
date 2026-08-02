@@ -1565,6 +1565,11 @@ function createWindow(options = {}) {
       sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
+      // backgroundThrottling is left at its default (true) and toggled at
+      // runtime instead — see applyRecordingBackgroundThrottling(). We only
+      // disable throttling WHILE recording (renderer-owned capture timers must
+      // run full-rate even when the window is hidden), and let a
+      // backgrounded-idle app throttle normally so it doesn't burn CPU.
     },
     // Windows/Linux render the Electron application menu as an in-window menu
     // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
@@ -2888,6 +2893,12 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       });
 
       let stderrBuf = '';
+      // Mirrors the main pipeline: true only if summarization actually ran
+      // (STREAM_COMPLETE). "Generate notes" reprocess always summarises; a
+      // retranscribe with auto_summarize off wouldn't, so track it rather than
+      // assume. Threaded into processing-complete so the renderer fires
+      // "Note ready" only when notes exist (#bug2).
+      let summarizationCompleted = false;
 
       // Liveness watchdog — see makeInactivityWatchdog. Summary CHUNK:
       // lines (and HEARTBEAT: lines if a retranscribe is ever added here)
@@ -2917,6 +2928,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
               mainWindow.webContents.send('summary-title', { title, sessionName });
             }
           } else if (line === 'STREAM_COMPLETE') {
+            summarizationCompleted = true;
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile });
             }
@@ -2955,6 +2967,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
               success: true,
               sessionName,
               summaryFile,
+              notesGenerated: summarizationCompleted,
               message: 'Reprocessing completed successfully'
             });
           }
@@ -3131,6 +3144,11 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
               sessionName,
               summaryFile,
               report: true,
+              // A report is only ever generated for a note that already has
+              // notes, so "notes exist" is true — preserves the pre-existing
+              // note-ready behavior and keeps this off the transcript-only
+              // "generate notes?" branch (#bug2).
+              notesGenerated: true,
               message: 'Report generation completed successfully'
             });
           }
@@ -4503,6 +4521,25 @@ ipcMain.handle('get-queue-status', async () => {
       (currentRecordingProcess !== null || systemAudioRecordingActive)
         ? (currentRecordingAppendTarget || null)
         : null,
+    // The real note file the CURRENT recording/processing session produces (the
+    // instant-stop placeholder written at stop, then rewritten in place by the
+    // pipeline). Lets useMeetings dedupe the synthetic "__live__/…" row against
+    // the real note once it exists, so one recording is never shown twice
+    // (#bug4). Deterministic from the audio stem, so it's the same key across
+    // this session's recording → processing phases.
+    //
+    // Precedence matters: prefer the ACTIVE recording's key over a PROCESSING
+    // job's. In the supported back-to-back flow (stop meeting A → immediately
+    // start meeting B while A is still processing), `sessionName` reports B (the
+    // recording), so liveSummaryFile must also be B's — otherwise it'd be A's,
+    // A's note is already in the list, and B's live row would be wrongly dropped
+    // (B shows no row at all). At B's own stop, teardown nulls
+    // activeSysAudioSummaryFile before currentProcessingJob is set to B, so the
+    // fallback still yields B and the intended dedup against B's placeholder
+    // fires. Only the Parakeet instant-stop path writes a placeholder, so this
+    // only actually bites there; Whisper/import have no placeholder (dedup is a
+    // no-op) and it's null when idle.
+    liveSummaryFile: activeSysAudioSummaryFile || currentProcessingJob?.summaryFile || null,
   };
 });
 
@@ -4977,6 +5014,21 @@ function loadAutoInstallWhenIdleEnabled() {
 
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
+// Toggle renderer background-throttling to match recording state (#442 review).
+// While recording we must NOT throttle — capture is renderer-owned (MediaRecorder
+// timeslice + silence-auto-stop interval + the live-tap) and can run with the
+// window hidden (auto-detect starts without showing it), where Chromium would
+// otherwise clamp timers. When not recording we allow throttling so a
+// backgrounded-idle app doesn't waste CPU. Reads the flag, so it's correct
+// regardless of which start/stop path called it. Idempotent + fail-safe.
+function applyRecordingBackgroundThrottling() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    // setBackgroundThrottling(allowed): true = throttle when hidden (default),
+    // false = never throttle. We disallow throttling while recording.
+    mainWindow.webContents.setBackgroundThrottling(!systemAudioRecordingActive);
+  } catch (_) { /* older Electron / no webContents — harmless */ }
+}
 let currentRecordingProcess = null;
 let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
@@ -5286,6 +5338,12 @@ async function processNextInQueue() {
   // Set when TRANSCRIPTION_COMPLETE arrives, so summarization_completed's
   // processing_bucket measures summarization time alone, not the whole job.
   let transcriptionEndedAtMs = null;
+  // Set true only when STREAM_COMPLETE arrives (summarization actually ran).
+  // Stays false on the transcript-only path (auto_summarize off → the backend
+  // prints SUMMARY_SKIPPED, never STREAM_COMPLETE), so the renderer can fire
+  // "Note ready" only when notes really exist, and a "Transcript ready —
+  // generate notes?" prompt otherwise (#bug2/#bug3).
+  let summarizationCompleted = false;
 
   try {
     const queueAiEnv = getAiEnv();
@@ -5376,6 +5434,7 @@ async function processNextInQueue() {
               mainWindow.webContents.send('summary-title', { title, sessionName: currentProcessingJob.sessionName });
             }
           } else if (line === 'STREAM_COMPLETE') {
+            summarizationCompleted = true;
             const summarizationStartMs = transcriptionEndedAtMs || currentProcessingStartedAtMs;
             trackEvent('summarization_completed', {
               success: true,
@@ -5485,6 +5544,7 @@ async function processNextInQueue() {
                     ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
                   meetingData: processedMeeting,
+                  notesGenerated: summarizationCompleted,
                   transcriptionFailed: Boolean(transcriptionFailedMsg),
                   transcriptionError: transcriptionFailedMsg || undefined
                 });
@@ -5501,6 +5561,7 @@ async function processNextInQueue() {
                   message: transcriptionFailedMsg
                     ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
+                  notesGenerated: summarizationCompleted,
                   transcriptionFailed: Boolean(transcriptionFailedMsg),
                   transcriptionError: transcriptionFailedMsg || undefined
                 });
@@ -5888,6 +5949,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
     // hook to fire startCapture. reportSystemAudioState then re-affirms it on
     // success / clears it on failure.
     systemAudioRecordingActive = true;
+    applyRecordingBackgroundThrottling();
     // Reset the live transcript buffer before the sidecar starts emitting.
     // On a resume/continue into the SAME note, preserve the previous session's
     // finalised segments as display-only `priorSegments` so the live bar shows
@@ -6142,6 +6204,7 @@ ipcMain.handle('stop-recording-ui', async () => {
       liveTranscriptState.summaryFile = instantSummaryFile;
     }
     systemAudioRecordingActive = false;
+    applyRecordingBackgroundThrottling();
     stopLiveTranscribe();
     currentRecordingSessionName = null;
     // Captured before resetRecordingRuntimeState() clears startedAtMs.
@@ -6584,23 +6647,30 @@ const ALLOW_DEVICE_LEVEL_FALLBACK = allowsDeviceLevelFallback(
   (() => { try { return process.getSystemVersion(); } catch (_) { return ''; } })(),
 );
 
-// Wait this long after the meeting app releases the mic before triggering
-// auto-pause + "Meeting ended" prompt. Verified empirically that Zoom/Meet/
-// Teams use software-mute (keep the OS-level stream open while muted), so
-// muting in-meeting does NOT emit a stop event and won't trip this debounce
-// — the only remaining false-positive source is a brief device switch.
-// 3s feels near-instant after a real meeting end; auto-resume handles any
-// rare device-switch case if the mic comes back within the window.
+// Wait this long after the meeting app releases the mic before auto-pausing.
+// Verified empirically that Zoom/Meet/Teams use software-mute (keep the
+// OS-level stream open while muted), so muting in-meeting does NOT emit a stop
+// event and won't trip this debounce — the only remaining false-positive source
+// is a brief device switch. 3s feels near-instant after a real meeting end;
+// auto-resume handles any rare device-switch case if the mic comes back within
+// the window.
 const MEETING_END_DEBOUNCE_MS = 3_000;
+
+// After auto-pausing on mic-release, hold the recording paused this long before
+// auto-stopping (finalizing). The grace absorbs the one real false positive — a
+// brief device switch — since auto-resume cancels the auto-stop if the mic
+// returns within it. Because a released mic reliably means the call ended (not
+// mute), we finalize automatically after this rather than prompting the user.
+const MEETING_END_AUTOSTOP_GRACE_MS = 20_000;
 
 let micMonitorProc = null;
 let micMonitorRespawnTimer = null;
 let micMonitorRespawnDelay = MIC_MONITOR_BACKOFF_BASE_MS;
 const lastNotifiedAt = new Map();
 // When the user accepts a "Meeting detected" notification we remember the
-// originating app so we can pair its subsequent mic-stop with the recording
-// and offer a "Summarise" prompt.
-let autoStartedSession = null; // { pid, app_id, appName, paused, pauseTimer, endNotif }
+// originating app so we can pair its subsequent mic-stop with the recording and
+// auto-stop when the meeting ends.
+let autoStartedSession = null; // { pid, app_id, appName, paused, pauseTimer, autoStopTimer }
 
 function humanizeAppName(evt) {
   for (const o of APP_NAME_OVERRIDES) {
@@ -6691,9 +6761,11 @@ async function handleMicEvent(line) {
   }
   if (evt.event !== 'start') return;
 
-  // Meeting briefly went silent then came back — same app resuming. Cancel
-  // any pending pause / dismiss the "Meeting ended" prompt / auto-resume the
-  // recording so the user doesn't have to do anything.
+  // Meeting briefly went silent then came back — same app resuming. Cancel any
+  // pending pause AND any pending auto-stop, and auto-resume the recording so
+  // the user doesn't have to do anything. Cancelling the auto-stop is the whole
+  // point of the grace window: a brief mic drop (device switch) must not
+  // finalize a still-live meeting.
   if (autoStartedSession && evt.app_id === autoStartedSession.app_id) {
     if (autoStartedSession.pauseTimer) {
       clearTimeout(autoStartedSession.pauseTimer);
@@ -6702,9 +6774,9 @@ async function handleMicEvent(line) {
     }
     if (autoStartedSession.paused) {
       autoStartedSession.paused = false;
-      if (autoStartedSession.endNotif) {
-        try { autoStartedSession.endNotif.close(); } catch (_) {}
-        autoStartedSession.endNotif = null;
+      if (autoStartedSession.autoStopTimer) {
+        clearTimeout(autoStartedSession.autoStopTimer);
+        autoStartedSession.autoStopTimer = null;
       }
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('auto-resume-requested');
@@ -6743,8 +6815,8 @@ function handleMicStop(evt) {
   // Recording may have been stopped manually (Stop button, hotkey, shortcut)
   // since we accepted the auto-start. The autoStartedSession isn't notified
   // of that today, so without this guard the mic-stop event would schedule
-  // a phantom pause + "Meeting ended" notification for a recording that's
-  // already gone. Drop the session here so the next start is clean.
+  // a phantom pause + auto-stop for a recording that's already gone. Drop the
+  // session here so the next start is clean.
   if (!currentRecordingProcess && !systemAudioRecordingActive) {
     clearAutoStartedSession();
     return;
@@ -6760,7 +6832,20 @@ function handleMicStop(evt) {
       mainWindow.webContents.send('auto-pause-requested');
     }
     sendDebugLog(`[auto-detect] meeting ended (paused): ${autoStartedSession.appName}`);
-    autoStartedSession.endNotif = showMeetingEndedNotification(autoStartedSession.appName);
+    // Don't finalize immediately — the mic can briefly drop on a device switch.
+    // Hold paused for a short grace; if the mic comes back, handleMicEvent above
+    // cancels this timer and auto-resumes. Otherwise the meeting has genuinely
+    // ended (a released mic ≠ mute — Zoom/Meet/Teams keep the stream open while
+    // muted, see MEETING_END_DEBOUNCE_MS), so auto-stop and let the pipeline run.
+    // No "Wrap up" prompt: mic-release is a reliable end signal, so we finalize
+    // automatically and the user's only end-of-meeting prompt is the
+    // post-transcription "Summarise" / "Note ready".
+    if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
+    autoStartedSession.autoStopTimer = setTimeout(() => {
+      autoStartedSession.autoStopTimer = null;
+      sendDebugLog(`[auto-detect] auto-stopping ended meeting: ${autoStartedSession.appName}`);
+      autoStopEndedMeeting();
+    }, MEETING_END_AUTOSTOP_GRACE_MS);
   }, MEETING_END_DEBOUNCE_MS);
 }
 
@@ -6781,29 +6866,6 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
   notif.show();
 }
 
-function showMeetingEndedNotification(appName) {
-  const notif = new Notification({
-    title: 'Meeting ended',
-    body: appName,
-    actions: [{ type: 'button', text: 'Summarise' }],
-  });
-  // Only the explicit Summarise button commits — body click just opens
-  // Steno so the user can decide (summarise / resume / leave paused) from
-  // the in-app UI. Once summarised the meeting is finalised and AI
-  // processing has begun, so a stray body tap shouldn't trigger it.
-  notif.on('action', (_evt, _index) => requestAutoSummarise());
-  notif.on('click', () => {
-    sendDebugLog('[auto-detect] Meeting ended notif body clicked — opening Steno (no commit)');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-  trackNotificationLifecycle(notif, 'meeting_ended');
-  notif.show();
-  return notif;
-}
-
 function requestAutoRecord(appName, originatingEvt, calEvent) {
   // Prefer the calendar event title when we matched one — it's user-authored
   // and recognisable weeks later. Otherwise fall back to the neutral
@@ -6816,16 +6878,21 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   sendDebugLog(`[auto-detect] user requested record (calendar-titled: ${calEvent?.title ? 'yes' : 'no'})`);
 
   // Track the originating app so we can pair its mic-stop with this recording
-  // and offer a "Summarise" prompt when the meeting ends.
+  // and auto-stop when the meeting ends.
   autoStartedSession = {
     pid: originatingEvt?.pid ?? null,
     app_id: originatingEvt?.app_id ?? null,
     appName,
     paused: false,
     pauseTimer: null,
-    endNotif: null,
+    autoStopTimer: null,
   };
 
+  // Tapping "Take Notes" is an explicit "I'm going to take notes" — so bring
+  // Steno to the front and open the live note so the user can start typing.
+  // (The notification itself is passive and never steals focus; only this
+  // explicit tap does.) The renderer's auto-record handler then starts the
+  // recording and opens the live-note editor.
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (!mainWindow.isVisible()) mainWindow.show();
     mainWindow.focus();
@@ -6833,11 +6900,15 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   }
 }
 
-function requestAutoSummarise() {
-  sendDebugLog('[auto-detect] user requested summarise from end notification');
+// Auto-stop an ended auto-detected meeting once the mic has stayed released
+// through the grace window (see handleMicStop). STOPS the paused recording,
+// which drives the shared post-stop pipeline; the *summarise* decision then
+// happens after transcription (transcript-ready / note-ready notifications),
+// not here. Sent on the `auto-summarise-requested` channel (whose renderer
+// handler already just stops the recording); the channel name predates the
+// auto-stop rework and is kept to avoid 4-file churn.
+function autoStopEndedMeeting() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
     mainWindow.webContents.send('auto-summarise-requested');
   }
   clearAutoStartedSession();
@@ -6846,9 +6917,7 @@ function requestAutoSummarise() {
 function clearAutoStartedSession() {
   if (!autoStartedSession) return;
   if (autoStartedSession.pauseTimer) clearTimeout(autoStartedSession.pauseTimer);
-  if (autoStartedSession.endNotif) {
-    try { autoStartedSession.endNotif.close(); } catch (_) {}
-  }
+  if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
   autoStartedSession = null;
 }
 
@@ -8063,6 +8132,53 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   }
 });
 
+// Fired by the renderer's processing-complete handler when a recording finished
+// transcription but NO notes were generated (auto_summarize off → transcript-
+// only note). Unlike note-ready, this prompts the user to summarise, and is the
+// correctly-timed replacement for the old premature meeting-end "Summarise?"
+// prompt (#bug2/#bug3). Tapping "Summarise" kicks off generation in the
+// BACKGROUND — no focus-steal — because when it finishes the note-ready
+// notification (click → opens the note) is the moment we bring the user in, so
+// there's no need to pull the window forward now. A body tap opens the note to
+// read the transcript.
+ipcMain.handle('show-transcript-ready-notification', async (_event, payload) => {
+  try {
+    // `shown` = passed the notifications_enabled gate (see show-note-ready).
+    if (!(await notificationsEnabled())) return { success: true, shown: false };
+    const { title, summaryFile, name } = payload || {};
+    const notif = new Notification({
+      title: 'Transcript ready',
+      body: title ? `Summarise "${title}"?` : 'Summarise?',
+      actions: [{ type: 'button', text: 'Summarise' }],
+      iconType: 'success',
+    });
+    // Background: kick off generation without pulling the window forward. The
+    // note-ready notification that fires on completion is where we bring the
+    // user in (its click opens the note).
+    const startSummarise = () => {
+      if (mainWindow && !mainWindow.isDestroyed() && summaryFile) {
+        mainWindow.webContents.send('generate-notes-requested', { summaryFile, name });
+      }
+    };
+    notif.on('action', () => startSummarise());
+    // Body tap just opens the note to read the transcript (no generation) — the
+    // in-note GenerateNotesBar is there if they change their mind.
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow.isVisible()) mainWindow.show();
+        mainWindow.focus();
+        if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
+      }
+    });
+    trackNotificationLifecycle(notif, 'transcript_ready');
+    notif.show();
+    return { success: true, shown: true };
+  } catch (e) {
+    sendDebugLog(`Failed to show transcript-ready notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('get-notifications', handleGetNotifications);
 
 ipcMain.handle('set-notifications', async (event, enabled) => {
@@ -9209,6 +9325,7 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
   systemAudioRecordingActive = isRecording;
+  applyRecordingBackgroundThrottling();
   if (!isRecording && !currentRecordingProcess) {
     // Reset the elapsed counter (avoids leaking startedAtMs when startCapture
     // fails), but DON'T blank currentRecordingSessionName here: this is a

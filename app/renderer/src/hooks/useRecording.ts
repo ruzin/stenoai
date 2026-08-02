@@ -8,6 +8,11 @@ import { useLiveDraftStore } from './liveDraftStore';
 import { navigate, routeFromHash } from '@/lib/router';
 import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
 import { streamCache } from '@/lib/meetingDetailState';
+import {
+  classifyCompletionNotification,
+  meetingAlreadyHasNotes,
+  completionRouteAction,
+} from '@/lib/completionNotification';
 import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
@@ -263,6 +268,11 @@ export function useRecording() {
      *  INTO — lets a detail view match by identity rather than the collidable
      *  display name. Null for a fresh new-note recording or when idle. */
     recordingSummaryFile: queue.data?.recordingSummaryFile ?? null,
+    /** The real note file the live recording/processing session produces.
+     *  useMeetings dedupes the synthetic live row against it so one recording
+     *  never shows as two entries (#bug4). Only Parakeet writes the placeholder
+     *  it points at, so dedup only bites there; null when idle. */
+    liveSummaryFile: queue.data?.liveSummaryFile ?? null,
     /** Set of summary files whose `reprocess-meeting` IPC is currently
      *  in flight. Used by useMeetings to flip the matching existing
      *  meeting rows' `is_processing` flag so Home shows the badge even
@@ -327,6 +337,10 @@ export function useRecordingEvents() {
         // user already manually started or is mid-meeting.
         if (status === 'recording' || status === 'paused') return;
         void startRecording(sessionName ?? undefined, 'notification_click');
+        // "Take Notes" is an explicit intent to write notes, so open the
+        // live-note editor (main already brought the window forward). Mirrors
+        // the toolbar New-note button.
+        navigate('/recording');
       }),
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording
@@ -346,8 +360,26 @@ export function useRecordingEvents() {
         void resumeRecording();
       }),
       bridge.on.autoSummariseRequested(() => {
-        // User clicked "Summarise" on the Meeting ended notification.
+        // User chose "Wrap up" on the Meeting ended notification — stop the
+        // (auto-paused) recording so the pipeline runs; the summarise decision
+        // now happens after transcription, not here (#bug3).
         if (status === 'recording' || status === 'paused') void stopRecording();
+      }),
+      bridge.on.generateNotesRequested(({ summaryFile, name }) => {
+        // User tapped "Summarise" on the transcript-ready notification. Run the
+        // same reprocess path as GenerateNotesBar in the BACKGROUND (no
+        // navigate/focus) — main tracks it in activeReprocessJobs so the badge
+        // shows, and its completion fires processing-complete with
+        // notesGenerated:true → the "Note ready" notification, whose click opens
+        // the note. That's where the user is brought in. (#bug2/#bug3)
+        if (summaryFile) {
+          // `name` here is only the processing-badge label (reprocess never
+          // passes it to the CLI, so it can't blank the note's title).
+          void ipc().meetings.reprocess(summaryFile, false, name ?? '').catch(() => {
+            // Reprocess failure surfaces via its own STREAM_ERROR/processing
+            // path; nothing to recover here.
+          });
+        }
       }),
     ];
     bridge.shortcuts.rendererReady();
@@ -467,48 +499,87 @@ export function useRecordingProcessingEffects() {
       if (data.success && finishedSummaryFile) {
         const currentRoute = routeFromHash(window.location.hash);
         const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
-        if (currentRoute === '/meetings/processing') {
+        // #bug1 lets an auto-detected recording run with the window HIDDEN
+        // (tray-only), so "the route is this note" no longer implies the user
+        // is looking at it. Gate the suppress-when-already-here logic on real
+        // visibility, not route alone — otherwise the wrap-up flow suppresses
+        // every post-transcription prompt on the default (Parakeet) engine:
+        // stopRecording navigates to the note's own route (useRecording.ts
+        // instant-stop path), so a route-only guard would always match and
+        // never notify. (visibilityState is 'hidden' for a hidden/minimised
+        // window.)
+        const windowVisible =
+          typeof document !== 'undefined' && document.visibilityState === 'visible';
+        const action = completionRouteAction({
+          currentRoute,
+          finishedMeetingRoute,
+          processingRoute: '/meetings/processing',
+          windowVisible,
+        });
+        if (action === 'navigate') {
           // Watching it finish on the processing page → take them straight
           // into the now-ready note.
           navigate(finishedMeetingRoute);
-        } else if (currentRoute !== finishedMeetingRoute) {
-          // Anywhere else (Home, Chat, Settings, recording another note,
-          // a different meeting's detail page) → fire a native "Note
-          // ready" banner so the user knows their work-in-progress
-          // finished. Route comparison rather than window-focus check on
-          // purpose: it means a minimised Steno / alt-tabbed user who
-          // *was* sitting on this note's detail page still doesn't get a
-          // notification, because the route hasn't changed. They'll see
-          // the static summary the moment they come back.
-          //
-          // Clicking the banner navigates straight to this note (see the
-          // `navigate-to-meeting` listener below) — unlike the idle-route
-          // comparison above, a click is an explicit "take me there" from
-          // the user, so it doesn't have the back-to-back-recording
-          // interruption risk that auto-navigating here would.
+        } else if (action === 'notify') {
+          // A different route (Home, Chat, Settings, recording another note, a
+          // different meeting) OR this note's route but the window is
+          // hidden/minimised (tray-only after an auto-detected wrap-up) → fire a
+          // notification so the user learns their note finished. Clicking it
+          // navigates straight here (navigate-to-meeting listener below) — an
+          // explicit "take me there", so no back-to-back-recording interruption
+          // risk. When the window is visible AND already on this note, we skip
+          // it: the static summary is right there.
           const title =
             data.meetingData?.session_info.name?.trim() ||
             data.sessionName?.trim() ||
             'Your note has finished processing';
+          const isFailed =
+            Boolean(data.transcriptionFailed) ||
+            Boolean(data.meetingData?.session_info.transcription_failed);
+          const kind = classifyCompletionNotification({
+            notesGenerated: data.notesGenerated,
+            // Continue-recording (append) skips summarization but the note it
+            // appended to already has notes — treat as note-ready, not
+            // "generate notes?" (M2). meetingAlreadyHasNotes encodes the subtle
+            // notes_generated frontmatter semantics (absent = has notes).
+            notesAlreadyExist: meetingAlreadyHasNotes(data.meetingData),
+            transcriptionFailed: data.transcriptionFailed,
+            meetingTranscriptionFailed: data.meetingData?.session_info.transcription_failed,
+          });
           // Note: no `notifications_enabled` pre-check here — the IPC
-          // handler in main.js gates internally via
-          // `notificationsEnabled()` and short-circuits when the user
-          // has Desktop notifications disabled in Settings. Doing a
-          // round-trip from the renderer to fetch the setting before
-          // firing this IPC would be a wasted poll. The gate stays
-          // single-source-of-truth in main.
-          void ipc()
-            .settings.showNoteReadyNotification({
-              title,
-              summaryFile: finishedSummaryFile,
-              failed:
-                Boolean(data.transcriptionFailed) ||
-                Boolean(data.meetingData?.session_info.transcription_failed),
-            })
-            .catch(() => {
-              // Notification failure isn't fatal — the note is still
-              // visible in Home + sidebar. Don't bubble up.
-            });
+          // handlers in main.js gate internally via `notificationsEnabled()`
+          // and short-circuit when the user has notifications disabled. A
+          // renderer round-trip to fetch the setting first would be a wasted
+          // poll; the gate stays single-source-of-truth in main.
+          if (kind === 'note-ready') {
+            // Notes were generated (auto-summarize on, or the deferred
+            // Generate-notes/reprocess finished) — or a transcription failure
+            // that still wrote a note. Either way it's "ready": open on click.
+            void ipc()
+              .settings.showNoteReadyNotification({
+                title,
+                summaryFile: finishedSummaryFile,
+                failed: isFailed,
+              })
+              .catch(() => {
+                // Notification failure isn't fatal — the note is still
+                // visible in Home + sidebar. Don't bubble up.
+              });
+          } else {
+            // Transcript-only note (auto_summarize off → no notes generated).
+            // Prompt to generate notes rather than claim "Note ready" (#bug2);
+            // this is also the correctly-timed replacement for the old
+            // premature meeting-end "Summarise?" prompt (#bug3).
+            void ipc()
+              .settings.showTranscriptReadyNotification({
+                title,
+                summaryFile: finishedSummaryFile,
+                name: data.sessionName ?? null,
+              })
+              .catch(() => {
+                // Notification failure isn't fatal.
+              });
+          }
         }
         // else: on this note's own detail page → nothing. The streaming
         // UI's own listener swaps to the static view; no extra signal

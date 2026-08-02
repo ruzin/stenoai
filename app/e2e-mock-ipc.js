@@ -488,6 +488,13 @@ function install({ ipcMain }) {
       return { success: true, path: seamPath };
     },
 
+    // Notification handlers — the real ones return { success, shown } after the
+    // notifications_enabled gate; the mock has no OS toast, so it just reports
+    // "shown" so a T1 that drives the transcript-ready branch (#bug2/#bug3) sees
+    // a realistic shape instead of the permissive fallback. (The gate itself is
+    // covered by the T2 spec against the real handler.)
+    'show-transcript-ready-notification': async () => ({ success: true, shown: true }),
+
     // Mirror the real export-note-pdf handler's seam. The mock has no Chromium
     // to rasterise HTML, so instead of a PDF it writes the renderer-built HTML
     // verbatim to STENOAI_E2E_EXPORT_PATH — that lets a T1 spec assert the exact

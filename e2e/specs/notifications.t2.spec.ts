@@ -4,7 +4,8 @@ import { readUserConfig } from '../fixtures/user-config';
 
 /**
  * T2 — notifications: get/set toggle persistence + that the toggle GATES the
- * note-ready / silence-auto-stop / system-audio-mic-only notifications. The
+ * note-ready / transcript-ready / silence-auto-stop / system-audio-mic-only
+ * notifications (transcript-ready is the #bug2/#bug3 transcript-only prompt). The
  * handlers now return a `shown` flag (the observable design-for-test signal —
  * a native banner isn't inspectable) reflecting whether the
  * notifications_enabled gate let it through. Deterministic + model-free.
@@ -20,6 +21,7 @@ type StenoWindow = Window & {
       setNotifications: (v: boolean) => Promise<Toggle>;
       showSilenceAutoStopNotification: (payload: unknown) => Promise<ShowResult>;
       showNoteReadyNotification: (payload: unknown) => Promise<ShowResult>;
+      showTranscriptReadyNotification: (payload: unknown) => Promise<ShowResult>;
       showSystemAudioMicOnlyNotification: () => Promise<ShowResult>;
     };
   };
@@ -41,6 +43,14 @@ const showNote = (page: import('@playwright/test').Page) =>
   );
 const showMicOnly = (page: import('@playwright/test').Page) =>
   page.evaluate(() => (window as StenoWindow).stenoai.settings.showSystemAudioMicOnlyNotification());
+const showTranscript = (page: import('@playwright/test').Page) =>
+  page.evaluate(() =>
+    (window as StenoWindow).stenoai.settings.showTranscriptReadyNotification({
+      title: 'E2E note',
+      summaryFile: 'e2e-note.json',
+      name: 'E2E note',
+    }),
+  );
 
 test('notifications toggle persists and gates the note-ready / silence / mic-only notifications; real dir untouched', async ({
   launchApp,
@@ -59,6 +69,7 @@ test('notifications toggle persists and gates the note-ready / silence / mic-onl
 
   expect((await showSilence(page)).shown).toBe(false);
   expect((await showNote(page)).shown).toBe(false);
+  expect((await showTranscript(page)).shown).toBe(false);
   expect((await showMicOnly(page)).shown).toBe(false);
 
   // Enable -> persisted + the gate now lets both through (shown is not false;
@@ -73,6 +84,7 @@ test('notifications toggle persists and gates the note-ready / silence / mic-onl
 
   expect((await showSilence(page)).shown).not.toBe(false);
   expect((await showNote(page)).shown).not.toBe(false);
+  expect((await showTranscript(page)).shown).not.toBe(false);
   expect((await showMicOnly(page)).shown).not.toBe(false);
 
   // Keystone: the real user-data dir is byte-for-byte untouched.

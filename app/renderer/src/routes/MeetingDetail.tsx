@@ -77,6 +77,7 @@ import { stripReasoning } from '@/lib/markdown';
 import { pendingTitleRegens, streamCache, type StreamPhase } from '@/lib/meetingDetailState';
 import { useReprocessBridge } from '@/hooks/reprocessBridgeStore';
 import { useRecording } from '@/hooks/useRecording';
+import { useAutoSummarizeSetting } from '@/hooks/useSettings';
 
 const LAST_OPENED_KEY = 'steno-last-opened-meeting';
 
@@ -164,6 +165,10 @@ function DetailContent({
   // Re-transcribe (#266) is only offered when the source recording still exists
   // on disk (keep-recordings was on) — otherwise re-running ASR is impossible.
   const recordingAvailable = useRecordingAvailable(summaryFile);
+  // Whether this processing note will get notes generated after transcription.
+  // Defaults to true (config default) while the setting loads, so the copy
+  // doesn't flash the transcript-only wording for the common auto-on case.
+  const willGenerateNotes = useAutoSummarizeSetting().data ?? true;
   const [retranscribeOpen, setRetranscribeOpen] = React.useState(false);
   const generateReport = useGenerateReport();
   const setActiveReport = useSetActiveReport();
@@ -1175,8 +1180,17 @@ function DetailContent({
                     className="text-[14px] leading-[1.6]"
                     style={{ color: 'var(--fg-2)', maxWidth: '64ch' }}
                   >
-                    Your transcript is captured — refining it and generating notes in the
-                    background. You can read and edit <strong>My notes</strong> now.
+                    {willGenerateNotes ? (
+                      <>
+                        Finishing your transcript in the background, then generating notes. You can
+                        read and edit <strong>My notes</strong> now.
+                      </>
+                    ) : (
+                      <>
+                        Finishing your transcript in the background. You can read and edit{' '}
+                        <strong>My notes</strong> now, and generate notes when it's done.
+                      </>
+                    )}
                   </p>
                 </section>
               ) : summary ? (

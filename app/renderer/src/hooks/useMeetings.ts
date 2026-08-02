@@ -6,12 +6,14 @@ import { useRecording } from '@/hooks/useRecording';
 import { useLiveDraftStore } from '@/hooks/liveDraftStore';
 import { meetingsKeys } from '@/hooks/meetingKeys';
 import { useUndoDeleteStore } from '@/hooks/undoDeleteStore';
+// #bug4 dedup helpers live in a dependency-light module so they're unit-testable
+// without this hook's import graph.
+import { LIVE_SUMMARY_PREFIX, liveRowRedundant } from '@/lib/liveMeetingRow';
 
 export { meetingsKeys };
+// Re-exported for existing consumers that import them from here.
+export { LIVE_SUMMARY_PREFIX, liveRowRedundant };
 
-/** Sentinel summary_file path used by the synthetic in-progress recording row.
- *  Never matches a real meeting file. Consumers detect via `meeting.is_recording`. */
-export const LIVE_SUMMARY_PREFIX = '__live__/';
 
 export function useMeetings() {
   const query = useQuery({
@@ -76,12 +78,20 @@ export function useMeetings() {
         )
       : null;
     if (!live) return base;
+    // #bug4: once the real note file for this session exists in the list, drop
+    // the synthetic live row so one recording is never shown as two entries.
+    // The instant-stop placeholder (Parakeet) is written at stop keyed by its
+    // real summary_file — which main surfaces as `liveSummaryFile` — while the
+    // synthetic row is keyed on the sentinel `__live__/<sessionName>`, so they
+    // never match on their own and would otherwise coexist during processing.
+    if (liveRowRedundant(base, recording.liveSummaryFile)) return base;
     return [live, ...base];
   }, [
     query.data,
     recording.sessionName,
     recording.status,
     recording.reprocessingSummaryFiles,
+    recording.liveSummaryFile,
     liveElapsed,
     draft?.title,
     draft?.startedAtMs,
