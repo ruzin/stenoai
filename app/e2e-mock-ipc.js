@@ -268,6 +268,16 @@ function install({ ipcMain }) {
               reasons: [],
               speech_duration_seconds: 245, segment_count: 60, first_timestamp: '02:10',
               sample_text: 'I think we should ship this on Friday',
+              // Several excerpts so the row can expand. The third has no
+              // transcript text (a real, common case -- a diarized segment
+              // no transcript line covers); it stays in the list because
+              // dropping it would shift every later play button's index.
+              samples: [
+                { start: 130.0, end: 138.0, text: 'I think we should ship this on Friday' },
+                { start: 400.0, end: 406.0, text: 'the migration is the risky part' },
+                { start: 900.0, end: 904.0, text: null },
+              ],
+              contains_multiple_speakers: false,
               is_likely_artifact: false,
               confirmed_by_user: null,
             },
@@ -281,6 +291,8 @@ function install({ ipcMain }) {
               reasons: [],
               speech_duration_seconds: 80, segment_count: 20, first_timestamp: '05:45',
               sample_text: 'let me check the numbers again',
+              samples: [{ start: 345.0, end: 351.0, text: 'let me check the numbers again' }],
+              contains_multiple_speakers: false,
               is_likely_artifact: false,
               confirmed_by_user: null,
             },
@@ -294,6 +306,8 @@ function install({ ipcMain }) {
               reasons: [],
               speech_duration_seconds: 30, segment_count: 8, first_timestamp: '00:42',
               sample_text: null,
+              samples: [{ start: 42.0, end: 46.0, text: null }],
+              contains_multiple_speakers: false,
               is_likely_artifact: false,
               confirmed_by_user: null,
             },
@@ -302,6 +316,8 @@ function install({ ipcMain }) {
               merged_from: [], candidates: [], reasons: [],
               speech_duration_seconds: 5, segment_count: 1, first_timestamp: '10:02',
               sample_text: null,
+              samples: [],
+              contains_multiple_speakers: false,
               is_likely_artifact: false,
               confirmed_by_user: null,
             },
@@ -314,6 +330,8 @@ function install({ ipcMain }) {
               reasons: [],
               speech_duration_seconds: 12, segment_count: 20, first_timestamp: '08:03',
               sample_text: null,
+              samples: [],
+              contains_multiple_speakers: false,
               is_likely_artifact: true,
               confirmed_by_user: null,
             },
@@ -747,13 +765,76 @@ function install({ ipcMain }) {
       success: true,
       meeting_id: meetingStem,
       recording_available: seedSpeakers,
+      // Same derivation as the real minimum_speaker_count: every cluster is
+      // at least one person, every cluster marked as mixed is at least two.
+      minimum_speaker_count: Object.values(speakerState.suggestions).reduce(
+        (sum, clusters) =>
+          sum
+          + Object.keys(clusters).length
+          + Object.values(clusters).filter((c) => c.contains_multiple_speakers).length,
+        0,
+      ),
       channels: speakerState.suggestions,
     }),
+
+    // Marks/clears "this cluster holds more than one person". Mirrors the
+    // real CLI's effect on a later suggest-speakers refetch, which is what
+    // the panel actually re-renders from: a marked cluster loses its
+    // suggestion AND its candidates, so the T1 spec sees the same row shape
+    // a real backend would produce rather than just a flag flipping.
+    'mark-speaker-cluster': async (_event, params) => {
+      const { channel, diarizationSpeakerId, containsMultipleSpeakers } = params || {};
+      const cluster = (speakerState.suggestions[channel] || {})[diarizationSpeakerId];
+      if (!cluster) {
+        return { success: false, error: `No cluster ${diarizationSpeakerId} in ${channel}` };
+      }
+      cluster.contains_multiple_speakers = Boolean(containsMultipleSpeakers);
+      if (cluster.contains_multiple_speakers) {
+        cluster.prevSuggestion = {
+          status: cluster.status,
+          suggested_person_id: cluster.suggested_person_id,
+          suggested_name: cluster.suggested_name,
+          candidates: cluster.candidates,
+        };
+        cluster.status = 'none';
+        cluster.suggested_person_id = null;
+        cluster.suggested_name = null;
+        cluster.candidates = [];
+      } else if (cluster.prevSuggestion) {
+        Object.assign(cluster, cluster.prevSuggestion);
+        delete cluster.prevSuggestion;
+      }
+      return {
+        success: true,
+        resolved_diarization_speaker_id: diarizationSpeakerId,
+        contains_multiple_speakers: cluster.contains_multiple_speakers,
+        minimum_speaker_count: 0,
+      };
+    },
+
+    'speaker-naming-status': async (_event, meetingStem) => {
+      const clusters = Object.values(speakerState.suggestions).flatMap((c) => Object.values(c));
+      const countable = clusters.filter((c) => !c.contains_multiple_speakers);
+      return {
+        success: true,
+        meeting_id: meetingStem,
+        has_sidecar: seedSpeakers,
+        total_clusters: countable.length,
+        named_clusters: countable.filter((c) => c.confirmed_by_user).length,
+        unnamed_clusters: countable.filter((c) => !c.confirmed_by_user).length,
+      };
+    },
 
     // Deterministic fake clip -- no real ffmpeg/audio decode in T1. Always
     // "succeeds" when speaker suggestions are seeded, mirroring
     // recording_available: true above.
-    'get-speaker-sample-audio': async (_event, _meetingStem, _channel, _diarizationSpeakerId) => {
+    // `segmentIndex` (which excerpt to play) is accepted and ignored: T1 has
+    // no real audio to slice, so which moment comes back is not something
+    // this tier can be honest about. That the index selects the right
+    // segment is proven where the selection actually happens -- see
+    // tests/test_speaker_multi_marking.py's sample_segments/segment_index
+    // cases and the T2 samples-ordering spec.
+    'get-speaker-sample-audio': async (_event, _meetingStem, _channel, _diarizationSpeakerId, _segmentIndex) => {
       if (!seedSpeakers) return { success: false, error: 'no source audio available' };
       // A real (if silent/empty) minimal 16-bit mono WAV -- so the renderer's
       // blob: URL construction + <audio> playback path is exercised with
