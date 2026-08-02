@@ -19,6 +19,7 @@ import click
 import asyncio
 import logging
 import json
+import os
 import re
 import sys
 import time
@@ -2751,6 +2752,24 @@ def list_meetings():
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Stems that still have their source recording on disk. Read as ONE
+    # directory listing rather than a per-meeting existence check, because
+    # this command is on the app's cold-start path and is deliberately
+    # "optimized for fast loading" -- with a listing the cost is a single
+    # syscall regardless of library size, and each meeting is then a set
+    # lookup. Extension-agnostic on purpose: the capture pipeline saves
+    # whatever the source produced (.webm system audio, .wav native
+    # captures, .m4a/.mp3 imports), so only the stem is meaningful.
+    def _recorded_stems(recordings_dir) -> set:
+        try:
+            return {Path(name).stem for name in os.listdir(recordings_dir)}
+        except OSError:
+            # No recordings dir yet (fresh install) is not an error -- it
+            # just means nothing has audio.
+            return set()
+
+    audio_stems = _recorded_stems(dirs["recordings"])
+
     # Collect summary files from current output dir (JSON preferred over MD)
     seen_files = set()
     seen_stems = set()
@@ -2760,7 +2779,7 @@ def list_meetings():
         for f in output_dir.glob(pattern):
             stem = f.stem.replace('_summary', '')
             if stem not in seen_stems:
-                summaries.append(f)
+                summaries.append((f, stem))
                 seen_files.add(f.resolve())
                 seen_stems.add(stem)
 
@@ -2774,18 +2793,21 @@ def list_meetings():
         else:
             default_output = Path(__file__).parent / "output"
         if default_output.exists():
+            # Meetings found here keep their audio in the DEFAULT recordings
+            # dir, not the custom one -- they predate the path change.
+            audio_stems |= _recorded_stems(default_output.parent / "recordings")
             for pattern in ("*_summary.json", "*_summary.md"):
                 for f in default_output.glob(pattern):
                     stem = f.stem.replace('_summary', '')
                     if f.resolve() not in seen_files and stem not in seen_stems:
-                        summaries.append(f)
+                        summaries.append((f, stem))
                         seen_files.add(f.resolve())
                         seen_stems.add(stem)
 
     meetings = []
 
     # Single-pass: read each file once, extract sort key and data together
-    for summary_file in summaries:
+    for summary_file, stem in summaries:
         try:
             if summary_file.suffix == '.md':
                 parsed = _parse_meeting_markdown(summary_file)
@@ -2815,6 +2837,13 @@ def list_meetings():
                         "folders": data.get("folders", []),
                         "user_notes": data.get("user_notes"),
                     }
+            # Whether the ORIGINAL audio is still on disk. keep_recordings
+            # defaults off, so for most notes it is not -- and everything
+            # that needs the audio (re-transcribe, speaker samples, any
+            # future re-diarization) is silently unavailable without it,
+            # with nothing in the list saying so until you open the note
+            # and find the action missing.
+            essential_meeting['has_audio'] = stem in audio_stems
             meetings.append((sort_key, essential_meeting))
         except Exception as e:
             logger.warning(f"Failed to load {summary_file}: {e}")

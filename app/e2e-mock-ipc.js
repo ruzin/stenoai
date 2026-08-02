@@ -165,6 +165,35 @@ function seedPriorSegments(rec) {
   ];
 }
 
+// Two notes differing ONLY in whether their original recording still exists,
+// for the overview's audio indicator (STENOAI_E2E_SEED_AUDIO_MEETINGS=1).
+// keep_recordings defaults off, so "no audio" is the normal case -- the pair
+// is what proves the icon tracks the flag rather than always rendering.
+const AUDIO_SEED_MEETINGS = [
+  {
+    session_info: {
+      name: 'With audio',
+      summary_file: 'with-audio_summary.md',
+      processed_at: '2026-08-02T12:00:00Z',
+      duration_seconds: 600,
+    },
+    summary: 'A note whose recording was kept.',
+    has_audio: true,
+    key_points: [], action_items: [], discussion_areas: [], participants: [],
+  },
+  {
+    session_info: {
+      name: 'Without audio',
+      summary_file: 'without-audio_summary.md',
+      processed_at: '2026-08-02T11:00:00Z',
+      duration_seconds: 900,
+    },
+    summary: 'A note whose recording was discarded after processing.',
+    has_audio: false,
+    key_points: [], action_items: [], discussion_areas: [], participants: [],
+  },
+];
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -377,6 +406,9 @@ function install({ ipcMain }) {
     // lives in MOCKS, which shadows DEFAULTS, so it is the single source for the
     // channel.
     'list-meetings': async () => {
+      if (process.env.STENOAI_E2E_SEED_AUDIO_MEETINGS === '1') {
+        return { success: true, meetings: AUDIO_SEED_MEETINGS };
+      }
       if (process.env.STENOAI_E2E_SEED_PENDING_NOTE === '1') {
         return { success: true, meetings: [PENDING_MEETING] };
       }
