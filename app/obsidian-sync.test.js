@@ -162,14 +162,48 @@ test('remove deletes the vault copy; preserves an externally-edited one', () => 
   fs.rmSync(h.root, { recursive: true, force: true });
 });
 
-test('reconcile removes vault copies whose source note is gone', () => {
+test('reconcile removes vault copies whose source note is gone', async () => {
+  const h = harness();
+  // Two notes so the scan is non-empty after one is deleted (the empty-scan
+  // guard deliberately protects the wipe-everything case — see the H2 test).
+  h.writeNote('n1', NOTE);
+  h.writeNote('n2', NOTE.replace('Acme Q3 Planning', 'Second Note'));
+  h.eng.syncNoteBySummaryPath(path.join(h.output, 'n1_summary.md'));
+  h.eng.syncNoteBySummaryPath(path.join(h.output, 'n2_summary.md'));
+  const target = path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning.md');
+  const survivor = path.join(h.vault, 'Sales', '2026-07-15 Second Note.md');
+  fs.unlinkSync(path.join(h.output, 'n1_summary.md')); // deleted while app closed
+  await h.eng.reconcileOnLaunch();
+  assert.ok(!fs.existsSync(target), 'orphan vault copy cleaned');
+  assert.ok(!h.eng.loadIndex().notes.n1, 'index entry dropped');
+  assert.ok(fs.existsSync(survivor), 'the still-present note is untouched');
+  fs.rmSync(h.root, { recursive: true, force: true });
+});
+
+test('reconcile does NOT mass-delete when the source scan comes back empty (H2)', async () => {
   const h = harness();
   h.writeNote('n1', NOTE);
   h.eng.syncNoteBySummaryPath(path.join(h.output, 'n1_summary.md'));
   const target = path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning.md');
-  fs.unlinkSync(path.join(h.output, 'n1_summary.md')); // deleted while app closed
-  h.eng.reconcileOnLaunch();
-  assert.ok(!fs.existsSync(target), 'orphan vault copy cleaned');
-  assert.ok(!h.eng.loadIndex().notes.n1, 'index entry dropped');
+  // Simulate a failed scan (e.g. a custom storage path that didn't load): the
+  // output dir is empty/absent — the vault copy must survive, not be wiped.
+  fs.rmSync(h.output, { recursive: true, force: true });
+  await h.eng.reconcileOnLaunch();
+  assert.ok(fs.existsSync(target), 'vault copy preserved on an untrustworthy scan');
+  assert.ok(h.eng.loadIndex().notes.n1, 'index entry preserved');
+  fs.rmSync(h.root, { recursive: true, force: true });
+});
+
+test('first sync never clobbers a pre-existing untracked vault file (H1)', () => {
+  const h = harness();
+  const existing = path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning.md');
+  fs.mkdirSync(path.dirname(existing), { recursive: true });
+  fs.writeFileSync(existing, 'MY HAND-WRITTEN OBSIDIAN NOTE');
+  h.writeNote('n1', NOTE);
+  const r = h.eng.syncNoteBySummaryPath(path.join(h.output, 'n1_summary.md'));
+  assert.equal(r.status, 'synced');
+  assert.equal(fs.readFileSync(existing, 'utf8'), 'MY HAND-WRITTEN OBSIDIAN NOTE', 'user file untouched');
+  assert.ok(fs.existsSync(path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning (n1).md')),
+    'mirror written to a free, stem-suffixed name');
   fs.rmSync(h.root, { recursive: true, force: true });
 });

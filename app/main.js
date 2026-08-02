@@ -2244,7 +2244,9 @@ if (!gotSingleInstanceLock) {
         enabled: !!JSON.parse(osEnabled.trim()).obsidian_sync_enabled,
         vaultPath: JSON.parse(osVault.trim()).obsidian_vault_path || '',
       });
-      obsidianSync.reconcileOnLaunch();
+      // Fire-and-forget: reconcile yields internally, so it must not block the
+      // awaited launch sequence.
+      obsidianSync.reconcileOnLaunch().catch(() => {});
     } catch (e) {
       console.warn('Obsidian sync init failed (non-fatal):', e?.message);
     }
