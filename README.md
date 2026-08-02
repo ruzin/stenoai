@@ -77,6 +77,19 @@ Steno"), not an in-app feature. See
 [`skills/granola-to-steno/README.md`](skills/granola-to-steno/README.md) for
 setup and limitations.
 
+## Use your notes from an agent (`/steno`)
+
+The [`steno`](skills/steno/README.md) skill makes an AI agent aware of your local
+Steno notes. Run `/steno` (or just mention your meetings) and it pulls in the
+relevant notes and acts on them — answer a question across meetings, recap your
+week, extract action items, or use the meetings as source material to draft a
+spec, PRD, or follow-up. It can also **guide you through setting up a cloud model**
+(`/steno setup`) — OpenAI, Anthropic, AWS Bedrock, or a custom endpoint.
+
+It's read-only over your notes (never modifies them), needs only Python 3.8+ (no
+dependencies), and is a drop-in agent skill — copy `skills/steno/` into your
+skills folder. See [`skills/steno/README.md`](skills/steno/README.md).
+
 ## macOS Shortcuts (Optional)
 
 <details>
