@@ -9,6 +9,9 @@ import { shortcut } from '@/lib/utils';
 // renders the same string each call without rebuilding the shortcut.
 const RECORD_SHORTCUT = shortcut('⌘⇧R', 'Ctrl+Shift+R');
 const RECORDING_HINT = `Start recording from the top-right, or from anywhere with ${RECORD_SHORTCUT}.`;
+// When the global record shortcut is turned off (Settings), the hero must not
+// advertise it — drop the "or from anywhere with ⌘⇧R" clause.
+const RECORDING_HINT_NO_HOTKEY = 'Start recording from the top-right.';
 
 // Cached at module load to avoid rebuilding on every render. We don't
 // react to system-locale changes mid-session — that would require a full
@@ -31,6 +34,10 @@ export interface HeroState {
   tomorrowPreview: CalendarEvent | null;
   calendarConnected: boolean;
   now: number;
+  // Whether the global record shortcut is enabled (Settings). Gates every
+  // ⌘⇧R mention in the subtitle copy so the hero never advertises a shortcut
+  // the user has turned off.
+  hotkeyEnabled: boolean;
 }
 
 // True only when `now` is inside the event's real [start, end) — i.e. the
@@ -88,6 +95,8 @@ export function heroHeadline(s: HeroState): string {
 // Subtitle. Mirrors the headline cases. Keeps the recording shortcut hint
 // as the default fallback so the page always tells the user how to act.
 export function heroSubtitle(s: HeroState): string {
+  // Idle/upcoming fallback hint — drops the ⌘⇧R clause when the shortcut is off.
+  const idleHint = s.hotkeyEnabled ? RECORDING_HINT : RECORDING_HINT_NO_HOTKEY;
   if (s.status === 'recording') {
     // Source of truth for "what we're capturing" is the active session
     // name — the user may have started a recording titled after one
@@ -97,7 +106,9 @@ export function heroSubtitle(s: HeroState): string {
     // so "to stop" is accurate when already recording.
     const title =
       s.sessionName?.trim() || s.inProgressEvent?.title?.trim() || 'In progress';
-    return `${title} · ${RECORD_SHORTCUT} to stop`;
+    // Drop the "· ⌘⇧R to stop" tail when the global shortcut is off — stopping
+    // is then a click-only action on the bottom bar.
+    return s.hotkeyEnabled ? `${title} · ${RECORD_SHORTCUT} to stop` : title;
   }
   if (s.status === 'paused') {
     // ⌘⇧R is a record-toggle: while paused it STOPS (finalizes) the recording
@@ -111,7 +122,9 @@ export function heroSubtitle(s: HeroState): string {
   // Only when the meeting has truly started (mirrors the headline gate) — the
   // pre-start grace falls through to the timed "starts at …" line below.
   if (s.inProgressEvent && eventIsNow(s.inProgressEvent, s.now)) {
-    return `Press ${RECORD_SHORTCUT} to start recording — or tap a meeting card below.`;
+    return s.hotkeyEnabled
+      ? `Press ${RECORD_SHORTCUT} to start recording — or tap a meeting card below.`
+      : 'Tap a meeting card below to start recording.';
   }
   if (s.nextSoonEvent) {
     const startMs = new Date(s.nextSoonEvent.start).getTime();
@@ -122,10 +135,12 @@ export function heroSubtitle(s: HeroState): string {
       const mins = Math.max(1, Math.ceil((startMs - s.now) / MIN_MS));
       if (mins < 60) {
         const at = HERO_TIME_FMT.format(new Date(startMs));
-        return `${s.nextSoonEvent.title} at ${at} — ${RECORD_SHORTCUT} when you're ready.`;
+        return s.hotkeyEnabled
+          ? `${s.nextSoonEvent.title} at ${at} — ${RECORD_SHORTCUT} when you're ready.`
+          : `${s.nextSoonEvent.title} at ${at}.`;
       }
     }
-    return RECORDING_HINT;
+    return idleHint;
   }
   if (s.tomorrowPreview) {
     const startMs = new Date(s.tomorrowPreview.start).getTime();
@@ -134,5 +149,5 @@ export function heroSubtitle(s: HeroState): string {
       return `Next up: ${s.tomorrowPreview.title} tomorrow at ${at}.`;
     }
   }
-  return RECORDING_HINT;
+  return idleHint;
 }

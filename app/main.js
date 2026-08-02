@@ -57,6 +57,7 @@ const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
+const { describeUpdateError, updateErrorPhase } = require('./update-error-copy');
 const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
@@ -85,6 +86,7 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  classifySummarizationStreamError,
   captureSanitizedException,
   sanitizeModelForAnalytics,
   summarizeCalendarSnapshot,
@@ -131,6 +133,58 @@ const IS_E2E = process.env.STENOAI_E2E === '1';
 // be a far wider behavioural change than closing this hole.
 const ALLOW_E2E_PATH_SEAMS = IS_E2E && !app.isPackaged;
 const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
+
+// Global (system-wide) accelerator to toggle recording. CommandOrControl
+// resolves to Cmd on macOS and Ctrl on Windows/Linux, so no manual
+// process.platform split is needed. The env override lets the e2e T2 spec
+// register a low-collision accelerator that can't clash with whatever the
+// real host already occupies (see e2e/specs/record-hotkey.t2.spec.ts).
+const RECORD_HOTKEY_ACCEL = process.env.STENOAI_E2E_RECORD_ACCEL || 'CommandOrControl+Shift+R';
+
+// Shared toggle-recording handler for the global shortcut — reused by the
+// startup registration and the live-apply set-record-hotkey IPC handler so
+// both bind the exact same behaviour.
+function handleRecordHotkey() {
+  console.log('Global hotkey triggered: toggle recording');
+  if (mainWindow) {
+    mainWindow.webContents.send('toggle-recording-hotkey');
+  }
+}
+
+// Direct config.json read (no Python subprocess) for the startup registration
+// gate — mirrors the launch-on-login / notifications snapshot reads. The
+// startup backend call is skipped under IS_E2E, so a subprocess gate would be
+// untestable in T2. Absence of the key = ON (back-compat: the shortcut was
+// unconditionally registered before this setting existed).
+function recordHotkeyEnabledFromDisk() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      return cfg.record_hotkey_enabled !== false;
+    }
+  } catch (e) {
+    console.warn('Failed to read record_hotkey_enabled from config:', e?.message);
+  }
+  return true;
+}
+
+// Idempotently drive the global record hotkey to `enabled` and report the
+// resulting registration. globalShortcut.register() returns false when the
+// accelerator is ALREADY registered (including by us), so a bare register on a
+// repeat-enable — or an enable that races the startup registration — would
+// report a spurious failure while isRegistered() is actually true. Guarding on
+// isRegistered() keeps both call sites idempotent and the return value honest.
+function applyRecordHotkey(enabled) {
+  if (enabled) {
+    if (!globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL)) {
+      globalShortcut.register(RECORD_HOTKEY_ACCEL, handleRecordHotkey);
+    }
+  } else if (globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL)) {
+    globalShortcut.unregister(RECORD_HOTKEY_ACCEL);
+  }
+  return globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL);
+}
 if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
@@ -1928,7 +1982,7 @@ if (!gotSingleInstanceLock) {
     const helpSubmenu = {
       role: 'help',
       submenu: [
-        { label: 'Learn More', click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
+        { label: 'Learn More', click: () => shell.openExternal('https://github.com/stenolabs/stenoai') },
         { label: 'Report a Bug', click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
       ]
     };
@@ -2002,6 +2056,24 @@ if (!gotSingleInstanceLock) {
     if (!IS_E2E && loadTranscriptionEngine() === 'parakeet') {
       lastParakeetWarmupAt = Date.now();
       spawnParakeetWarmup();
+    }
+
+    // Register the global hotkey for toggle recording, unless the user turned
+    // it off in Settings. CommandOrControl resolves per-platform (Cmd on
+    // macOS, Ctrl on Windows/Linux). Gate on the persisted preference read
+    // directly from config.json — absence of the key = ON (back-compat).
+    // MUST run before createWindow(): the renderer queries get-record-hotkey
+    // on mount and caches { registered }, so registering only after the
+    // slow awaits below would report a transient registered:false as a
+    // registration failure ("couldn't register" hint, hidden shortcut copy).
+    if (recordHotkeyEnabledFromDisk()) {
+      if (applyRecordHotkey(true)) {
+        console.log(`Global hotkey registered: ${RECORD_HOTKEY_ACCEL}`);
+      } else {
+        console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
+      }
+    } else {
+      console.log('Global record hotkey disabled by preference — not registering');
     }
 
     createWindow();
@@ -2191,21 +2263,6 @@ if (!gotSingleInstanceLock) {
     // dir and misses a custom-storage user's notes entirely. Deferred off the
     // critical path so the per-note frontmatter scan never delays first paint.
     setImmediate(sweepStuckProcessingFlags);
-
-    // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
-    const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
-    const registered = globalShortcut.register(hotkeyModifier, () => {
-      console.log('Global hotkey triggered: toggle recording');
-      if (mainWindow) {
-        mainWindow.webContents.send('toggle-recording-hotkey');
-      }
-    });
-
-    if (registered) {
-      console.log(`Global hotkey registered: ${hotkeyModifier}`);
-    } else {
-      console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
-    }
 
     if (pendingShortcutUrls.length > 0) {
       const urlsToProcess = [...pendingShortcutUrls];
@@ -5381,6 +5438,10 @@ async function processNextInQueue() {
   // so the catch block below can still read it after the inner Promise
   // executor's scope has closed.
   let processingStage = 'transcription';
+  // Captured from a STREAM_ERROR: line during the summarization stage, so the
+  // catch block below can classify the real failure reason for error_occurred
+  // instead of only seeing "exited with code N" (see classifySummarizationStreamError).
+  let summarizationStreamError = null;
   // Read once per job (not per marker) -- engine/model/language/provider
   // don't change mid-job, and this avoids a repeated config.json read on
   // every stdout line.
@@ -5498,6 +5559,17 @@ async function processNextInQueue() {
               model: transcriptionCtx.model,
               language: transcriptionCtx.language,
             });
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            // Guarded on the WRITE (not just read at trackEvent time): today
+            // process_streaming only ever prints STREAM_ERROR during the
+            // summarization stage, but if that ever changed, an unguarded
+            // capture here would let a transcription-stage STREAM_ERROR
+            // masquerade as (or be overwritten by) a later summarization
+            // failure that dies without its own message.
+            if (processingStage === 'summarization') {
+              summarizationStreamError = line.slice('STREAM_ERROR:'.length).trim();
+            }
+            forwardDiagnosticStdout(line, 'process-streaming');
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
               // Instant stop stamps the (deterministic) summaryFile so the
@@ -5611,6 +5683,13 @@ async function processNextInQueue() {
       error_type: 'processing_queue',
       stage: processingStage,
       reason: classifyErrorReason(error),
+      // A STREAM_ERROR: line during the summarization stage carries the real
+      // failure reason (Ollama down, model missing, empty reduce result, ...)
+      // that classifyErrorReason can't see -- it only looked at stderr, which
+      // otherwise collapses every summarization crash into subprocess_exit_1.
+      ...(processingStage === 'summarization' && summarizationStreamError
+        ? { summarization_reason: classifySummarizationStreamError(summarizationStreamError) }
+        : {}),
     });
 
     // A processing crash (e.g. a metal::malloc OOM that SIGABRTs the
@@ -6297,6 +6376,15 @@ let pendingDownloadPercent = null;
 // a failed background update would show nothing. Cleared when a new cycle
 // starts (check / available / progress) or a download completes.
 let pendingUpdateError = null;
+// Whether that error survives a later successful check. A dropped connection
+// is disproved by one; a full disk, a missing update feed or a permission
+// problem is not, and clearing those on an unrelated success would hide a
+// condition that is still true. See update-error-copy.js.
+let pendingUpdateErrorSticky = false;
+// True between calling quitAndInstall and the app actually going away, so an
+// error that fires in that window is reported as a failed install rather than
+// as a failed check.
+let installingUpdate = false;
 
 // ── Idle auto-install ──
 // True once an update has finished downloading and is staged for install.
@@ -6383,6 +6471,8 @@ async function maybeAutoInstallWhenIdle() {
   // Bypass the mainWindow 'close' handler's preventDefault+hide (same reason as
   // the manual install-update path) so quitAndInstall actually quits + applies.
   isQuitting = true;
+  // From here on, an updater error is an INSTALL failure, not a failed check.
+  installingUpdate = true;
   // isSilent=true, isForceRunAfter=true — install without the wizard and
   // relaunch the app afterwards.
   autoUpdater.quitAndInstall(true, true);
@@ -6442,11 +6532,31 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  // Drop a stale non-sticky failure AND tell a mounted About tab, so the banner
+  // never outlives the state it describes. Sticky ones are left alone: a full
+  // disk, a permission problem or a missing feed is not disproved by starting or
+  // finding an update, only by bytes actually arriving (download-progress).
+  // Both callers need exactly this, and having it in one place is what stops the
+  // two from drifting apart — the earlier version cleared here but only emitted
+  // there, so the event never fired and About kept showing a settled failure
+  // next to a running download.
+  const clearNonStickyUpdateError = () => {
+    if (!pendingUpdateError || pendingUpdateErrorSticky) return;
+    pendingUpdateError = null;
+    if (mainWindow) mainWindow.webContents.send('update-error-cleared');
+  };
+
   autoUpdater.on('checking-for-update', () => {
     sendDebugLog('Auto-updater: checking for updates...');
     // Fresh cycle — clear any stale error from a previous failed check so a
     // rehydrating About tab doesn't show an error that's now being retried.
-    pendingUpdateError = null;
+    // Sticky ones stay: starting a check does not free disk space, grant write
+    // permission, or give this build an update feed, and those conditions are
+    // still true until something actually succeeds. They are cleared where that
+    // happens: a version found and fetched (update-available / download-progress
+    // / update-downloaded below), or a poll that comes back clean in the
+    // check-for-updates handler.
+    clearNonStickyUpdateError();
   });
 
   autoUpdater.on('update-available', (info) => {
@@ -6454,7 +6564,16 @@ function setupAutoUpdater() {
     // Matches the renderer's own `setDownloadPercent((p) => p ?? 0)` — marks
     // a download as started before the first real progress tick arrives.
     if (pendingDownloadPercent === null) pendingDownloadPercent = 0;
-    pendingUpdateError = null;
+    // Only the non-sticky ones. This event says a version was FOUND, i.e. the
+    // feed was readable — it does not say a single byte was written, so it
+    // cannot disprove a full disk or a permission problem. Those clear one
+    // event later, on the first download-progress tick, which does prove it.
+    // (Clearing them here made the banner vanish and come straight back when
+    // the unchanged condition failed the download again.)
+    //
+    // Usually a no-op, since checking-for-update already ran for this cycle —
+    // it covers a failure that arrived between the two events.
+    clearNonStickyUpdateError();
     if (mainWindow) {
       mainWindow.webContents.send('update-available', { version: info.version });
     }
@@ -6462,12 +6581,26 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-not-available', () => {
     sendDebugLog('Auto-updater: up to date');
+    // A completed cycle with nothing pending — clear even a sticky failure.
+    // This is the updater itself reporting success, unlike the GitHub poll in
+    // the check-for-updates handler (our own request, which proves nothing
+    // about whether the updater can read its feed or write to disk). Nothing is
+    // waiting to download or install any more, so a banner about a past attempt
+    // is describing a state that no longer exists — and a condition that really
+    // is still broken (no update feed) errors before ever reaching this event.
+    pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
+    // Tell a mounted About tab too — it keeps its own copy, and the events it
+    // already listens to (available/progress/downloaded) don't fire on a clean
+    // cycle, so without this the banner would sit there until a remount.
+    if (mainWindow) mainWindow.webContents.send('update-error-cleared');
   });
 
   autoUpdater.on('download-progress', (progress) => {
     sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
     pendingDownloadPercent = Math.round(progress.percent);
     pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
     if (mainWindow) {
       mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
     }
@@ -6477,6 +6610,7 @@ function setupAutoUpdater() {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
     pendingDownloadPercent = null;
     pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
     pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
@@ -6492,6 +6626,21 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     const msg = (err && err.message) || String(err);
+    // Which phase failed, captured BEFORE the state is cleared below. Note it
+    // does NOT consider a staged update: a periodic check can fail long after a
+    // download succeeded, and calling that a failed download is the lie this
+    // whole path exists to stop telling.
+    //
+    // Known limit: electron-updater's error event does not say which attempt it
+    // belongs to, so a periodic check that fails WHILE a download is genuinely
+    // running is attributed to the download. That case was already reported as
+    // a download failure before this module existed, so the heuristic is not a
+    // regression — closing it needs per-attempt correlation the library does
+    // not expose.
+    const phase = updateErrorPhase({
+      downloadInFlight: pendingDownloadPercent !== null,
+      installing: installingUpdate,
+    });
     // Clear any in-flight download state regardless of which branch below
     // fires — otherwise a failure after 'update-available' (which seeds
     // pendingDownloadPercent to 0) leaves get-update-status reporting a
@@ -6507,12 +6656,19 @@ function setupAutoUpdater() {
       sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
       return;
     }
+    // The raw text stays here, where it's useful for diagnosis. What reaches
+    // the About tab is one sentence naming the phase that failed and whether
+    // the user has to do anything — see update-error-copy.js.
     sendDebugLog(`Auto-updater error: ${msg}`);
+    const { message: userMessage, sticky } = describeUpdateError(msg, { phase });
+    // The install attempt (if any) is over — a later error is a fresh cycle.
+    installingUpdate = false;
     // Persist so a later About-tab mount can rehydrate it (the event below is
     // one-shot and only reaches an already-mounted listener).
-    pendingUpdateError = msg;
+    pendingUpdateError = userMessage;
+    pendingUpdateErrorSticky = sticky;
     if (mainWindow) {
-      mainWindow.webContents.send('update-error', { message: msg });
+      mainWindow.webContents.send('update-error', { message: userMessage });
     }
   });
 
@@ -6541,6 +6697,8 @@ ipcMain.on('install-update', () => {
   // quitAndInstall's window-close step actually quits the app. Without this
   // the app just minimises and Squirrel never gets to apply the update.
   isQuitting = true;
+  // From here on, an updater error is an INSTALL failure, not a failed check.
+  installingUpdate = true;
   autoUpdater.quitAndInstall(false, true);
 });
 
@@ -8092,6 +8250,47 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
   }
 });
 
+// Both the persisted preference AND the live registration state — the UI needs
+// to know if the shortcut is enabled but failed to register (another app owns
+// the accelerator) so it can surface a hint.
+ipcMain.handle('get-record-hotkey', () => ({
+  success: true,
+  enabled: recordHotkeyEnabledFromDisk(),
+  registered: globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL),
+}));
+
+ipcMain.handle('set-record-hotkey', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting record hotkey to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-record-hotkey', enabled ? 'True' : 'False']);
+
+    // Surface a persist failure rather than silently applying the shortcut.
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const persisted = JSON.parse(jsonMatch[0]);
+      if (persisted.success === false) {
+        return {
+          success: false,
+          error: persisted.error || 'Failed to save record shortcut preference',
+        };
+      }
+    }
+
+    // Live-apply so the change takes effect without a relaunch. Idempotent and
+    // never unregisterAll() — see applyRecordHotkey (guards on isRegistered() so
+    // a repeat-enable can't report a spurious failure, and only ever touches
+    // this specific accelerator).
+    const registered = applyRecordHotkey(enabled);
+    if (enabled && !registered) {
+      console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
+    }
+    return { success: true, enabled, registered };
+  } catch (error) {
+    sendDebugLog(`Error setting record hotkey: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-telemetry', async () => {
   try {
     const result = await runPythonScript('simple_recorder.py', ['get-telemetry']);
@@ -9442,7 +9641,7 @@ async function findOllamaExecutable() {
 // named constant so the repo path has a single source of truth (and is the one
 // line to change if the repo is renamed/transferred — though the redirect
 // following below means an old build keeps working through GitHub's 301 too).
-const UPDATE_CHECK_URL = 'https://api.github.com/repos/ruzin/stenoai/releases/latest';
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/stenolabs/stenoai/releases/latest';
 
 // Update checking functionality. Follows HTTP redirects (301/302/307/308):
 // GitHub's REST API returns a 301 to the new owner/repo path when a repo is
@@ -9601,6 +9800,19 @@ ipcMain.handle('check-for-updates', async () => {
   // Mac below the launch floor, which must not download a build it can't run (#432).
   if (!IS_E2E && app.isPackaged && osEligible) {
     autoUpdater.checkForUpdates().catch(() => {});
+  }
+  // A check that just succeeded and found nothing settles an earlier FAILED
+  // check — otherwise a stale banner sits under a fresh "You're on the latest
+  // version", two contradictory answers to one question. Cleared here, in the
+  // state the About tab rehydrates from, so it stays cleared across a remount
+  // rather than only until the user switches tabs.
+  //
+  // Only non-sticky errors: this poll is our own GitHub request, so it says
+  // nothing about whether the updater can write to /Applications or whether
+  // this build has an update feed at all. Those conditions are still true and
+  // stay on screen (see update-error-copy.js).
+  if (result.success && !result.updateAvailable && !pendingUpdateErrorSticky) {
+    pendingUpdateError = null;
   }
   // Surface eligibility so the About tab can explain why an "update available"
   // won't auto-install on an under-floor Mac, rather than offering a broken

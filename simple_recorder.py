@@ -189,12 +189,13 @@ def _normalize_markdown_for_parsing(md_text: str) -> str:
     """Ensure headers immediately following a reasoning tag start on a new line."""
     return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
 
-# Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
+# Shared atomic writers (tempfile + os.replace + Windows PermissionError
 # retry). One implementation for the summary JSON and config.json (recorder_state.json
-# is no longer written — see MeetingPipeline.state_file) — re-exported here so
-# existing imports keep working. The canonical copy lives in src.config because
-# this module already imports from src (the reverse import would be circular).
-from src.config import _atomic_write_json  # noqa: E402
+# is no longer written — see MeetingPipeline.state_file) and one for the summary
+# Markdown — re-exported here so existing imports keep working. The canonical
+# copies live in src.config because this module already imports from src (the
+# reverse import would be circular).
+from src.config import _atomic_write_json, _atomic_write_text  # noqa: E402
 
 
 def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max_beats: int = 30):
@@ -623,7 +624,7 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _atomic_write_text(summary_path, '\n'.join(md_lines))
 
         print(f"⚠️ Transcription failed; preserved audio: {audio_path}")
         print(f"TRANSCRIPTION_FAILED:{short_error}", flush=True)
@@ -717,7 +718,7 @@ Summary output language: {config.get_language_name(output_language)}
                 md_lines.append('## User Notes')
                 md_lines.append('')
                 md_lines.append(notes_text)
-            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            _atomic_write_text(summary_path, '\n'.join(md_lines))
             if not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
@@ -811,7 +812,7 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _atomic_write_text(summary_path, '\n'.join(md_lines))
 
         # Clean up
         from src.config import get_config
@@ -950,7 +951,7 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
             content = content[:notes_idx] + segment + '\n' + content[notes_idx:]
         else:
             content = content.rstrip('\n') + segment + '\n'
-        target.write_text(content, encoding='utf-8')
+        _atomic_write_text(target, content)
     else:
         with open(target, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -1256,7 +1257,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                 md_lines.append('## User Notes')
                 md_lines.append('')
                 md_lines.append(notes_text)
-            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            _atomic_write_text(summary_path, '\n'.join(md_lines))
 
             if not is_live_transcript and not gate_config.get_keep_recordings():
                 try:
@@ -1370,7 +1371,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _atomic_write_text(summary_path, '\n'.join(md_lines))
 
         # Clean up audio. When we fell back to the live transcript the batch
         # transcription was empty/failed, so KEEP the audio regardless of the
@@ -3099,7 +3100,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
                 md_lines.append('## User Notes')
                 md_lines.append('')
                 md_lines.append(notes_text)
-            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            _atomic_write_text(summary_path, '\n'.join(md_lines))
         else:
             # JSON format: parse streamed markdown into structured fields
             parsed = recorder._parse_streamed_markdown(streamed_md)
@@ -3330,7 +3331,7 @@ def regen_title(summary_file):
             import re
             escaped = generated_title.replace('\\', '\\\\').replace('"', '\\"')
             text = re.sub(r'^title:.*$', f'title: "{escaped}"', text, flags=re.MULTILINE)
-            summary_path.write_text(text, encoding='utf-8')
+            _atomic_write_text(summary_path, text)
         else:
             with open(summary_path, 'w') as f:
                 json.dump(existing_data, f, indent=2)
@@ -4226,6 +4227,38 @@ def set_notifications(enabled):
         print(json.dumps({"success": True, "notifications_enabled": enabled}))
     else:
         print(f"ERROR: Failed to save notification preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_record_hotkey():
+    """Get the current global record shortcut preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_record_hotkey_enabled()
+
+    result = {
+        "record_hotkey_enabled": enabled
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_record_hotkey(enabled):
+    """Set global record shortcut preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_record_hotkey_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: Record shortcut {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "record_hotkey_enabled": enabled}))
+    else:
+        print("ERROR: Failed to save record shortcut preference")
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 

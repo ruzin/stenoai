@@ -1,4 +1,7 @@
 import * as React from 'react';
+// Serialises the report markdown to an HTML string for the branded PDF, using
+// the same react-markdown renderer the detail view renders on screen.
+import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
 import {
   Calendar as CalendarIcon,
@@ -604,21 +607,35 @@ function DetailContent({
     };
   }, [info, meeting]);
 
-  // Whether the note has structured content worth exporting to PDF — the
-  // disabled state only needs this boolean, so the ~45KB branded HTML (base64
-  // font included) is built lazily on click in saveNotesPdf, not on every render.
-  const canExportNotesPdf = hasNotesContent(noteSections);
+  // Whether there is anything worth exporting to PDF — the disabled state only
+  // needs this boolean, so the ~45KB branded HTML (base64 font included) is
+  // built lazily on click in saveNotesPdf, not on every render. An open report
+  // counts on its own: a transcript-only note (auto-summarise off) has no
+  // structured sections but can still have a generated report on screen.
+  const canExportNotesPdf = activeReport
+    ? Boolean(stripReasoning(activeReport.content).trim())
+    : hasNotesContent(noteSections);
 
-  // Branded-PDF export of the Standard structured note (not an open template
-  // report — the branded template is structured-note shaped). Hands finished
-  // HTML to the export-note-pdf IPC, which rasterises + writes it.
+  // Branded-PDF export of whichever note is on screen — the open template
+  // report when one is selected, otherwise the Standard structured note. The
+  // report's markdown is serialised with the SAME renderer the view above uses
+  // (react-markdown), so the PDF can't drift from what the user is looking at.
+  // Hands finished HTML to the export-note-pdf IPC, which rasterises + writes it.
   const saveNotesPdf = async () => {
     if (!canExportNotesPdf) return;
     setExportError(null);
     try {
+      const reportForPdf = activeReport
+        ? {
+            templateName: activeReport.template_name,
+            contentHtml: renderToStaticMarkup(
+              <ReactMarkdown>{stripReasoning(activeReport.content)}</ReactMarkdown>,
+            ),
+          }
+        : null;
       const res = await ipc().meetings.exportNotePdf(
         defaultExportFilename(meeting, 'pdf'),
-        buildNotesHtml(noteSections)
+        buildNotesHtml(noteSections, reportForPdf)
       );
       if (!res.success && res.error !== EXPORT_CANCELED_ERROR) {
         setExportError(`Couldn't save notes: ${res.error || 'unknown error'}`);
