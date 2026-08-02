@@ -29,7 +29,7 @@ function ExternalLinkAction({ label, onClick }: { label: string; onClick: () => 
 // handler) for the contextual "View release" button below.
 const CHANGELOG_URL = 'https://docs.stenoai.co/changelog';
 const DISCORD_URL = 'https://discord.gg/DZ6vcQnxxu';
-const GITHUB_URL = 'https://github.com/ruzin/stenoai';
+const GITHUB_URL = 'https://github.com/stenolabs/stenoai';
 const TERMS_URL = 'https://stenoai.co/terms.html';
 const PRIVACY_URL = 'https://stenoai.co/privacy.html';
 
@@ -56,33 +56,66 @@ export function AboutTab() {
   // set this — whichever observes completion first wins, and once true a
   // later-arriving percent-only snapshot is ignored rather than merged.
   const settledRef = React.useRef(false);
+  // Separate from settledRef, which is about the progress bar. Every
+  // authoritative write to the banner bumps this: the live update-error and
+  // update-error-cleared events, and the re-read after a manual check. The
+  // mount-time getStatus() below captures it before its request and drops its
+  // own reply if anything has written since — main answers with the state as of
+  // the REQUEST, so a newer write has to win regardless of which reply lands
+  // last. Without it, a stale reply's `e ?? persisted` merge sees the cleared
+  // null and puts the settled failure straight back on screen.
+  const errorSeqRef = React.useRef(0);
 
   React.useEffect(() => {
     const offAvailable = ipc().on.updateAvailable(() => {
       // Confirms the real background updater has started fetching this
       // version — the progress bar below is about to start moving.
+      //
+      // Deliberately does NOT clear the banner: main keeps a sticky failure
+      // through this event, because finding a version proves the feed was
+      // readable and nothing else. Clearing here would hide a failure main
+      // still holds, and a remount would bring it straight back.
       settledRef.current = false;
-      setDownloadError(null);
       setDownloadPercent((p) => p ?? 0);
     });
     const offProgress = ipc().on.updateDownloadProgress((evt) => {
+      // Bytes are actually arriving — that is what disproves a full disk or a
+      // permission problem, so this is where main clears both kinds and where
+      // the banner goes with them.
+      errorSeqRef.current += 1;
+      setDownloadError(null);
       setDownloadPercent(evt.percent);
     });
     const offDownloaded = ipc().on.updateDownloaded((evt) => {
       settledRef.current = true;
+      // Main clears the failure here too (both kinds — the bytes are on disk).
+      // Usually download-progress got there first, but a resumed or cached
+      // transfer can make this the first event this tab sees, and then the
+      // banner would sit next to "Restart to Update".
+      errorSeqRef.current += 1;
+      setDownloadError(null);
       setDownloadPercent(null);
       setDownloadedVersion(evt.version);
     });
     const offError = ipc().on.updateError((evt) => {
       settledRef.current = true;
+      errorSeqRef.current += 1;
       setDownloadPercent(null);
       setDownloadError(evt.message);
+    });
+    // Main settled an earlier failure (a cycle came back clean). Nothing else
+    // fires on that path, so without this the banner would stay on a tab that
+    // happens to be open.
+    const offErrorCleared = ipc().on.updateErrorCleared(() => {
+      errorSeqRef.current += 1;
+      setDownloadError(null);
     });
     return () => {
       offAvailable();
       offProgress();
       offDownloaded();
       offError();
+      offErrorCleared();
     };
   }, []);
 
@@ -98,6 +131,9 @@ export function AboutTab() {
   // the progress bar alongside it.
   React.useEffect(() => {
     let cancelled = false;
+    // Captured before the request: anything that writes the banner while this
+    // is in flight makes the reply stale, whichever order they land in.
+    const seqAtRequest = errorSeqRef.current;
     void ipc()
       .updates.getStatus()
       .then((result) => {
@@ -105,7 +141,7 @@ export function AboutTab() {
         if (result.downloadedVersion) {
           settledRef.current = true;
           setDownloadedVersion((v) => v ?? result.downloadedVersion);
-        } else if (result.downloadError) {
+        } else if (result.downloadError && errorSeqRef.current === seqAtRequest) {
           // A failed background update persists in main; restore it so
           // returning to About still shows the failure. Terminal for this
           // cycle (like a completed download), so mark settled — a stale
@@ -141,6 +177,22 @@ export function AboutTab() {
         });
       } else {
         setCheckState({ kind: 'up-to-date' });
+        // A check that just succeeded settles an earlier failed one, so a stale
+        // banner doesn't sit under a fresh "You're on the latest version" as two
+        // contradictory answers to the same question. Main owns that decision —
+        // it knows whether the failure was disproved by this check or is still
+        // true (a full disk, a permission problem) — so re-read rather than
+        // clearing locally, and stay in sync with what a remount would show.
+        // Same staleness rule as the mount effect, in the other direction: if a
+        // live update-error lands while this read is in flight, that error is
+        // newer than the state main answered with, and overwriting it would
+        // wipe a failure that just happened.
+        const seqAtRequest = errorSeqRef.current;
+        const status = await ipc().updates.getStatus();
+        if (status.success && errorSeqRef.current === seqAtRequest) {
+          errorSeqRef.current += 1;
+          setDownloadError(status.downloadError);
+        }
       }
     } catch (e) {
       setCheckState({
@@ -238,9 +290,14 @@ export function AboutTab() {
         </div>
       )}
 
+      {/* main.js sends a finished sentence that already names what failed
+          (check vs download) — see update-error-copy.js. Rendering it verbatim
+          is deliberate: the old "Update download failed: {raw}" prefix claimed
+          a download even when the check never got that far, and pasted
+          net:: codes and bundle paths into the UI. */}
       {downloadError && (
         <div className="py-3 text-[12px]" style={{ color: 'var(--danger)' }}>
-          Update download failed: {downloadError}
+          {downloadError}
         </div>
       )}
 
