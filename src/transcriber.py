@@ -522,6 +522,35 @@ def _merge_close_diar_segments(segments: list[dict], max_gap: float) -> list[dic
     return merged
 
 
+def _clamp_overlapping_diar_segments(segments: list[dict]) -> list[dict]:
+    """Give each moment of audio to one speaker only, by pulling a segment's
+    start up to where the previous speaker actually stopped. Segments must
+    already be sorted by start time; the result is re-sorted by the caller.
+
+    Sortformer really does emit overlapping segments -- observed on
+    single-mic audio, see the note above LONG_SENTENCE_SPLIT_THRESHOLD_S.
+    Left as-is, the overlapped span is counted twice: once for each cluster.
+    That inflated total is what _cluster_channel_labels weighs against
+    CHANNEL_DOMINANCE_THRESHOLD to decide whether a channel is one voice or
+    gets split into "Speaker N" at all, so a run of overlap can decide the
+    speaker count on double-counted time.
+
+    A segment lying ENTIRELY inside an earlier one is left untouched:
+    clamping it would leave nothing of it, and a cluster that only ever
+    speaks inside someone else's turn would vanish from the channel
+    completely -- deleting a speaker to fix an arithmetic error is the
+    worse trade. Its span stays double-counted, which is the rarer case."""
+    clamped: list[dict] = []
+    running_end: Optional[float] = None
+    for segment in segments:
+        current = dict(segment)
+        if running_end is not None and current["start"] < running_end < current["end"]:
+            current["start"] = running_end
+        clamped.append(current)
+        running_end = current["end"] if running_end is None else max(running_end, current["end"])
+    return clamped
+
+
 # A single mic capturing two people is a much harder acoustic problem than a
 # clean mic-vs-system-audio split — the diarizer's own turn boundaries can be
 # genuinely noisy/overlapping there (observed empirically: alternating and
@@ -897,7 +926,16 @@ def _run_steno_diarize(
         ),
         key=lambda s: s["start"],
     )
+    # Merge first so a same-speaker overlap (the flicker case) collapses into
+    # one turn instead of being clamped into two touching ones; then clamp
+    # what is left, which is overlap between DIFFERENT speakers; then merge
+    # again, since clamping can leave two same-speaker segments flush.
+    # Clamping only ever moves a start forward, so re-sort before the second
+    # merge -- a segment nested inside a longer one keeps its original start
+    # and can end up out of order.
     merged = _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
+    clamped = sorted(_clamp_overlapping_diar_segments(merged), key=lambda s: s["start"])
+    merged = _merge_close_diar_segments(clamped, STENO_DIARIZE_MERGE_GAP_S)
     embeddings = {str(k): [float(x) for x in v] for k, v in raw_embeddings.items()}
     return merged, embeddings
 

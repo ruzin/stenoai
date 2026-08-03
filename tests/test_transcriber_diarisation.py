@@ -34,6 +34,7 @@ from src.transcriber import (
     WhisperTranscriber,
     _apply_voiceprint_matches,
     _assign_asr_segments_to_diar_segments,
+    _clamp_overlapping_diar_segments,
     _cluster_channel_labels,
     _diarised_split_timeout,
     _format_timestamp,
@@ -807,6 +808,58 @@ class MergeCloseDiarSegmentsTests(unittest.TestCase):
         self.assertEqual(segments, [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0"}])
 
 
+class ClampOverlappingDiarSegmentsTests(unittest.TestCase):
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(_clamp_overlapping_diar_segments([]), [])
+
+    def test_partial_overlap_is_given_to_the_earlier_speaker(self):
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments), [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ])
+
+    def test_untouched_when_nothing_overlaps(self):
+        segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments), segments)
+
+    def test_fully_contained_segment_survives_instead_of_being_clamped_away(self):
+        # Clamping this one leaves nothing of it, and a cluster that only
+        # ever speaks inside someone else's turn would disappear from the
+        # channel entirely. Double-counted time is the cheaper mistake.
+        segments = [
+            {"start": 0.0, "end": 10.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 4.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments), segments)
+
+    def test_clamps_against_the_furthest_end_seen_not_just_the_previous(self):
+        # A long segment followed by a short nested one must not let the
+        # next real turn start back inside the long one.
+        segments = [
+            {"start": 0.0, "end": 10.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 4.0, "speaker": "SPEAKER_1"},
+            {"start": 8.0, "end": 12.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments)[2], {
+            "start": 10.0, "end": 12.0, "speaker": "SPEAKER_1",
+        })
+
+    def test_does_not_mutate_input(self):
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ]
+        _clamp_overlapping_diar_segments(segments)
+        self.assertEqual(segments[1]["start"], 3.0)
+
+
 class AssignAsrSegmentsToDiarSegmentsTests(unittest.TestCase):
     def test_empty_diar_segments_is_a_no_op(self):
         diar_segments = []
@@ -1517,6 +1570,42 @@ class RunStenoDiarizeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(embeddings, {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]})
+
+    def test_cross_speaker_overlap_is_clamped_before_the_result_is_returned(self):
+        # Sortformer really does emit overlapping segments on single-mic
+        # audio. Returned as-is, the overlapped span counts toward BOTH
+        # clusters' speaking time, and that total is what decides whether
+        # a channel is treated as one voice or split into "Speaker N".
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 5.0},
+                {"speakerId": "SPEAKER_1", "start": 3.0, "end": 8.0},
+            ],
+            "speakers": {},
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, _ = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ])
+
+    def test_same_speaker_overlap_collapses_into_one_turn(self):
+        # Same-speaker overlap is diarizer flicker, not two voices -- it
+        # must merge into one turn rather than be clamped into two
+        # touching ones.
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 5.0},
+                {"speakerId": "SPEAKER_0", "start": 3.0, "end": 8.0},
+            ],
+            "speakers": {},
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, _ = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [{"start": 0.0, "end": 8.0, "speaker": "SPEAKER_0"}])
 
     def test_parses_json_with_trailing_warning_after_payload(self):
         # A real ~3.5h channel measured a late CoreML/Metal warning printed
