@@ -562,6 +562,14 @@ Summary output language: {config.get_language_name(output_language)}
             "is_diarised": is_diarised,
             "diarised_text": diarised_text,
             "output_language": output_language,
+            # Share of the audio the backend actually read, worst channel, or
+            # None where it does no windowing of its own. None means
+            # "unknown", not "complete" -- see the live-transcript fallback in
+            # process_streaming.
+            "window_coverage": (
+                transcript_result.get("window_coverage")
+                if isinstance(transcript_result, dict) else None
+            ),
         }
 
     def _handle_transcription_failure(
@@ -899,6 +907,43 @@ try:
 except ImportError:
     _SILENCE_SENTINEL = "No speech detected in audio"
 
+# Below this share of the audio actually read, a batch transcript stops being
+# "the transcript" and the complete live transcript is the better rescue.
+# Deliberately low: a meeting that lost a window or two is still far better
+# than the streaming text, and swapping too eagerly is how the old length
+# threshold made things worse (see the fallback in process_streaming).
+# Half the file missing is not a gap, it is a different recording.
+_MIN_BATCH_WINDOW_COVERAGE = 0.5
+
+
+def _unusable_batch_reason(
+    batch_text: str,
+    batch_failed: bool,
+    window_coverage: Optional[float],
+) -> Optional[str]:
+    """Why the batch transcript can't stand as the meeting's transcript, or
+    None when it can.
+
+    Three ways it can't: the transcription crashed, it came back as exactly
+    the silence sentinel, or it read less than half the audio (see
+    _MIN_BATCH_WINDOW_COVERAGE). Deliberately NOT length -- a five-minute
+    stand-up is allowed to be short, and an earlier length threshold here
+    replaced correct transcripts because of it.
+
+    ``window_coverage`` is None for a backend that does no windowing of its
+    own; unknown is not a reason to throw a result away.
+
+    Lives outside process_streaming so the decision can be tested as itself
+    rather than restated in a test that could drift away from it.
+    """
+    if batch_failed:
+        return "failed"
+    if batch_text.strip() == _SILENCE_SENTINEL:
+        return "returned only silence"
+    if window_coverage is not None and window_coverage < _MIN_BATCH_WINDOW_COVERAGE:
+        return f"read only {window_coverage:.0%} of the audio"
+    return None
+
 
 def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
     """Fold a continue-recording segment into an existing note.
@@ -1101,16 +1146,24 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         # We only swap in the live text when the batch result is genuinely
         # unusable (failed or silence sentinel). Any non-whitespace live content
         # is better than a silent failure — even a brief session deserves rescue.
+        # Third case, added later: a batch that neither crashed nor returned
+        # silence, but read only part of the audio. The onnx backend skips a
+        # window whose recognize() raises on purpose, so one bad window
+        # doesn't fail a meeting -- but the transcript then covers less than
+        # the recording holds, and nothing said so. Such a result is not
+        # empty, so it used to pass this gate and silently replace a complete
+        # live transcript with a full-of-holes one.
         batch_text = transcript_data.get("transcript_text", "") or ""
         batch_failed = bool(transcript_data.get("transcription_failed"))
-        batch_is_silence = batch_text.strip() == _SILENCE_SENTINEL
+        reason = _unusable_batch_reason(
+            batch_text, batch_failed, transcript_data.get("window_coverage")
+        )
         is_live_transcript = False
-        if (batch_failed or batch_is_silence) and live_transcript_text \
-                and live_transcript_text.strip():
+        if reason and live_transcript_text and live_transcript_text.strip():
             logger.warning(
                 "Batch transcription %s; falling back to the live transcript "
                 "captured during recording (%d chars)",
-                "failed" if batch_failed else "returned only silence",
+                reason,
                 len(live_transcript_text),
             )
             is_live_transcript = True

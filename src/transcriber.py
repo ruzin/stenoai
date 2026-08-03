@@ -277,6 +277,20 @@ def _format_timestamp(seconds: float) -> str:
     return f"{mm:02d}:{ss:02d}"
 
 
+def _worst_window_coverage(*results: Optional[dict]) -> Optional[float]:
+    """Lowest reported window coverage across the channels that reported one.
+
+    Returns None when nothing reported -- a backend that does no windowing
+    of its own cannot lose a window, but it also cannot vouch for the file,
+    so "unknown" stays distinct from "complete"."""
+    values = [
+        float(r["window_coverage"])
+        for r in results
+        if isinstance(r, dict) and r.get("window_coverage") is not None
+    ]
+    return min(values) if values else None
+
+
 def _token_jaccard(a: str, b: str) -> float:
     """Jaccard similarity over normalised word tokens.
 
@@ -698,6 +712,12 @@ class WhisperTranscriber:
             "duration_seconds": result.get("duration_seconds"),
             "detected_language": result.get("detected_language"),
             "detected_language_probability": result.get("detected_language_probability"),
+            # Share of the audio the backend actually read, or None where it
+            # does no windowing of its own. Only the onnx backend can lose a
+            # window quietly (parakeet-mlx has no per-chunk except, so a bad
+            # window fails the whole call loudly) -- but the key travels on
+            # both paths so callers never have to branch.
+            "window_coverage": result.get("window_coverage"),
         }
 
     def _convert_to_16khz(self, audio_filepath: Path) -> tuple[Path, Optional[float]]:
@@ -1121,6 +1141,11 @@ class WhisperTranscriber:
             mic_empty_on_energy = False
             system_empty_on_energy = False
             empty_error: Optional[str] = None
+            # A channel the energy gate skipped never gets a result -- bind
+            # both up front so anything reading them after the branches (the
+            # window-coverage roll-up at the end) can't hit an unbound name.
+            mic_result: Optional[dict] = None
+            sys_result: Optional[dict] = None
 
             # Split channels are already 16 kHz mono + high-passed by the
             # split ffmpeg pass above — skip the mono pre-processing pass.
@@ -1295,6 +1320,22 @@ class WhisperTranscriber:
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
                 "engine": engine or self.backend,
+                # Worst channel wins: a meeting is only as complete as the
+                # side that lost the most. None when no channel reported a
+                # figure (whisper.cpp, parakeet-mlx, or a file short enough
+                # to need no windowing) -- absence means "unknown", never
+                # "complete", so callers must not read it as a pass.
+                #
+                # Only channels whose segments SURVIVED count. Bleed handling
+                # above can empty a channel outright (per-segment drop, or the
+                # Jaccard collapse to mic-only); what its transcription missed
+                # says nothing about the transcript that was actually built,
+                # and letting it vote would swap in the live transcript over a
+                # perfectly good mic-only one.
+                "window_coverage": _worst_window_coverage(
+                    mic_result if mic_segments else None,
+                    sys_result if system_segments else None,
+                ),
             }
         finally:
             # Clean up temp channel files
