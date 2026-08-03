@@ -516,7 +516,12 @@ def _merge_close_diar_segments(segments: list[dict], max_gap: float) -> list[dic
     for segment in segments[1:]:
         last = merged[-1]
         if segment["speaker"] == last["speaker"] and segment["start"] - last["end"] <= max_gap:
-            last["end"] = segment["end"]
+            # max(), not assignment: sorted-by-start does not mean the next
+            # segment ends later. A same-speaker segment nested inside the
+            # one before it (Sortformer emits these, and clamping can leave
+            # one behind) would otherwise pull the merged end BACKWARDS and
+            # delete speaking time that was really there.
+            last["end"] = max(last["end"], segment["end"])
         else:
             merged.append(dict(segment))
     return merged

@@ -802,6 +802,18 @@ class MergeCloseDiarSegmentsTests(unittest.TestCase):
         merged = _merge_close_diar_segments(segments, 0.3)
         self.assertEqual(len(merged), 2)
 
+    def test_nested_same_speaker_segment_does_not_shorten_the_turn(self):
+        # Sorted by start does not mean each segment ends later than the
+        # one before. A nested same-speaker segment used to pull the merged
+        # end backwards, deleting speaking time that was really there --
+        # and that time feeds the dominance share deciding the speaker count.
+        segments = [
+            {"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"},
+            {"start": 2.0, "end": 3.0, "speaker": "SPEAKER_0"},
+        ]
+        merged = _merge_close_diar_segments(segments, 0.3)
+        self.assertEqual(merged, [{"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"}])
+
     def test_does_not_mutate_input(self):
         segments = [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0"}]
         _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
@@ -858,6 +870,26 @@ class ClampOverlappingDiarSegmentsTests(unittest.TestCase):
         ]
         _clamp_overlapping_diar_segments(segments)
         self.assertEqual(segments[1]["start"], 3.0)
+
+    def test_a_nested_same_speaker_segment_survives_the_whole_pipeline(self):
+        # A[0,4] B[1,5] A[2,3]: clamping moves B behind A, which leaves the
+        # nested A next to the outer one and used to truncate the outer A
+        # from 4 to 3 in the second merge. A must keep every second it held.
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 4.0},
+                {"speakerId": "SPEAKER_1", "start": 1.0, "end": 5.0},
+                {"speakerId": "SPEAKER_0", "start": 2.0, "end": 3.0},
+            ],
+            "speakers": {},
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, _ = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [
+            {"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"},
+            {"start": 4.0, "end": 5.0, "speaker": "SPEAKER_1"},
+        ])
 
 
 class AssignAsrSegmentsToDiarSegmentsTests(unittest.TestCase):
