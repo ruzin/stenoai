@@ -8217,11 +8217,10 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
 // transcription but NO notes were generated (auto_summarize off → transcript-
 // only note). Unlike note-ready, this prompts the user to summarise, and is the
 // correctly-timed replacement for the old premature meeting-end "Summarise?"
-// prompt (#bug2/#bug3). Tapping "Summarise" kicks off generation in the
-// BACKGROUND — no focus-steal — because when it finishes the note-ready
-// notification (click → opens the note) is the moment we bring the user in, so
-// there's no need to pull the window forward now. A body tap opens the note to
-// read the transcript.
+// prompt (#bug2/#bug3). One-click, matching "Take Notes": tapping "Summarise" —
+// the button OR the notification body — brings the window forward, opens the
+// note, and starts generation there, so the user watches it stream in-place;
+// "Note ready" still fires on completion.
 async function showTranscriptReadyNotification(payload) {
   // `shown` = passed the notifications_enabled gate (see show-note-ready).
   if (!(await notificationsEnabled())) return { success: true, shown: false };

@@ -378,7 +378,16 @@ export function useRecordingEvents() {
         // transcription via the transcript-ready → "Summarise?" → note-ready
         // notifications — no separate meeting-end prompt.
         if (status === 'recording' || status === 'paused') {
-          void stopRecording({ navigateToNote: false }).catch(() => {});
+          // Surface a failed auto-stop: unlike startRecording, stopRecording
+          // re-throws without notifying, and this path deliberately doesn't
+          // navigate — so without this the meeting would silently fail to
+          // finalize with no user-visible signal. Route it through the same
+          // capture-error notification the start path uses.
+          void stopRecording({ navigateToNote: false }).catch((err) => {
+            ipc().recording.reportCaptureError(
+              err instanceof Error ? err.message : 'Recording could not stop'
+            );
+          });
         }
       }),
       bridge.on.generateNotesRequested(({ summaryFile, name }) => {
