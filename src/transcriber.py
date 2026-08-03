@@ -535,11 +535,37 @@ def _merge_close_diar_segments(segments: list[dict], max_gap: float) -> list[dic
 # whenever it actually overlaps more than one distinct diarizer speaker.
 LONG_SENTENCE_SPLIT_THRESHOLD_S = 5.0
 
+# How far outside every diarizer segment an ASR timestamp may sit and still
+# be attributed to the nearest speaker. Without a bound, "nearest" is
+# unconditional: text at 0-1s with the channel's only diarizer segment at
+# 2-3s was attributed in full to a speaker who, by the diarizer's own
+# output, was not speaking anywhere near it -- and that attribution also
+# reached the raw cluster id used for voiceprints, so one unplaceable line
+# could feed a profile. Normal ASR-vs-diarizer boundary disagreement is
+# well under a second (a clipped onset, a trailing word, breath before a
+# turn); a whole second of diarizer-side silence around a sentence means
+# the diarizer heard nobody there, not that it heard someone nearby.
+#
+# Judgment value, not a measured optimum: chosen to sit clearly above
+# observed boundary slop and well above STENO_DIARIZE_MERGE_GAP_S, so only
+# genuinely unplaceable text is affected. Raising it moves behaviour back
+# toward the old unconditional nearest.
+DIAR_LABEL_FALLBACK_TOLERANCE_S = 1.0
 
-def _find_nearest_diar_segment(start: float, end: float, diar_segments: list[dict]) -> Optional[int]:
+
+def _find_nearest_diar_segment(
+    start: float,
+    end: float,
+    diar_segments: list[dict],
+    max_gap: Optional[float] = None,
+) -> Optional[int]:
     """Index of the diar segment containing [start, end]'s midpoint, or the
     nearest one by boundary distance if the midpoint falls in an uncovered
-    gap. Returns None only when diar_segments is empty."""
+    gap.
+
+    With ``max_gap`` set, a midpoint further than that from every segment is
+    reported as unplaceable (None) instead of borrowing the nearest speaker.
+    Returns None when diar_segments is empty."""
     midpoint = (start + end) / 2
     best_i, best_dist = None, float("inf")
     for i, segment in enumerate(diar_segments):
@@ -552,10 +578,14 @@ def _find_nearest_diar_segment(start: float, end: float, diar_segments: list[dic
         )
         if dist < best_dist:
             best_i, best_dist = i, dist
+    if max_gap is not None and best_dist > max_gap:
+        return None
     return best_i
 
 
-def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segments: list[dict]) -> None:
+def _assign_asr_segments_to_diar_segments(
+    asr_segments: list[dict], diar_segments: list[dict]
+) -> list[dict]:
     """Assign each ASR (Parakeet) sentence to the diarizer segment(s) it
     belongs to.
 
@@ -577,12 +607,21 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
     whisper.cpp backend, or an older cached result), the sentence falls back
     to whole-block assignment like the normal case.
 
-    Mutates diar_segments in place, attaching joined text as segment["text"]."""
+    Unplaceable case: a sentence whose midpoint sits further than
+    DIAR_LABEL_FALLBACK_TOLERANCE_S outside every diarizer segment is not
+    attributed to anyone. It is returned to the caller instead, which keeps
+    the text in the transcript under the channel's own label rather than
+    naming a speaker the diarizer never heard there. Text is never dropped.
+
+    Mutates diar_segments in place, attaching joined text as
+    segment["text"]. Returns the ASR segments that could not be placed, in
+    input order (empty list in the normal case)."""
     for segment in diar_segments:
         segment["text"] = ""
     if not diar_segments:
-        return
+        return list(asr_segments)
 
+    unplaceable: list[dict] = []
     texts_by_segment: dict[int, list[str]] = {i: [] for i in range(len(diar_segments))}
     for asr_segment in asr_segments:
         text = (asr_segment.get("text") or "").strip()
@@ -610,8 +649,17 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
                     continue
                 t_start = float(token.get("start") or 0.0)
                 t_end = float(token.get("end") or t_start)
-                idx = _find_nearest_diar_segment(t_start, t_end, diar_segments)
+                idx = _find_nearest_diar_segment(
+                    t_start, t_end, diar_segments, DIAR_LABEL_FALLBACK_TOLERANCE_S
+                )
                 if idx is None:
+                    # This word carries no usable speaker evidence. Keep it
+                    # with the turn it is already inside instead of opening
+                    # one for a speaker the diarizer didn't hear here --
+                    # words before the first placeable one simply stay
+                    # buffered in run_words and lead that first run, so the
+                    # sentence's word order survives either way.
+                    run_words.append(token_text)
                     continue
                 if run_index is not None and idx != run_index:
                     texts_by_segment[run_index].append("".join(run_words))
@@ -620,13 +668,23 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
                 run_words.append(token_text)
             if run_index is not None and run_words:
                 texts_by_segment[run_index].append("".join(run_words))
+            elif run_index is None:
+                # Not one word in the sentence could be placed -- including
+                # the case where the token list carries no usable text at
+                # all, which used to drop the sentence silently.
+                unplaceable.append(asr_segment)
         else:
-            idx = _find_nearest_diar_segment(start, end, diar_segments)
+            idx = _find_nearest_diar_segment(
+                start, end, diar_segments, DIAR_LABEL_FALLBACK_TOLERANCE_S
+            )
             if idx is not None:
                 texts_by_segment[idx].append(text)
+            else:
+                unplaceable.append(asr_segment)
 
     for i, segment in enumerate(diar_segments):
         segment["text"] = " ".join(t.strip() for t in texts_by_segment[i] if t.strip()).strip()
+    return unplaceable
 
 
 # How often to print a HEARTBEAT: line while blocked waiting on
@@ -1064,7 +1122,7 @@ def _tag_channel_segments(
                     cluster_labels = _apply_voiceprint_matches(
                         speaker_embeddings, cluster_labels, legacy_label, allow_self_match,
                     )
-                    _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
+                    unplaceable = _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
                     diar_tagged = []
                     for segment in diar_segments:
                         text = (segment.get("text") or "").strip()
@@ -1073,6 +1131,18 @@ def _tag_channel_segments(
                                 segment["start"], cluster_labels[segment["speaker"]], text,
                                 segment["speaker"],
                             ))
+                    # Text the diarizer left unplaceable still belongs in the
+                    # transcript -- under this channel's own label, with no
+                    # raw cluster id, so it reads as "someone on this side"
+                    # and can never feed a voiceprint. Dropping it would lose
+                    # real speech; naming a speaker for it would invent one.
+                    for asr_segment in unplaceable:
+                        text = (asr_segment.get("text") or "").strip()
+                        if text:
+                            diar_tagged.append((
+                                float(asr_segment.get("start") or 0.0), legacy_label, text, None,
+                            ))
+                    diar_tagged.sort(key=lambda turn: turn[0])
                     if diar_tagged:
                         logger.info(
                             f"Diarizing {legacy_label} channel found "
@@ -1113,6 +1183,18 @@ def _tag_channel_segments(
         finally:
             print(f"PROGRESS:diarize:{legacy_label}:done", flush=True)
 
+    # Only borrowing the WRONG speaker is a problem, and with a single
+    # distinct cluster there is no wrong one -- a gap line's provenance is
+    # unambiguous however far it sits from the nearest segment. Bound the
+    # lookup only where a second cluster exists to be borrowed from (the
+    # dominance-collapsed shape), so the common single-voice channel keeps
+    # exact provenance for every line.
+    provenance_tolerance = (
+        DIAR_LABEL_FALLBACK_TOLERANCE_S
+        if diar_segments_for_provenance
+        and len({seg["speaker"] for seg in diar_segments_for_provenance}) > 1
+        else None
+    )
     legacy_tagged: list[tuple[float, str, str, Optional[str]]] = []
     for s in asr_segments:
         text = (s.get("text") or "").strip()
@@ -1130,7 +1212,12 @@ def _tag_channel_segments(
             # this path's visible output -- still required to be
             # byte-identical to the pre-Phase-8 legacy behaviour. This is
             # purely a read-only side lookup for exact-match provenance.
-            idx = _find_nearest_diar_segment(start, float(s.get("end") or start), diar_segments_for_provenance)
+            idx = _find_nearest_diar_segment(
+                start,
+                float(s.get("end") or start),
+                diar_segments_for_provenance,
+                provenance_tolerance,
+            )
             if idx is not None:
                 raw_sid = diar_segments_for_provenance[idx]["speaker"]
         legacy_tagged.append((start, legacy_label, text, raw_sid))
