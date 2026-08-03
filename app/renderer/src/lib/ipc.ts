@@ -1151,7 +1151,7 @@ export interface StenoaiBridge {
     autoRecordRequested: Subscribe<{ sessionName?: string; appName?: string }>;
     autoPauseRequested: Subscribe<void>;
     autoResumeRequested: Subscribe<void>;
-    autoSummariseRequested: Subscribe<{ summarise?: boolean }>;
+    autoSummariseRequested: Subscribe<void>;
     /** Main asks the renderer to generate notes for a transcript-only note in
      *  the background (from the "Generate notes" action on the transcript-ready
      *  notification). Renderer runs the same reprocess path as GenerateNotesBar. */

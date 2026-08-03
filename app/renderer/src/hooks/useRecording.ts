@@ -19,14 +19,6 @@ export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
 
 const queueKey = ['recording', 'queue'] as const;
 
-// Summary files whose owning auto-detected meeting the user asked to summarise
-// via the reliable meeting-end "Summarise" prompt. That prompt fires BEFORE
-// transcription finishes, so we defer the intent here: when the transcript-only
-// note completes, force note generation (reprocess) even with auto-summarize off
-// (the new default). Module-scoped so it survives the components remounting
-// between recording and completion.
-const pendingAutoSummarise = new Set<string>();
-
 // ── Shared window-visibility subscription ───────────────────────────────
 //
 // `useRecording` is consumed by 12+ components. If each consumer manages
@@ -376,26 +368,17 @@ export function useRecordingEvents() {
         // its own state says we're paused.
         void resumeRecording();
       }),
-      bridge.on.autoSummariseRequested(({ summarise } = {}) => {
+      bridge.on.autoSummariseRequested(() => {
         // Auto-stop of an ended auto-detected meeting — stop the (auto-paused)
-        // recording so the pipeline runs. Do NOT navigate to the note: the user
-        // isn't engaged (they're leaving the meeting), and navigating there would
-        // let the completion handler suppress the completion notification once
-        // macOS surfaces Steno as the meeting closes.
+        // recording so the shared post-stop pipeline runs, exactly like a manual
+        // stop. Do NOT navigate to the note: the user isn't engaged (they're
+        // leaving the meeting), and navigating there would let the completion
+        // handler suppress the completion notification once macOS surfaces Steno
+        // as the meeting closes. The summarise decision then happens after
+        // transcription via the transcript-ready → "Summarise?" → note-ready
+        // notifications — no separate meeting-end prompt.
         if (status === 'recording' || status === 'paused') {
-          void stopRecording({ navigateToNote: false })
-            .then((data) => {
-              // The user explicitly tapped the meeting-end "Summarise" prompt
-              // (not the untapped auto-stop fallback) → remember to generate
-              // notes once this note's transcript completes, even with
-              // auto-summarize off. Parakeet instant-stop returns the note path
-              // here; without one (Whisper) we fall back to the post-transcription
-              // "Transcript ready — Summarise?" prompt.
-              if (summarise && data?.summaryFile) {
-                pendingAutoSummarise.add(data.summaryFile);
-              }
-            })
-            .catch(() => {});
+          void stopRecording({ navigateToNote: false }).catch(() => {});
         }
       }),
       bridge.on.generateNotesRequested(({ summaryFile, name }) => {
@@ -530,25 +513,6 @@ export function useRecordingProcessingEffects() {
       const finishedSummaryFile =
         data.meetingData?.session_info.summary_file ?? data.summaryFile ?? null;
       if (data.success && finishedSummaryFile) {
-        // Deferred force-summary: the user tapped the reliable meeting-end
-        // "Summarise" prompt on this (now transcript-only) note → generate notes
-        // now via the same reprocess path as the "Generate notes" CTA, even with
-        // auto-summarize off. Skip the notification here; the reprocess
-        // completion fires again with notesGenerated:true → the "Note ready"
-        // prompt, whose click opens the note.
-        if (pendingAutoSummarise.has(finishedSummaryFile)) {
-          pendingAutoSummarise.delete(finishedSummaryFile);
-          const failed =
-            Boolean(data.transcriptionFailed) ||
-            Boolean(data.meetingData?.session_info.transcription_failed);
-          // Only force notes when there's a clean transcript-only note to
-          // summarise; a failed transcript or one that already has notes falls
-          // through to the normal completion handling below.
-          if (!data.notesGenerated && !failed) {
-            void ipc().meetings.reprocess(finishedSummaryFile, false, '').catch(() => {});
-            return;
-          }
-        }
         const currentRoute = routeFromHash(window.location.hash);
         const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
         // #bug1 lets an auto-detected recording run with the window HIDDEN
