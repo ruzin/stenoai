@@ -134,26 +134,33 @@ function yamlQuote(v) {
     .replace(/\r?\n/g, ' ') + '"';
 }
 
-// Filesystem-safe filename for macOS + Windows. `stem` is the fallback when the
-// title sanitises to nothing.
+// Filesystem-safe filename *segment* for macOS + Windows. Never returns '.' /
+// '..' / '' — a folder named ".." must not let a write escape the vault via
+// path.join (folder names are unvalidated in src/folders.py). Strips leading
+// AND trailing dots/spaces so pure-dot names collapse, then falls back to a
+// sanitized stem, then to '_'.
 function sanitizeFilename(name, stem) {
-  let s = String(name || '')
+  const clean = (v) => String(v || '')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/[. ]+$/, ''); // Windows: no trailing dot/space
+    .replace(/^[.\s]+|[.\s]+$/g, ''); // no leading/trailing dot/space (kills '.'/'..')
+  let s = clean(name) || clean(stem) || '_';
   if (process.platform === 'win32' && WIN_RESERVED.test(s)) s = '_' + s;
-  if (s.length > 180) s = s.slice(0, 180).trim();
-  return s || stem;
+  if (s.length > 180) s = s.slice(0, 180).replace(/[.\s]+$/, '') || '_';
+  return s;
 }
 
 // `YYYY-MM-DD Title.md`. When a *different* note already owns that name
-// (collision), append the stem to disambiguate deterministically.
+// (collision), append the stem — and keep probing suffixed candidates so even
+// a second pre-existing collision is never clobbered.
 function deriveFilename(dateStr, title, stem, isTaken) {
   const base = [dateStr, sanitizeFilename(title, stem)].filter(Boolean).join(' ');
   let name = `${base}.md`;
-  if (typeof isTaken === 'function' && isTaken(name)) {
+  const taken = (n) => typeof isTaken === 'function' && isTaken(n);
+  if (taken(name)) {
     name = `${base} (${stem}).md`;
+    for (let i = 2; taken(name); i += 1) name = `${base} (${stem}-${i}).md`;
   }
   return name;
 }
@@ -164,7 +171,10 @@ function deriveFilename(dateStr, title, stem, isTaken) {
 function transformNote(raw, { stem, resolveFolderName }) {
   const { fm, body } = parseFrontmatter(raw);
   const title = fm.title || stem;
-  const dateStr = fm.date ? String(fm.date).slice(0, 10) : '';
+  // Only a well-formed YYYY-MM-DD becomes part of the filename — a hand-edited
+  // date must never inject path separators / '..' into the vault path.
+  const rawDate = fm.date ? String(fm.date).slice(0, 10) : '';
+  const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '';
   let folderIds = [];
   if (fm.folders) {
     try { folderIds = JSON.parse(fm.folders); } catch (_) { folderIds = []; }
@@ -202,6 +212,7 @@ function registerObsidianSync({
 } = {}) {
   let cached = { enabled: false, vaultPath: '' };
   let backfilling = false;
+  let backfillQueued = false;
 
   const log = (msg) => { try { sendDebugLog(`[obsidian-sync] ${msg}`); } catch (_) {} };
 
@@ -398,36 +409,50 @@ function registerObsidianSync({
     }
   }
 
+  // Returns { files, complete }. `complete` is false when a base's output dir
+  // couldn't be read for a non-ENOENT reason (EACCES/EIO) — the scan can't be
+  // trusted to be exhaustive, so callers must not delete on the strength of it.
   function listSummaryFiles() {
     const out = [];
+    let complete = true;
     for (const base of (getAllowedBaseDirs() || [])) {
       const dir = path.join(base, 'output');
       let names = [];
-      try { names = fs.readdirSync(dir); } catch (_) { continue; }
+      try { names = fs.readdirSync(dir); }
+      catch (err) { if (err && err.code !== 'ENOENT') complete = false; continue; }
       for (const n of names) {
         if (n.endsWith(SUMMARY_SUFFIX)) out.push(path.join(dir, n));
       }
     }
-    return out;
+    return { files: out, complete };
   }
 
   // One-time export of every existing note when the user turns sync on.
   async function backfillAll() {
-    if (!isActive() || backfilling) return { status: 'skipped' };
+    if (!isActive()) return { status: 'disabled' };
+    // A backfill requested while one is running (e.g. the user switched the
+    // vault folder mid-run) is queued, not dropped — otherwise the newly
+    // selected vault could be left partially populated.
+    if (backfilling) { backfillQueued = true; return { status: 'queued' }; }
     backfilling = true;
-    let n = 0;
+    let total = 0;
     try {
       // Each note self-loads/saves the index. Slower than a shared in-memory
       // index, but correct: a per-note hook (rename/update) firing during a
       // yield can't have its index write clobbered by backfill's final save (M2).
-      for (const p of listSummaryFiles()) {
-        syncNoteBySummaryPath(p);
-        n += 1;
-        if (n % 25 === 0) await new Promise((r) => setImmediate(r)); // yield
-      }
-      log(`backfill complete: ${n} notes`);
+      do {
+        backfillQueued = false;
+        let n = 0;
+        for (const p of listSummaryFiles().files) {
+          syncNoteBySummaryPath(p); // reads cached.vaultPath live → new vault after a switch
+          n += 1;
+          if (n % 25 === 0) await new Promise((r) => setImmediate(r)); // yield
+        }
+        total += n;
+        log(`backfill pass complete: ${n} notes`);
+      } while (backfillQueued); // re-run against the vault it was switched to
     } finally { backfilling = false; }
-    return { status: 'done', count: n };
+    return { status: 'done', count: total };
   }
 
   // Repair index drift at launch (notes deleted while closed, crash windows).
@@ -436,38 +461,40 @@ function registerObsidianSync({
     if (!isActive()) return { status: 'disabled' };
     const idx = loadIndex();
     drainStale(idx);
-    const onDisk = new Map(
-      listSummaryFiles().map((p) => [stemFromSummaryPath(p), p]));
-    // Guard against a mass-delete on an untrustworthy scan: an empty scan while
-    // the index still tracks notes almost always means the scan failed (e.g. a
-    // custom storage path that didn't load this launch) — not that the user
-    // deleted everything. Skip the delete pass rather than wipe their vault (H2).
-    const trustDeletes = onDisk.size > 0 || Object.keys(idx.notes).length === 0;
+    const scan = listSummaryFiles();
+    const onDisk = new Map(scan.files.map((p) => [stemFromSummaryPath(p), p]));
+    // Only delete on the strength of a scan that (a) completed without a read
+    // error on any base and (b) actually found notes. Either an incomplete scan
+    // (a custom storage path that failed to read/load this launch) or an empty
+    // one is treated as untrustworthy — skip deletes rather than wipe the vault
+    // (H2 + cubic: a partially-failed scan must not delete another dir's notes).
+    const trustDeletes = scan.complete && onDisk.size > 0;
     try {
-      // 1. Index entries whose source note is gone → remove the vault copy.
+      // 1. Index entries whose source note is gone → remove the vault copy,
+      //    UNLESS it was edited in Obsidian (preserve + flag the conflict).
       if (trustDeletes) {
         for (const stem of Object.keys(idx.notes)) {
           if (!onDisk.has(stem)) {
             const entry = idx.notes[stem];
             const abs = path.join(cached.vaultPath, entry.vaultRelPath);
-            if (!isExternallyEdited(abs, entry)) {
-              rmWithRetry(abs);
-              try { fs.rmdirSync(path.dirname(abs)); } catch (_) {}
-              delete idx.notes[stem];
+            if (isExternallyEdited(abs, entry)) {
+              recordConflict(idx, stem, entry.vaultRelPath, 'external-edit-on-delete');
+              continue; // keep the file + entry so the conflict stays visible
             }
+            if (!rmWithRetry(abs)) idx.stale.push(entry.vaultRelPath);
+            try { fs.rmdirSync(path.dirname(abs)); } catch (_) {}
+            delete idx.notes[stem];
           }
         }
       }
       saveIndex(idx);
-      // 2. Source present but index missing/stale, or vault file missing →
-      // re-sync (each self-persists, consistent with backfill's model).
+      // 2. Re-sync every present note (hash-aware: an unchanged note is a cheap
+      //    no-op after the idempotent skip). This heals a note whose content /
+      //    title / folder changed while the app was closed even when its old
+      //    vault file still exists — including folder renames (subfolder drift).
       let n = 0;
-      for (const [stem, p] of onDisk) {
-        const entry = idx.notes[stem];
-        const abs = entry && path.join(cached.vaultPath, entry.vaultRelPath);
-        if (!entry || (abs && !fs.existsSync(abs))) {
-          syncNoteBySummaryPath(p);
-        }
+      for (const [, p] of onDisk) {
+        syncNoteBySummaryPath(p);
         if (++n % 25 === 0) await new Promise((r) => setImmediate(r)); // yield
       }
     } catch (e) { log(`reconcile failed: ${e.code || e.message}`); }

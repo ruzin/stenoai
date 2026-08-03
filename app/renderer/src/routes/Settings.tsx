@@ -42,7 +42,7 @@ const SETTINGS_TAB_DESCRIPTIONS: Partial<Record<SettingsTabId, React.ReactNode>>
   organisation: 'Connect to Steno Enterprise for your organisation.',
 };
 
-// Deep-linkable tab ids: the 7 SettingsTabId nav destinations, plus
+// Deep-linkable tab ids: the 8 SettingsTabId nav destinations, plus
 // 'transcription' as a legacy alias that resolves onto 'ai' (its content
 // moved into AiTab's Transcription section, which renders first on that
 // page) — keeps `/settings?tab=transcription` links working unmodified.
@@ -52,6 +52,7 @@ const DEEP_LINK_IDS = [
   'ai',
   'templates',
   'organisation',
+  'integrations',
   'advanced',
   'developer',
   'about',

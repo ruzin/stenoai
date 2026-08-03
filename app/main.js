@@ -3001,8 +3001,9 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
         if (code === 0) {
           console.log(`✅ Completed reprocessing: ${sessionName}`);
           // Reprocess / generate-notes / re-transcribe rewrote the note — mirror
-          // it into the vault (#413) if sync is on. Best-effort.
-          try { if (summaryFile) obsidianSync.syncNoteBySummaryPath(summaryFile); } catch (_) {}
+          // it into the vault (#413) if sync is on. Use the canonical realPath
+          // (not the renderer alias) so it indexes under the true summary stem.
+          try { if (realPath) obsidianSync.syncNoteBySummaryPath(realPath); } catch (_) {}
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('processing-complete', {
               success: true,

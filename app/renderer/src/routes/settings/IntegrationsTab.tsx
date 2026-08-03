@@ -1,3 +1,4 @@
+import { Gem } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -8,7 +9,7 @@ import {
   useSetObsidianSync,
   useSetObsidianVaultPath,
 } from '@/hooks/useSettings';
-import { COMPACT_BTN, SettingRow } from './primitives';
+import { COMPACT_BTN } from './primitives';
 
 /**
  * Integrations settings (#413). Currently: Obsidian vault sync — a one-way
@@ -38,16 +39,32 @@ export function IntegrationsTab() {
 
   return (
     <section data-settings-tab="integrations">
-      <SettingRow
-        label="Sync to Obsidian"
-        description="Mirror your notes into an Obsidian vault folder as Markdown. One-way (Steno → vault); edits made in Obsidian are never overwritten."
+      <div
+        className="flex items-start justify-between gap-6 py-4"
+        style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          {/* Obsidian's crystal motif — the app's icon system is lucide, so use
+              its Gem (a faceted crystal) rather than a one-off brand SVG. */}
+          <Gem size={18} className="mt-[2px] shrink-0" style={{ color: '#7c6cf5' }} aria-hidden />
+          <div className="min-w-0">
+            <div className="text-[14px] font-normal" style={{ color: 'var(--fg-1)' }}>
+              Sync to Obsidian
+            </div>
+            <div className="mt-[2px] text-[13px]" style={{ color: 'var(--fg-2)' }}>
+              Mirror your notes into an Obsidian vault folder as Markdown. One-way
+              (Steno → vault); edits made in Obsidian are never overwritten.
+            </div>
+          </div>
+        </div>
         <Switch
           checked={enabled.data ?? false}
           onCheckedChange={(v) => setEnabled.mutate(v)}
           disabled={enabled.data === undefined}
+          aria-label="Sync to Obsidian"
+          className="mt-1 shrink-0"
         />
-      </SettingRow>
+      </div>
 
       <div
         className="flex items-start justify-between gap-6 py-4"

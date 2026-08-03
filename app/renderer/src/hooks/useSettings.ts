@@ -428,17 +428,12 @@ export function useObsidianSyncSetting() {
 }
 
 export function useSetObsidianSync() {
-  const qc = useQueryClient();
-  const toggle = useToggleSetting(settingsKeys.obsidianSync(), async (v) =>
+  // Conflicts discovered by the (fire-and-forget) backfill surface via the
+  // polling refetch on useObsidianConflicts, so both mutate and mutateAsync
+  // stay consistent without a per-call invalidation wrapper.
+  return useToggleSetting(settingsKeys.obsidianSync(), async (v) =>
     unwrap(await ipc().settings.setObsidianSync(v)),
   );
-  // Enabling kicks a backfill in main; refresh the conflicts view shortly after.
-  return {
-    ...toggle,
-    mutate: (v: boolean) => toggle.mutate(v, {
-      onSettled: () => qc.invalidateQueries({ queryKey: settingsKeys.obsidianConflicts() }),
-    }),
-  };
 }
 
 export function useObsidianVaultPath() {
@@ -469,6 +464,10 @@ export function useObsidianConflicts() {
   return useQuery({
     queryKey: settingsKeys.obsidianConflicts(),
     queryFn: async () => unwrap(await ipc().settings.getObsidianConflicts()).conflicts,
+    // The backfill/sync that records conflicts runs async in main (fire-and-
+    // forget), so poll while the Integrations tab is mounted to surface a
+    // freshly-recorded conflict rather than showing a stale count.
+    refetchInterval: 4000,
   });
 }
 

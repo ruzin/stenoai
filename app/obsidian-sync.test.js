@@ -108,7 +108,7 @@ test('off by default: no write, no state file when disabled', () => {
   fs.rmSync(h.root, { recursive: true, force: true });
 });
 
-test('sync writes a readable file under the folder subdir; backfill covers all', () => {
+test('sync writes a readable file under the folder subdir', () => {
   const h = harness();
   h.writeNote('n1', NOTE);
   const r = h.eng.syncNoteBySummaryPath(path.join(h.output, 'n1_summary.md'));
@@ -116,6 +116,32 @@ test('sync writes a readable file under the folder subdir; backfill covers all',
   const target = path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning.md');
   assert.ok(fs.existsSync(target), 'file under Sales/ with readable name');
   assert.match(fs.readFileSync(target, 'utf8'), /source: Steno/);
+  fs.rmSync(h.root, { recursive: true, force: true });
+});
+
+test('backfillAll mirrors every existing note (one-time export on enable)', async () => {
+  const h = harness();
+  h.writeNote('n1', NOTE);
+  h.writeNote('n2', NOTE.replace('Acme Q3 Planning', 'Second Note'));
+  const r = await h.eng.backfillAll();
+  assert.equal(r.status, 'done');
+  assert.equal(r.count, 2);
+  assert.ok(fs.existsSync(path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning.md')));
+  assert.ok(fs.existsSync(path.join(h.vault, 'Sales', '2026-07-15 Second Note.md')));
+  fs.rmSync(h.root, { recursive: true, force: true });
+});
+
+test('a Steno folder named ".." cannot write outside the vault', () => {
+  const h = harness();
+  // Point the note at a folder whose name is "..".
+  fs.writeFileSync(path.join(h.dataDir, 'folders.json'),
+    JSON.stringify({ folders: [{ id: 'evil', name: '..' }] }));
+  h.writeNote('n1', NOTE.replace('"fold1234"', '"evil"'));
+  const r = h.eng.syncNoteBySummaryPath(path.join(h.output, 'n1_summary.md'));
+  assert.equal(r.status, 'synced');
+  // Nothing was written to the vault's PARENT dir.
+  const parentMd = fs.readdirSync(path.dirname(h.vault)).filter((f) => f.endsWith('.md'));
+  assert.deepEqual(parentMd, [], 'no note escaped to the vault parent');
   fs.rmSync(h.root, { recursive: true, force: true });
 });
 
