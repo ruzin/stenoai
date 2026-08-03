@@ -57,11 +57,13 @@ const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
+const { describeUpdateError, updateErrorPhase } = require('./update-error-copy');
 const { isOSUpdateEligible, MIN_MACOS_FOR_AUTOUPDATE } = require('./update-os-gate');
 const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { userNotesFilePath } = require('./notes-file');
+const { buildNoteReadyNotificationOptions, buildTranscriptReadyBody } = require('./notification-copy');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -84,6 +86,7 @@ const {
   sanitizeTrackProperties,
   calendarMeetingProvider,
   classifyErrorReason,
+  classifySummarizationStreamError,
   captureSanitizedException,
   sanitizeModelForAnalytics,
   summarizeCalendarSnapshot,
@@ -112,6 +115,58 @@ if (process.env.STENOAI_USER_DATA_DIR) {
 }
 const IS_E2E = process.env.STENOAI_E2E === '1';
 const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
+
+// Global (system-wide) accelerator to toggle recording. CommandOrControl
+// resolves to Cmd on macOS and Ctrl on Windows/Linux, so no manual
+// process.platform split is needed. The env override lets the e2e T2 spec
+// register a low-collision accelerator that can't clash with whatever the
+// real host already occupies (see e2e/specs/record-hotkey.t2.spec.ts).
+const RECORD_HOTKEY_ACCEL = process.env.STENOAI_E2E_RECORD_ACCEL || 'CommandOrControl+Shift+R';
+
+// Shared toggle-recording handler for the global shortcut — reused by the
+// startup registration and the live-apply set-record-hotkey IPC handler so
+// both bind the exact same behaviour.
+function handleRecordHotkey() {
+  console.log('Global hotkey triggered: toggle recording');
+  if (mainWindow) {
+    mainWindow.webContents.send('toggle-recording-hotkey');
+  }
+}
+
+// Direct config.json read (no Python subprocess) for the startup registration
+// gate — mirrors the launch-on-login / notifications snapshot reads. The
+// startup backend call is skipped under IS_E2E, so a subprocess gate would be
+// untestable in T2. Absence of the key = ON (back-compat: the shortcut was
+// unconditionally registered before this setting existed).
+function recordHotkeyEnabledFromDisk() {
+  try {
+    const cfgPath = path.join(getUserDataDir(), 'config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      return cfg.record_hotkey_enabled !== false;
+    }
+  } catch (e) {
+    console.warn('Failed to read record_hotkey_enabled from config:', e?.message);
+  }
+  return true;
+}
+
+// Idempotently drive the global record hotkey to `enabled` and report the
+// resulting registration. globalShortcut.register() returns false when the
+// accelerator is ALREADY registered (including by us), so a bare register on a
+// repeat-enable — or an enable that races the startup registration — would
+// report a spurious failure while isRegistered() is actually true. Guarding on
+// isRegistered() keeps both call sites idempotent and the return value honest.
+function applyRecordHotkey(enabled) {
+  if (enabled) {
+    if (!globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL)) {
+      globalShortcut.register(RECORD_HOTKEY_ACCEL, handleRecordHotkey);
+    }
+  } else if (globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL)) {
+    globalShortcut.unregister(RECORD_HOTKEY_ACCEL);
+  }
+  return globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL);
+}
 if (IS_E2E_MOCK_IPC) {
   require('./e2e-mock-ipc').install({ ipcMain, BrowserWindow });
 }
@@ -315,6 +370,19 @@ class Notification extends EventEmitter {
       height: 70,
       x: x + width - 425,
       y: y + 1,
+      // Create HIDDEN and only ever show via showInactive() in ready-to-show
+      // below. Without this, `show` defaults to true, so the constructor shows
+      // the window with the *activating* show() — which brings the whole app to
+      // the foreground (firing app.on('activate') → mainWindow.show()/focus()),
+      // so a passive toast appearing wrongly refocuses Steno. focusable:false
+      // stops the toast taking key focus but does NOT stop app activation; only
+      // show:false + showInactive() keeps the app in the background.
+      show: false,
+      // Because the toast now stays in a backgrounded app, a click on its
+      // buttons would otherwise be swallowed as the app-activating click (so the
+      // user has to click twice — once to activate, once to act). acceptFirstMouse
+      // makes that first click register as a real click on the button.
+      acceptFirstMouse: true,
       frame: false,
       transparent: true,
       alwaysOnTop: true,
@@ -1511,6 +1579,11 @@ function createWindow(options = {}) {
       sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
       scrollBounce: true,
+      // backgroundThrottling is left at its default (true) and toggled at
+      // runtime instead — see applyRecordingBackgroundThrottling(). We only
+      // disable throttling WHILE recording (renderer-owned capture timers must
+      // run full-rate even when the window is hidden), and let a
+      // backgrounded-idle app throttle normally so it doesn't burn CPU.
     },
     // Windows/Linux render the Electron application menu as an in-window menu
     // bar (File/Edit/View/…); macOS puts it in the global bar. Hide it off-mac
@@ -1909,7 +1982,7 @@ if (!gotSingleInstanceLock) {
     const helpSubmenu = {
       role: 'help',
       submenu: [
-        { label: 'Learn More', click: () => shell.openExternal('https://github.com/ruzin/stenoai') },
+        { label: 'Learn More', click: () => shell.openExternal('https://github.com/stenolabs/stenoai') },
         { label: 'Report a Bug', click: () => shell.openExternal('https://discord.gg/DZ6vcQnxxu') }
       ]
     };
@@ -1985,10 +2058,29 @@ if (!gotSingleInstanceLock) {
       spawnParakeetWarmup();
     }
 
+    // Register the global hotkey for toggle recording, unless the user turned
+    // it off in Settings. CommandOrControl resolves per-platform (Cmd on
+    // macOS, Ctrl on Windows/Linux). Gate on the persisted preference read
+    // directly from config.json — absence of the key = ON (back-compat).
+    // MUST run before createWindow(): the renderer queries get-record-hotkey
+    // on mount and caches { registered }, so registering only after the
+    // slow awaits below would report a transient registered:false as a
+    // registration failure ("couldn't register" hint, hidden shortcut copy).
+    if (recordHotkeyEnabledFromDisk()) {
+      if (applyRecordHotkey(true)) {
+        console.log(`Global hotkey registered: ${RECORD_HOTKEY_ACCEL}`);
+      } else {
+        console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
+      }
+    } else {
+      console.log('Global record hotkey disabled by preference — not registering');
+    }
+
     createWindow();
     if (!IS_E2E && loadShowMenuBarIconEnabled()) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
+    setupDevNotificationTriggers();
     // Pre-meeting heads-up scheduler (calendar-time based). Skipped under E2E —
     // tests drive the show-premeeting-notification IPC seam directly; this would
     // otherwise start a background calendar poll.
@@ -2153,21 +2245,6 @@ if (!gotSingleInstanceLock) {
     // dir and misses a custom-storage user's notes entirely. Deferred off the
     // critical path so the per-note frontmatter scan never delays first paint.
     setImmediate(sweepStuckProcessingFlags);
-
-    // Register global hotkey for toggle recording (Cmd+Shift+R on macOS, Ctrl+Shift+R on Windows/Linux)
-    const hotkeyModifier = process.platform === 'darwin' ? 'Command+Shift+R' : 'Ctrl+Shift+R';
-    const registered = globalShortcut.register(hotkeyModifier, () => {
-      console.log('Global hotkey triggered: toggle recording');
-      if (mainWindow) {
-        mainWindow.webContents.send('toggle-recording-hotkey');
-      }
-    });
-
-    if (registered) {
-      console.log(`Global hotkey registered: ${hotkeyModifier}`);
-    } else {
-      console.error(`Failed to register global hotkey: ${hotkeyModifier}`);
-    }
 
     if (pendingShortcutUrls.length > 0) {
       const urlsToProcess = [...pendingShortcutUrls];
@@ -2847,6 +2924,12 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
       });
 
       let stderrBuf = '';
+      // Mirrors the main pipeline: true only if summarization actually ran
+      // (STREAM_COMPLETE). "Generate notes" reprocess always summarises; a
+      // retranscribe with auto_summarize off wouldn't, so track it rather than
+      // assume. Threaded into processing-complete so the renderer fires
+      // "Note ready" only when notes exist (#bug2).
+      let summarizationCompleted = false;
 
       // Liveness watchdog — see makeInactivityWatchdog. Summary CHUNK:
       // lines (and HEARTBEAT: lines if a retranscribe is ever added here)
@@ -2876,6 +2959,7 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
               mainWindow.webContents.send('summary-title', { title, sessionName });
             }
           } else if (line === 'STREAM_COMPLETE') {
+            summarizationCompleted = true;
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('summary-complete', { success: true, sessionName, summaryFile });
             }
@@ -2909,15 +2993,43 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
         watchdog.clear();
         if (code === 0) {
           console.log(`✅ Completed reprocessing: ${sessionName}`);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('processing-complete', {
-              success: true,
-              sessionName,
-              summaryFile,
-              message: 'Reprocessing completed successfully'
-            });
-          }
-          resolve();
+          // Look up the saved meeting so the completion event carries meetingData
+          // with the note's CURRENT title — reprocess may have generated an LLM
+          // title, so `sessionName` here can still be the 'Note' placeholder. The
+          // renderer's note-ready notification reads meetingData.session_info.name
+          // for its body; without this it falls back to the generic string and
+          // the note title never shows. Mirrors the recording-complete path.
+          runPythonScript('simple_recorder.py', ['list-meetings'], true)
+            .then((meetingsResult) => {
+              const allMeetings = JSON.parse(meetingsResult);
+              const processedMeeting =
+                allMeetings.find((m) => m.session_info?.summary_file === summaryFile) || null;
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName,
+                  summaryFile,
+                  meetingData: processedMeeting,
+                  notesGenerated: summarizationCompleted,
+                  message: 'Reprocessing completed successfully'
+                });
+              }
+            })
+            .catch((error) => {
+              console.error('Error fetching reprocessed meeting:', error);
+              // Fall back to firing without meetingData — the note-ready title
+              // may be generic, but the note is still in the list + sidebar.
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName,
+                  summaryFile,
+                  notesGenerated: summarizationCompleted,
+                  message: 'Reprocessing completed successfully'
+                });
+              }
+            })
+            .finally(() => resolve());
         } else {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('processing-complete', {
@@ -3090,6 +3202,11 @@ ipcMain.handle('generate-report-meeting', async (event, summaryFile, templateId)
               sessionName,
               summaryFile,
               report: true,
+              // A report is only ever generated for a note that already has
+              // notes, so "notes exist" is true — preserves the pre-existing
+              // note-ready behavior and keeps this off the transcript-only
+              // "generate notes?" branch (#bug2).
+              notesGenerated: true,
               message: 'Report generation completed successfully'
             });
           }
@@ -4462,6 +4579,25 @@ ipcMain.handle('get-queue-status', async () => {
       (currentRecordingProcess !== null || systemAudioRecordingActive)
         ? (currentRecordingAppendTarget || null)
         : null,
+    // The real note file the CURRENT recording/processing session produces (the
+    // instant-stop placeholder written at stop, then rewritten in place by the
+    // pipeline). Lets useMeetings dedupe the synthetic "__live__/…" row against
+    // the real note once it exists, so one recording is never shown twice
+    // (#bug4). Deterministic from the audio stem, so it's the same key across
+    // this session's recording → processing phases.
+    //
+    // Precedence matters: prefer the ACTIVE recording's key over a PROCESSING
+    // job's. In the supported back-to-back flow (stop meeting A → immediately
+    // start meeting B while A is still processing), `sessionName` reports B (the
+    // recording), so liveSummaryFile must also be B's — otherwise it'd be A's,
+    // A's note is already in the list, and B's live row would be wrongly dropped
+    // (B shows no row at all). At B's own stop, teardown nulls
+    // activeSysAudioSummaryFile before currentProcessingJob is set to B, so the
+    // fallback still yields B and the intended dedup against B's placeholder
+    // fires. Only the Parakeet instant-stop path writes a placeholder, so this
+    // only actually bites there; Whisper/import have no placeholder (dedup is a
+    // no-op) and it's null when idle.
+    liveSummaryFile: activeSysAudioSummaryFile || currentProcessingJob?.summaryFile || null,
   };
 });
 
@@ -4936,6 +5072,21 @@ function loadAutoInstallWhenIdleEnabled() {
 
 // Global recording state management
 let systemAudioRecordingActive = false;  // Track system audio recording for tray/quit
+// Toggle renderer background-throttling to match recording state (#442 review).
+// While recording we must NOT throttle — capture is renderer-owned (MediaRecorder
+// timeslice + silence-auto-stop interval + the live-tap) and can run with the
+// window hidden (auto-detect starts without showing it), where Chromium would
+// otherwise clamp timers. When not recording we allow throttling so a
+// backgrounded-idle app doesn't waste CPU. Reads the flag, so it's correct
+// regardless of which start/stop path called it. Idempotent + fail-safe.
+function applyRecordingBackgroundThrottling() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    // setBackgroundThrottling(allowed): true = throttle when hidden (default),
+    // false = never throttle. We disallow throttling while recording.
+    mainWindow.webContents.setBackgroundThrottling(!systemAudioRecordingActive);
+  } catch (_) { /* older Electron / no webContents — harmless */ }
+}
 let currentRecordingProcess = null;
 let currentRecordingSessionName = null;  // Surfaced in get-queue-status so renderer knows which meeting is live
 let processingQueue = [];
@@ -5233,6 +5384,10 @@ async function processNextInQueue() {
   // so the catch block below can still read it after the inner Promise
   // executor's scope has closed.
   let processingStage = 'transcription';
+  // Captured from a STREAM_ERROR: line during the summarization stage, so the
+  // catch block below can classify the real failure reason for error_occurred
+  // instead of only seeing "exited with code N" (see classifySummarizationStreamError).
+  let summarizationStreamError = null;
   // Read once per job (not per marker) -- engine/model/language/provider
   // don't change mid-job, and this avoids a repeated config.json read on
   // every stdout line.
@@ -5241,6 +5396,12 @@ async function processNextInQueue() {
   // Set when TRANSCRIPTION_COMPLETE arrives, so summarization_completed's
   // processing_bucket measures summarization time alone, not the whole job.
   let transcriptionEndedAtMs = null;
+  // Set true only when STREAM_COMPLETE arrives (summarization actually ran).
+  // Stays false on the transcript-only path (auto_summarize off → the backend
+  // prints SUMMARY_SKIPPED, never STREAM_COMPLETE), so the renderer can fire
+  // "Note ready" only when notes really exist, and a "Transcript ready —
+  // generate notes?" prompt otherwise (#bug2/#bug3).
+  let summarizationCompleted = false;
 
   try {
     const queueAiEnv = getAiEnv();
@@ -5331,6 +5492,7 @@ async function processNextInQueue() {
               mainWindow.webContents.send('summary-title', { title, sessionName: currentProcessingJob.sessionName });
             }
           } else if (line === 'STREAM_COMPLETE') {
+            summarizationCompleted = true;
             const summarizationStartMs = transcriptionEndedAtMs || currentProcessingStartedAtMs;
             trackEvent('summarization_completed', {
               success: true,
@@ -5350,6 +5512,17 @@ async function processNextInQueue() {
               model: transcriptionCtx.model,
               language: transcriptionCtx.language,
             });
+          } else if (line.startsWith('STREAM_ERROR:')) {
+            // Guarded on the WRITE (not just read at trackEvent time): today
+            // process_streaming only ever prints STREAM_ERROR during the
+            // summarization stage, but if that ever changed, an unguarded
+            // capture here would let a transcription-stage STREAM_ERROR
+            // masquerade as (or be overwritten by) a later summarization
+            // failure that dies without its own message.
+            if (processingStage === 'summarization') {
+              summarizationStreamError = line.slice('STREAM_ERROR:'.length).trim();
+            }
+            forwardDiagnosticStdout(line, 'process-streaming');
           } else if (line.startsWith('PROGRESS:')) {
             if (mainWindow && !mainWindow.isDestroyed()) {
               // Instant stop stamps the (deterministic) summaryFile so the
@@ -5429,6 +5602,7 @@ async function processNextInQueue() {
                     ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
                   meetingData: processedMeeting,
+                  notesGenerated: summarizationCompleted,
                   transcriptionFailed: Boolean(transcriptionFailedMsg),
                   transcriptionError: transcriptionFailedMsg || undefined
                 });
@@ -5445,6 +5619,7 @@ async function processNextInQueue() {
                   message: transcriptionFailedMsg
                     ? 'Transcription failed; recording preserved (not deleted)'
                     : 'Processing completed successfully',
+                  notesGenerated: summarizationCompleted,
                   transcriptionFailed: Boolean(transcriptionFailedMsg),
                   transcriptionError: transcriptionFailedMsg || undefined
                 });
@@ -5463,6 +5638,13 @@ async function processNextInQueue() {
       error_type: 'processing_queue',
       stage: processingStage,
       reason: classifyErrorReason(error),
+      // A STREAM_ERROR: line during the summarization stage carries the real
+      // failure reason (Ollama down, model missing, empty reduce result, ...)
+      // that classifyErrorReason can't see -- it only looked at stderr, which
+      // otherwise collapses every summarization crash into subprocess_exit_1.
+      ...(processingStage === 'summarization' && summarizationStreamError
+        ? { summarization_reason: classifySummarizationStreamError(summarizationStreamError) }
+        : {}),
     });
 
     // A processing crash (e.g. a metal::malloc OOM that SIGABRTs the
@@ -5825,6 +6007,7 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
     // hook to fire startCapture. reportSystemAudioState then re-affirms it on
     // success / clears it on failure.
     systemAudioRecordingActive = true;
+    applyRecordingBackgroundThrottling();
     // Reset the live transcript buffer before the sidecar starts emitting.
     // On a resume/continue into the SAME note, preserve the previous session's
     // finalised segments as display-only `priorSegments` so the live bar shows
@@ -6079,6 +6262,7 @@ ipcMain.handle('stop-recording-ui', async () => {
       liveTranscriptState.summaryFile = instantSummaryFile;
     }
     systemAudioRecordingActive = false;
+    applyRecordingBackgroundThrottling();
     stopLiveTranscribe();
     currentRecordingSessionName = null;
     // Captured before resetRecordingRuntimeState() clears startedAtMs.
@@ -6149,6 +6333,15 @@ let pendingDownloadPercent = null;
 // a failed background update would show nothing. Cleared when a new cycle
 // starts (check / available / progress) or a download completes.
 let pendingUpdateError = null;
+// Whether that error survives a later successful check. A dropped connection
+// is disproved by one; a full disk, a missing update feed or a permission
+// problem is not, and clearing those on an unrelated success would hide a
+// condition that is still true. See update-error-copy.js.
+let pendingUpdateErrorSticky = false;
+// True between calling quitAndInstall and the app actually going away, so an
+// error that fires in that window is reported as a failed install rather than
+// as a failed check.
+let installingUpdate = false;
 
 // ── Idle auto-install ──
 // True once an update has finished downloading and is staged for install.
@@ -6235,6 +6428,8 @@ async function maybeAutoInstallWhenIdle() {
   // Bypass the mainWindow 'close' handler's preventDefault+hide (same reason as
   // the manual install-update path) so quitAndInstall actually quits + applies.
   isQuitting = true;
+  // From here on, an updater error is an INSTALL failure, not a failed check.
+  installingUpdate = true;
   // isSilent=true, isForceRunAfter=true — install without the wizard and
   // relaunch the app afterwards.
   autoUpdater.quitAndInstall(true, true);
@@ -6294,11 +6489,31 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  // Drop a stale non-sticky failure AND tell a mounted About tab, so the banner
+  // never outlives the state it describes. Sticky ones are left alone: a full
+  // disk, a permission problem or a missing feed is not disproved by starting or
+  // finding an update, only by bytes actually arriving (download-progress).
+  // Both callers need exactly this, and having it in one place is what stops the
+  // two from drifting apart — the earlier version cleared here but only emitted
+  // there, so the event never fired and About kept showing a settled failure
+  // next to a running download.
+  const clearNonStickyUpdateError = () => {
+    if (!pendingUpdateError || pendingUpdateErrorSticky) return;
+    pendingUpdateError = null;
+    if (mainWindow) mainWindow.webContents.send('update-error-cleared');
+  };
+
   autoUpdater.on('checking-for-update', () => {
     sendDebugLog('Auto-updater: checking for updates...');
     // Fresh cycle — clear any stale error from a previous failed check so a
     // rehydrating About tab doesn't show an error that's now being retried.
-    pendingUpdateError = null;
+    // Sticky ones stay: starting a check does not free disk space, grant write
+    // permission, or give this build an update feed, and those conditions are
+    // still true until something actually succeeds. They are cleared where that
+    // happens: a version found and fetched (update-available / download-progress
+    // / update-downloaded below), or a poll that comes back clean in the
+    // check-for-updates handler.
+    clearNonStickyUpdateError();
   });
 
   autoUpdater.on('update-available', (info) => {
@@ -6306,7 +6521,16 @@ function setupAutoUpdater() {
     // Matches the renderer's own `setDownloadPercent((p) => p ?? 0)` — marks
     // a download as started before the first real progress tick arrives.
     if (pendingDownloadPercent === null) pendingDownloadPercent = 0;
-    pendingUpdateError = null;
+    // Only the non-sticky ones. This event says a version was FOUND, i.e. the
+    // feed was readable — it does not say a single byte was written, so it
+    // cannot disprove a full disk or a permission problem. Those clear one
+    // event later, on the first download-progress tick, which does prove it.
+    // (Clearing them here made the banner vanish and come straight back when
+    // the unchanged condition failed the download again.)
+    //
+    // Usually a no-op, since checking-for-update already ran for this cycle —
+    // it covers a failure that arrived between the two events.
+    clearNonStickyUpdateError();
     if (mainWindow) {
       mainWindow.webContents.send('update-available', { version: info.version });
     }
@@ -6314,12 +6538,26 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-not-available', () => {
     sendDebugLog('Auto-updater: up to date');
+    // A completed cycle with nothing pending — clear even a sticky failure.
+    // This is the updater itself reporting success, unlike the GitHub poll in
+    // the check-for-updates handler (our own request, which proves nothing
+    // about whether the updater can read its feed or write to disk). Nothing is
+    // waiting to download or install any more, so a banner about a past attempt
+    // is describing a state that no longer exists — and a condition that really
+    // is still broken (no update feed) errors before ever reaching this event.
+    pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
+    // Tell a mounted About tab too — it keeps its own copy, and the events it
+    // already listens to (available/progress/downloaded) don't fire on a clean
+    // cycle, so without this the banner would sit there until a remount.
+    if (mainWindow) mainWindow.webContents.send('update-error-cleared');
   });
 
   autoUpdater.on('download-progress', (progress) => {
     sendDebugLog(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
     pendingDownloadPercent = Math.round(progress.percent);
     pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
     if (mainWindow) {
       mainWindow.webContents.send('update-download-progress', { percent: Math.round(progress.percent) });
     }
@@ -6329,6 +6567,7 @@ function setupAutoUpdater() {
     sendDebugLog(`Auto-updater: v${info.version} ready to install`);
     pendingDownloadPercent = null;
     pendingUpdateError = null;
+    pendingUpdateErrorSticky = false;
     pendingUpdateVersion = info.version;
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', { version: info.version });
@@ -6344,6 +6583,21 @@ function setupAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     const msg = (err && err.message) || String(err);
+    // Which phase failed, captured BEFORE the state is cleared below. Note it
+    // does NOT consider a staged update: a periodic check can fail long after a
+    // download succeeded, and calling that a failed download is the lie this
+    // whole path exists to stop telling.
+    //
+    // Known limit: electron-updater's error event does not say which attempt it
+    // belongs to, so a periodic check that fails WHILE a download is genuinely
+    // running is attributed to the download. That case was already reported as
+    // a download failure before this module existed, so the heuristic is not a
+    // regression — closing it needs per-attempt correlation the library does
+    // not expose.
+    const phase = updateErrorPhase({
+      downloadInFlight: pendingDownloadPercent !== null,
+      installing: installingUpdate,
+    });
     // Clear any in-flight download state regardless of which branch below
     // fires — otherwise a failure after 'update-available' (which seeds
     // pendingDownloadPercent to 0) leaves get-update-status reporting a
@@ -6359,12 +6613,19 @@ function setupAutoUpdater() {
       sendDebugLog('Auto-updater: no update feed published for this release yet — skipping.');
       return;
     }
+    // The raw text stays here, where it's useful for diagnosis. What reaches
+    // the About tab is one sentence naming the phase that failed and whether
+    // the user has to do anything — see update-error-copy.js.
     sendDebugLog(`Auto-updater error: ${msg}`);
+    const { message: userMessage, sticky } = describeUpdateError(msg, { phase });
+    // The install attempt (if any) is over — a later error is a fresh cycle.
+    installingUpdate = false;
     // Persist so a later About-tab mount can rehydrate it (the event below is
     // one-shot and only reaches an already-mounted listener).
-    pendingUpdateError = msg;
+    pendingUpdateError = userMessage;
+    pendingUpdateErrorSticky = sticky;
     if (mainWindow) {
-      mainWindow.webContents.send('update-error', { message: msg });
+      mainWindow.webContents.send('update-error', { message: userMessage });
     }
   });
 
@@ -6393,6 +6654,8 @@ ipcMain.on('install-update', () => {
   // quitAndInstall's window-close step actually quits the app. Without this
   // the app just minimises and Squirrel never gets to apply the update.
   isQuitting = true;
+  // From here on, an updater error is an INSTALL failure, not a failed check.
+  installingUpdate = true;
   autoUpdater.quitAndInstall(false, true);
 });
 
@@ -6442,23 +6705,30 @@ const ALLOW_DEVICE_LEVEL_FALLBACK = allowsDeviceLevelFallback(
   (() => { try { return process.getSystemVersion(); } catch (_) { return ''; } })(),
 );
 
-// Wait this long after the meeting app releases the mic before triggering
-// auto-pause + "Meeting ended" prompt. Verified empirically that Zoom/Meet/
-// Teams use software-mute (keep the OS-level stream open while muted), so
-// muting in-meeting does NOT emit a stop event and won't trip this debounce
-// — the only remaining false-positive source is a brief device switch.
-// 3s feels near-instant after a real meeting end; auto-resume handles any
-// rare device-switch case if the mic comes back within the window.
+// Wait this long after the meeting app releases the mic before auto-pausing.
+// Verified empirically that Zoom/Meet/Teams use software-mute (keep the
+// OS-level stream open while muted), so muting in-meeting does NOT emit a stop
+// event and won't trip this debounce — the only remaining false-positive source
+// is a brief device switch. 3s feels near-instant after a real meeting end;
+// auto-resume handles any rare device-switch case if the mic comes back within
+// the window.
 const MEETING_END_DEBOUNCE_MS = 3_000;
+
+// After auto-pausing on mic-release, hold the recording paused this long before
+// auto-stopping (finalizing). The grace absorbs the one real false positive — a
+// brief device switch — since auto-resume cancels the auto-stop if the mic
+// returns within it. Because a released mic reliably means the call ended (not
+// mute), we finalize automatically after this rather than prompting the user.
+const MEETING_END_AUTOSTOP_GRACE_MS = 10_000;
 
 let micMonitorProc = null;
 let micMonitorRespawnTimer = null;
 let micMonitorRespawnDelay = MIC_MONITOR_BACKOFF_BASE_MS;
 const lastNotifiedAt = new Map();
 // When the user accepts a "Meeting detected" notification we remember the
-// originating app so we can pair its subsequent mic-stop with the recording
-// and offer a "Summarise" prompt.
-let autoStartedSession = null; // { pid, app_id, appName, paused, pauseTimer, endNotif }
+// originating app so we can pair its subsequent mic-stop with the recording and
+// auto-stop when the meeting ends.
+let autoStartedSession = null; // { pid, app_id, appName, paused, pauseTimer, autoStopTimer }
 
 function humanizeAppName(evt) {
   for (const o of APP_NAME_OVERRIDES) {
@@ -6549,9 +6819,11 @@ async function handleMicEvent(line) {
   }
   if (evt.event !== 'start') return;
 
-  // Meeting briefly went silent then came back — same app resuming. Cancel
-  // any pending pause / dismiss the "Meeting ended" prompt / auto-resume the
-  // recording so the user doesn't have to do anything.
+  // Meeting briefly went silent then came back — same app resuming. Cancel any
+  // pending pause AND any pending auto-stop, and auto-resume the recording so
+  // the user doesn't have to do anything. Cancelling the auto-stop is the whole
+  // point of the grace window: a brief mic drop (device switch) must not
+  // finalize a still-live meeting.
   if (autoStartedSession && evt.app_id === autoStartedSession.app_id) {
     if (autoStartedSession.pauseTimer) {
       clearTimeout(autoStartedSession.pauseTimer);
@@ -6560,10 +6832,12 @@ async function handleMicEvent(line) {
     }
     if (autoStartedSession.paused) {
       autoStartedSession.paused = false;
-      if (autoStartedSession.endNotif) {
-        try { autoStartedSession.endNotif.close(); } catch (_) {}
-        autoStartedSession.endNotif = null;
+      if (autoStartedSession.autoStopTimer) {
+        clearTimeout(autoStartedSession.autoStopTimer);
+        autoStartedSession.autoStopTimer = null;
       }
+      // Meeting came back before the grace window elapsed — cancel the auto-stop
+      // and keep capturing.
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('auto-resume-requested');
       }
@@ -6601,8 +6875,8 @@ function handleMicStop(evt) {
   // Recording may have been stopped manually (Stop button, hotkey, shortcut)
   // since we accepted the auto-start. The autoStartedSession isn't notified
   // of that today, so without this guard the mic-stop event would schedule
-  // a phantom pause + "Meeting ended" notification for a recording that's
-  // already gone. Drop the session here so the next start is clean.
+  // a phantom pause + auto-stop for a recording that's already gone. Drop the
+  // session here so the next start is clean.
   if (!currentRecordingProcess && !systemAudioRecordingActive) {
     clearAutoStartedSession();
     return;
@@ -6618,7 +6892,21 @@ function handleMicStop(evt) {
       mainWindow.webContents.send('auto-pause-requested');
     }
     sendDebugLog(`[auto-detect] meeting ended (paused): ${autoStartedSession.appName}`);
-    autoStartedSession.endNotif = showMeetingEndedNotification(autoStartedSession.appName);
+    // Meeting ended: auto-stop silently after a short grace, then let the shared
+    // post-stop pipeline run. The summarise decision happens AFTER transcription
+    // via the same transcript-ready → "Summarise?" → note-ready notifications as
+    // a manual stop — no separate meeting-end prompt (it was redundant and made
+    // summarise a two-step flow). If the mic comes back within the grace,
+    // handleMicEvent above cancels this timer and auto-resumes. Otherwise the
+    // meeting has genuinely ended (a released mic ≠ mute — Zoom/Meet/Teams keep
+    // the stream open while muted, see MEETING_END_DEBOUNCE_MS), so we auto-stop
+    // — a meeting is never left stranded paused.
+    if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
+    autoStartedSession.autoStopTimer = setTimeout(() => {
+      autoStartedSession.autoStopTimer = null;
+      sendDebugLog(`[auto-detect] auto-stopping ended meeting: ${autoStartedSession.appName}`);
+      autoStopEndedMeeting();
+    }, MEETING_END_AUTOSTOP_GRACE_MS);
   }, MEETING_END_DEBOUNCE_MS);
 }
 
@@ -6632,34 +6920,13 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
     body: calEvent?.title || appName,
     actions: [{ type: 'button', text: 'Take Notes' }],
   });
+  // Both the "Take Notes" button and the notification body start recording — one
+  // action, so a single tap anywhere works.
   const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
-  notif.on('click', trigger);                       // body tap (always available)
+  notif.on('click', () => trigger());              // body tap (always available)
   trackNotificationLifecycle(notif, 'meeting_detected');
   notif.show();
-}
-
-function showMeetingEndedNotification(appName) {
-  const notif = new Notification({
-    title: 'Meeting ended',
-    body: appName,
-    actions: [{ type: 'button', text: 'Summarise' }],
-  });
-  // Only the explicit Summarise button commits — body click just opens
-  // Steno so the user can decide (summarise / resume / leave paused) from
-  // the in-app UI. Once summarised the meeting is finalised and AI
-  // processing has begun, so a stray body tap shouldn't trigger it.
-  notif.on('action', (_evt, _index) => requestAutoSummarise());
-  notif.on('click', () => {
-    sendDebugLog('[auto-detect] Meeting ended notif body clicked — opening Steno (no commit)');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-  trackNotificationLifecycle(notif, 'meeting_ended');
-  notif.show();
-  return notif;
 }
 
 function requestAutoRecord(appName, originatingEvt, calEvent) {
@@ -6674,16 +6941,21 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   sendDebugLog(`[auto-detect] user requested record (calendar-titled: ${calEvent?.title ? 'yes' : 'no'})`);
 
   // Track the originating app so we can pair its mic-stop with this recording
-  // and offer a "Summarise" prompt when the meeting ends.
+  // and auto-stop when the meeting ends.
   autoStartedSession = {
     pid: originatingEvt?.pid ?? null,
     app_id: originatingEvt?.app_id ?? null,
     appName,
     paused: false,
     pauseTimer: null,
-    endNotif: null,
+    autoStopTimer: null,
   };
 
+  // Tapping "Take Notes" is an explicit "I'm going to take notes" — so bring
+  // Steno to the front and open the live note so the user can start typing.
+  // (The notification itself is passive and never steals focus; only this
+  // explicit tap does.) The renderer's auto-record handler then starts the
+  // recording and opens the live-note editor.
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (!mainWindow.isVisible()) mainWindow.show();
     mainWindow.focus();
@@ -6691,12 +6963,16 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   }
 }
 
-function requestAutoSummarise() {
-  sendDebugLog('[auto-detect] user requested summarise from end notification');
+// Auto-stop an ended auto-detected meeting once the mic has stayed released
+// through the grace window (see handleMicStop). STOPS the paused recording,
+// which drives the shared post-stop pipeline; the *summarise* decision then
+// happens after transcription (transcript-ready / note-ready notifications),
+// not here — identical to a manual stop. Sent on the `auto-summarise-requested`
+// channel (whose renderer handler just stops the recording); the channel name
+// predates the auto-stop rework and is kept to avoid 4-file churn.
+function autoStopEndedMeeting() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
-    mainWindow.webContents.send('auto-summarise-requested');
+    mainWindow.webContents.send('auto-summarise-requested', {});
   }
   clearAutoStartedSession();
 }
@@ -6704,10 +6980,59 @@ function requestAutoSummarise() {
 function clearAutoStartedSession() {
   if (!autoStartedSession) return;
   if (autoStartedSession.pauseTimer) clearTimeout(autoStartedSession.pauseTimer);
-  if (autoStartedSession.endNotif) {
-    try { autoStartedSession.endNotif.close(); } catch (_) {}
-  }
+  if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
   autoStartedSession = null;
+}
+
+// Opt-in dev tool: global shortcuts to fire each completion notification on
+// demand, so their native macOS click/action behavior is verifiable in
+// `npm start` without a real meeting or a DMG rebuild. Enabled only in a dev
+// build with STENOAI_DEV_NOTIF_TRIGGERS=1 (never packaged, never E2E) so it
+// doesn't grab shortcuts from other contributors by default. These fire the SAME
+// functions the real flow uses (showMeetingDetected/TranscriptReady/NoteReady),
+// so what you see here matches a real meeting.
+//   Ctrl+Alt+1 → "Meeting detected" (Take Notes)
+//   Ctrl+Alt+2 → "Transcript ready" (Summarise) for the most recent note
+//   Ctrl+Alt+3 → "Note ready" for the most recent note
+const DEV_NOTIF_TRIGGERS_ENV = 'STENOAI_DEV_NOTIF_TRIGGERS';
+function setupDevNotificationTriggers() {
+  if (IS_E2E || app.isPackaged || !process.env[DEV_NOTIF_TRIGGERS_ENV]) return;
+  const latestNote = async () => {
+    try {
+      const meetings = JSON.parse(await runPythonScript('simple_recorder.py', ['list-meetings'], true));
+      const withNotes = meetings.filter((m) => m.session_info?.summary_file);
+      const m = withNotes[0];
+      return m
+        ? { summaryFile: m.session_info.summary_file, title: m.session_info.name || 'Untitled note' }
+        : null;
+    } catch (e) {
+      sendDebugLog(`[dev-notify] list-meetings failed: ${e.message}`);
+      return null;
+    }
+  };
+  const register = (accel, label, fn) => {
+    try {
+      if (!globalShortcut.register(accel, fn)) {
+        console.warn(`[dev-notify] failed to register ${accel} (${label})`);
+      }
+    } catch (e) {
+      console.warn(`[dev-notify] register threw for ${accel}: ${e.message}`);
+    }
+  };
+  register('Control+Alt+1', 'meeting-detected', () => {
+    showMeetingDetectedNotification('DevMeeting', { pid: 0, app_id: 'dev.meeting' }, null);
+  });
+  register('Control+Alt+2', 'transcript-ready', async () => {
+    const note = await latestNote();
+    if (!note) { sendDebugLog('[dev-notify] no note for transcript-ready'); return; }
+    void showTranscriptReadyNotification({ title: note.title, summaryFile: note.summaryFile, name: note.title });
+  });
+  register('Control+Alt+3', 'note-ready', async () => {
+    const note = await latestNote();
+    if (!note) { sendDebugLog('[dev-notify] no note for note-ready'); return; }
+    void showNoteReadyNotification({ title: note.title, summaryFile: note.summaryFile });
+  });
+  sendDebugLog('[dev-notify] triggers registered (Ctrl+Alt+1/2/3)');
 }
 
 function setupAutoMeetingDetector() {
@@ -7971,46 +8296,78 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
 // navigate-to-meeting event — and only falls back to focus-only when
 // `summaryFile` is absent (the hardFailure case: nothing was ever written,
 // so there's nothing to open).
+async function showNoteReadyNotification(payload) {
+  // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
+  if (!(await notificationsEnabled())) return { success: true, shown: false };
+  const { summaryFile } = payload || {};
+  const { title, body, iconType, outcome } = buildNoteReadyNotificationOptions(payload);
+  const notif = new Notification({ title, body, iconType });
+  notif.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
+    }
+  });
+  trackNotificationLifecycle(notif, 'note_ready', { outcome });
+  notif.show();
+  return { success: true, shown: true };
+}
+
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
-    // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
-    if (!(await notificationsEnabled())) return { success: true, shown: false };
-    const { title, failed, hardFailure, summaryFile } = payload || {};
-    // Three honest states:
-    //  - hardFailure: processing crashed (or an import never enqueued) so no
-    //    note was written — there's nothing to "open". Keep the message
-    //    neutral: it's shared by recording crashes, import crashes and import
-    //    enqueue failures, and over-promising ("audio kept") is either hollow
-    //    (no UI surfaces the orphaned audio) or wrong (enqueue failure).
-    //  - failed: a graceful transcription failure DID write a marked note —
-    //    the recording was preserved and the note explains it on open.
-    //  - otherwise: the note is genuinely ready.
-    const notif = new Notification({
-      title: hardFailure
-        ? 'Processing failed'
-        : failed
-          ? 'Transcription failed'
-          : 'Note ready',
-      body: hardFailure
-        ? `Steno couldn't process ${title ? `"${title}"` : 'your note'}.`
-        : failed
-          ? 'Your recording was preserved — open the note for details.'
-          : (title || 'Your note has finished processing'),
-      iconType: (hardFailure || failed) ? 'alert' : 'success',
-    });
-    notif.on('click', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
-        if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
-      }
-    });
-    const outcome = hardFailure ? 'hard_failure' : failed ? 'failed' : 'success';
-    trackNotificationLifecycle(notif, 'note_ready', { outcome });
-    notif.show();
-    return { success: true, shown: true };
+    return await showNoteReadyNotification(payload);
   } catch (e) {
     sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+});
+
+// Fired by the renderer's processing-complete handler when a recording finished
+// transcription but NO notes were generated (auto_summarize off → transcript-
+// only note). Unlike note-ready, this prompts the user to summarise, and is the
+// correctly-timed replacement for the old premature meeting-end "Summarise?"
+// prompt (#bug2/#bug3). One-click, matching "Take Notes": tapping "Summarise" —
+// the button OR the notification body — brings the window forward, opens the
+// note, and starts generation there, so the user watches it stream in-place;
+// "Note ready" still fires on completion.
+async function showTranscriptReadyNotification(payload) {
+  // `shown` = passed the notifications_enabled gate (see show-note-ready).
+  if (!(await notificationsEnabled())) return { success: true, shown: false };
+  const { title, summaryFile, name } = payload || {};
+  const notif = new Notification({
+    title: 'Transcript ready',
+    body: buildTranscriptReadyBody(title),
+    actions: [{ type: 'button', text: 'Summarise' }],
+    iconType: 'success',
+  });
+  // The whole notification means "yes, summarise": a body tap AND the "Summarise"
+  // button both open the note and start generation there, so the user watches it
+  // stream in-place ("Note ready" still fires on completion). Wiring both to the
+  // same action is what makes it one-click (like "Take Notes") — a body tap that
+  // only navigated was the source of the two-click ("first click opens, second
+  // click summarises"). Bring the window forward, navigate to the note, THEN
+  // kick off generation.
+  const startSummarise = () => {
+    if (mainWindow && !mainWindow.isDestroyed() && summaryFile) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
+      mainWindow.webContents.send('generate-notes-requested', { summaryFile, name });
+    }
+  };
+  notif.on('action', () => startSummarise());
+  notif.on('click', () => startSummarise());
+  trackNotificationLifecycle(notif, 'transcript_ready');
+  notif.show();
+  return { success: true, shown: true };
+}
+
+ipcMain.handle('show-transcript-ready-notification', async (_event, payload) => {
+  try {
+    return await showTranscriptReadyNotification(payload);
+  } catch (e) {
+    sendDebugLog(`Failed to show transcript-ready notification: ${e.message}`);
     return { success: false, error: e.message };
   }
 });
@@ -8034,6 +8391,47 @@ ipcMain.handle('set-notifications', async (event, enabled) => {
     return { success: true, notifications_enabled: enabled };
   } catch (error) {
     sendDebugLog(`Error setting notifications: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Both the persisted preference AND the live registration state — the UI needs
+// to know if the shortcut is enabled but failed to register (another app owns
+// the accelerator) so it can surface a hint.
+ipcMain.handle('get-record-hotkey', () => ({
+  success: true,
+  enabled: recordHotkeyEnabledFromDisk(),
+  registered: globalShortcut.isRegistered(RECORD_HOTKEY_ACCEL),
+}));
+
+ipcMain.handle('set-record-hotkey', async (event, enabled) => {
+  try {
+    sendDebugLog(`Setting record hotkey to: ${enabled}`);
+    const result = await runPythonScript('simple_recorder.py', ['set-record-hotkey', enabled ? 'True' : 'False']);
+
+    // Surface a persist failure rather than silently applying the shortcut.
+    const jsonMatch = result.match(/\{.*\}/s);
+    if (jsonMatch) {
+      const persisted = JSON.parse(jsonMatch[0]);
+      if (persisted.success === false) {
+        return {
+          success: false,
+          error: persisted.error || 'Failed to save record shortcut preference',
+        };
+      }
+    }
+
+    // Live-apply so the change takes effect without a relaunch. Idempotent and
+    // never unregisterAll() — see applyRecordHotkey (guards on isRegistered() so
+    // a repeat-enable can't report a spurious failure, and only ever touches
+    // this specific accelerator).
+    const registered = applyRecordHotkey(enabled);
+    if (enabled && !registered) {
+      console.error(`Failed to register global hotkey: ${RECORD_HOTKEY_ACCEL}`);
+    }
+    return { success: true, enabled, registered };
+  } catch (error) {
+    sendDebugLog(`Error setting record hotkey: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
@@ -9120,6 +9518,7 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
   systemAudioRecordingActive = isRecording;
+  applyRecordingBackgroundThrottling();
   if (!isRecording && !currentRecordingProcess) {
     // Reset the elapsed counter (avoids leaking startedAtMs when startCapture
     // fails), but DON'T blank currentRecordingSessionName here: this is a
@@ -9388,7 +9787,7 @@ async function findOllamaExecutable() {
 // named constant so the repo path has a single source of truth (and is the one
 // line to change if the repo is renamed/transferred — though the redirect
 // following below means an old build keeps working through GitHub's 301 too).
-const UPDATE_CHECK_URL = 'https://api.github.com/repos/ruzin/stenoai/releases/latest';
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/stenolabs/stenoai/releases/latest';
 
 // Update checking functionality. Follows HTTP redirects (301/302/307/308):
 // GitHub's REST API returns a 301 to the new owner/repo path when a repo is
@@ -9547,6 +9946,19 @@ ipcMain.handle('check-for-updates', async () => {
   // Mac below the launch floor, which must not download a build it can't run (#432).
   if (!IS_E2E && app.isPackaged && osEligible) {
     autoUpdater.checkForUpdates().catch(() => {});
+  }
+  // A check that just succeeded and found nothing settles an earlier FAILED
+  // check — otherwise a stale banner sits under a fresh "You're on the latest
+  // version", two contradictory answers to one question. Cleared here, in the
+  // state the About tab rehydrates from, so it stays cleared across a remount
+  // rather than only until the user switches tabs.
+  //
+  // Only non-sticky errors: this poll is our own GitHub request, so it says
+  // nothing about whether the updater can write to /Applications or whether
+  // this build has an update feed at all. Those conditions are still true and
+  // stay on screen (see update-error-copy.js).
+  if (result.success && !result.updateAvailable && !pendingUpdateErrorSticky) {
+    pendingUpdateError = null;
   }
   // Surface eligibility so the About tab can explain why an "update available"
   // won't auto-install on an under-floor Mac, rather than offering a broken

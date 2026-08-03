@@ -171,6 +171,28 @@ const SPEAKER_SEED_MEETING = {
   discussion_areas: [],
 };
 
+/**
+ * Carried-over segments for the resume/continue case, keyed off
+ * STENOAI_E2E_SEED_PRIOR_SEGMENTS: `1` is one earlier recording, `twice` is a
+ * note continued a second time - two recordings' worth, each numbering its
+ * segments from its own start, which is what produces repeated (start, speaker)
+ * pairs in a single carried-over list.
+ */
+function seedPriorSegments(rec) {
+  const mode = process.env.STENOAI_E2E_SEED_PRIOR_SEGMENTS;
+  if (!mode || !(rec.active || rec.processing)) return [];
+  const first = [
+    { text: 'earlier bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+    { text: 'earlier bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+  ];
+  if (mode !== 'twice') return first;
+  return [
+    ...first,
+    { text: 'second session bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+    { text: 'second session bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+  ];
+}
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -354,37 +376,65 @@ function install({ ipcMain }) {
       }
       return { success: true };
     },
-    'get-queue-status': async () => ({
-      success: true,
-      isProcessing: rec.processing,
-      queueSize: 0,
-      currentJob: rec.processing ? rec.sessionName : null,
-      currentReprocesses: [],
-      hasRecording: rec.active,
-      isPaused: rec.paused,
-      elapsedSeconds: rec.active
-        ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
-        : 0,
-      sessionName: rec.active || rec.processing ? rec.sessionName : null,
-      recordingSummaryFile: rec.active ? rec.appendTo : null,
-    }),
+    // Scripted-sequence seam for the processing-watchdog T1: when
+    // STENOAI_E2E_QUEUE_STATE_PATH points at a JSON file, each poll returns that
+    // file's contents (merged over the idle defaults) so a spec can drive the
+    // real stop→enqueue state SEQUENCE over time (optimistic processing → a
+    // legitimate idle+empty handoff gap → late enqueue) by rewriting the file
+    // between polls. Falls through to the rec-based machine if the file is
+    // absent/unreadable (e.g. not yet written on the first poll).
+    'get-queue-status': async () => {
+      const statePath = process.env.STENOAI_E2E_QUEUE_STATE_PATH;
+      if (statePath) {
+        try {
+          const override = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+          return {
+            success: true,
+            isProcessing: false,
+            queueSize: 0,
+            currentJob: null,
+            currentReprocesses: [],
+            hasRecording: false,
+            isPaused: false,
+            elapsedSeconds: 0,
+            sessionName: null,
+            recordingSummaryFile: null,
+            ...override,
+          };
+        } catch {
+          /* file not ready yet — fall through to the rec-based default below */
+        }
+      }
+      return {
+        success: true,
+        isProcessing: rec.processing,
+        queueSize: 0,
+        currentJob: rec.processing ? rec.sessionName : null,
+        currentReprocesses: [],
+        hasRecording: rec.active,
+        isPaused: rec.paused,
+        elapsedSeconds: rec.active
+          ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
+          : 0,
+        sessionName: rec.active || rec.processing ? rec.sessionName : null,
+        recordingSummaryFile: rec.active ? rec.appendTo : null,
+      };
+    },
 
     // Live transcript backfill. Real main.js populates liveTranscriptState from
     // the ASR sidecar (a model) — unreachable in T1 — so we seed it here. With
     // STENOAI_E2E_SEED_PRIOR_SEGMENTS=1 it returns carried-over priorSegments
     // (the resume/continue case) so the generate-notes-bar T1 can assert the
-    // live bar shows earlier speech instead of starting blank.
+    // live bar shows earlier speech instead of starting blank. `=twice` seeds
+    // the note that has been continued a second time: main.js prepends the
+    // existing priors on every continue (main.js, `carryPrior`), and each
+    // recording's `start` counts from zero again, so the carried-over text
+    // legitimately contains repeated offsets for the same speaker.
     'get-live-transcript-state': async () => ({
       success: true,
       sessionName: rec.active || rec.processing ? rec.sessionName : null,
       segments: [],
-      priorSegments:
-        process.env.STENOAI_E2E_SEED_PRIOR_SEGMENTS === '1' && (rec.active || rec.processing)
-          ? [
-              { text: 'earlier bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
-              { text: 'earlier bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
-            ]
-          : [],
+      priorSegments: seedPriorSegments(rec),
       ready: true,
       error: null,
     }),
@@ -471,6 +521,15 @@ function install({ ipcMain }) {
       return { success: true };
     },
 
+    // Mirrors main.js's set-record-hotkey shape (enabled + live registered
+    // flag). Stateless under mock IPC — the real registration is asserted by
+    // the T2 spec; here it just keeps the toggle mutation from erroring.
+    'set-record-hotkey': async (_event, enabled) => ({
+      success: true,
+      enabled,
+      registered: !!enabled,
+    }),
+
     // The detail route loads via get-meeting (the lazy per-meeting fetch), not
     // by filtering list-meetings — answer it with the same seeded meeting so the
     // transcript-export detail route resolves and renders the transcript actions.
@@ -552,6 +611,13 @@ function install({ ipcMain }) {
       fs.writeFileSync(seamPath, content, 'utf-8');
       return { success: true, path: seamPath };
     },
+
+    // Notification handlers — the real ones return { success, shown } after the
+    // notifications_enabled gate; the mock has no OS toast, so it just reports
+    // "shown" so a T1 that drives the transcript-ready branch (#bug2/#bug3) sees
+    // a realistic shape instead of the permissive fallback. (The gate itself is
+    // covered by the T2 spec against the real handler.)
+    'show-transcript-ready-notification': async () => ({ success: true, shown: true }),
 
     // Mirror the real export-note-pdf handler's seam. The mock has no Chromium
     // to rasterise HTML, so instead of a PDF it writes the renderer-built HTML
@@ -844,6 +910,21 @@ function install({ ipcMain }) {
       ? 'mlx-community/parakeet-tdt-0.6b-v3'
       : 'istupakov/parakeet-tdt-0.6b-v3-onnx';
 
+  // Mirrors main.js: a successful check that finds no update settles an earlier
+  // FAILED check, and it does so in the state the About tab rehydrates from —
+  // so the T1 spec asserts the contract (check clears it for good), not just a
+  // local setState. Seeded by STENOAI_E2E_SEED_UPDATE_ERROR.
+  let seededUpdateError =
+    process.env.STENOAI_E2E_SEED_UPDATE_ERROR === '1'
+      ? "Steno couldn't reach the update server. Check your connection — it will try again later."
+      : null;
+
+  // Only the FIRST get-update-status is delayed, so the About tab's mount-time
+  // request is still in flight when the check that settles the error completes,
+  // and its stale reply lands last. Delaying every call would let the check's
+  // own re-read arrive after it and paper over the bug being guarded against.
+  let slowUpdateStatusCallsLeft = process.env.STENOAI_E2E_SLOW_UPDATE_STATUS === '1' ? 1 : 0;
+
   const DEFAULTS = {
     'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
     // Read-only display poll for the About tab's "Check for Updates" button
@@ -860,12 +941,16 @@ function install({ ipcMain }) {
           updateAvailable: true,
           currentVersion: '0.0.0-e2e',
           latestVersion: '9.9.9',
-          releaseUrl: 'https://github.com/ruzin/stenoai/releases/latest',
+          releaseUrl: 'https://github.com/stenolabs/stenoai/releases/latest',
           releaseName: 'Version 9.9.9',
           downloadUrl: null,
           osUpdateEligible: false,
         };
       }
+      // Up to date, and that settles a previously failed check — main.js
+      // clears the persisted error in exactly this branch, so the mock does
+      // too and the spec can assert it stays gone across a remount.
+      seededUpdateError = null;
       return {
         success: true,
         updateAvailable: false,
@@ -885,13 +970,26 @@ function install({ ipcMain }) {
     // so the About tab's mount-time rehydration (settings-about.t1) can assert
     // the failure is restored on navigation, not just from the live one-shot
     // 'update-error' event.
-    'get-update-status': () => ({
-      success: true,
-      downloadedVersion: null,
-      downloadPercent: null,
-      downloadError:
-        process.env.STENOAI_E2E_SEED_UPDATE_ERROR === '1' ? 'network unreachable' : null,
-    }),
+    'get-update-status': async () => {
+      // Answer with the state as of the REQUEST, not as of the reply. That is
+      // what main.js does (it reads pendingUpdateError when the handler runs),
+      // and it is what makes STENOAI_E2E_SLOW_UPDATE_STATUS a real race rather
+      // than a sleep.
+      const snapshot = seededUpdateError;
+      if (slowUpdateStatusCallsLeft > 0) {
+        slowUpdateStatusCallsLeft -= 1;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      return {
+        success: true,
+        downloadedVersion: null,
+        downloadPercent: null,
+        // main.js sends the About tab a finished sentence, not the raw
+        // electron-updater text (update-error-copy.js), so the seed mirrors that
+        // shape and the spec asserts what a user would actually read.
+        downloadError: snapshot,
+      };
+    },
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
     // adapter's default and keep the org-lock spec's UI unchanged. A spec can
@@ -911,6 +1009,10 @@ function install({ ipcMain }) {
     // switches permanently disabled under mock IPC.
     'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
     'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
+    // Global record shortcut toggle (GeneralTab's "Global record shortcut"
+    // row + the hero copy). Default enabled + registered so T1 renderer specs
+    // render the ON state without a real globalShortcut registration.
+    'get-record-hotkey': { success: true, enabled: true, registered: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps

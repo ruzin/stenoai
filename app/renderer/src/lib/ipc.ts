@@ -369,6 +369,14 @@ export interface QueueStatus {
    *  different one" by identity rather than the collidable display name. Null
    *  for a fresh new-note recording or when idle. */
   recordingSummaryFile?: string | null;
+  /** The real note file the current recording/processing session produces (the
+   *  instant-stop placeholder, then rewritten by the pipeline). Deterministic
+   *  from the audio stem and stable across record→process, so useMeetings can
+   *  dedupe the synthetic "__live__/…" row against the real note once it exists
+   *  (one recording, one row — #bug4). Only the Parakeet instant-stop path
+   *  writes that placeholder, so dedup only bites there; Whisper/import have no
+   *  placeholder (dedup is a no-op even when this is set), and it's null idle. */
+  liveSummaryFile?: string | null;
 }
 
 export type PickAudioFileResponse = Result<{ filePath: string }>;
@@ -584,6 +592,11 @@ export type GetTranscriptionEngineResponse = Result<{
 }>;
 
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
+// `enabled` is the persisted preference; `registered` is the live global-
+// shortcut registration state (false when enabled but another app owns the
+// accelerator). The setter returns the same two fields.
+export type GetRecordHotkeyResponse = Result<{ enabled: boolean; registered: boolean }>;
+export type SetRecordHotkeyResponse = Result<{ enabled: boolean; registered: boolean }>;
 export type GetTelemetryResponse = Result<{
   telemetry_enabled: boolean;
   anonymous_id?: string;
@@ -732,6 +745,11 @@ export interface ProcessingCompleteEvent {
    *  reprocess banner regardless of whether STREAM_ERROR or a non-zero exit
    *  ended it. */
   report?: boolean;
+  /** True when summarization actually ran (STREAM_COMPLETE), i.e. the note has
+   *  generated notes. False/absent on the transcript-only path (auto_summarize
+   *  off → SUMMARY_SKIPPED). Drives whether the renderer fires "Note ready" vs
+   *  the "Transcript ready — generate notes?" prompt (#bug2/#bug3). */
+  notesGenerated?: boolean;
 }
 export interface QueryChunkEvent {
   queryId: string;
@@ -1070,6 +1088,8 @@ export interface StenoaiBridge {
   settings: {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getRecordHotkey: RequestFn<[], GetRecordHotkeyResponse>;
+    setRecordHotkey: RequestFn<[v: boolean], SetRecordHotkeyResponse>;
     getTelemetry: RequestFn<[], GetTelemetryResponse>;
     setTelemetry: RequestFn<
       [v: boolean, source: TelemetryToggleSource],
@@ -1117,6 +1137,20 @@ export interface StenoaiBridge {
         },
       ],
       Result<Record<string, never>>
+    >;
+    /** Transcript-only note finished transcription with no notes generated
+     *  (auto_summarize off). Prompts "Generate notes?" — the action starts
+     *  generation in the background, a body tap opens the note. Returns `shown`
+     *  for the notifications_enabled gate. (#bug2/#bug3) */
+    showTranscriptReadyNotification: RequestFn<
+      [
+        payload: {
+          title?: string;
+          summaryFile?: string | null;
+          name?: string | null;
+        },
+      ],
+      Result<{ shown?: boolean }>
     >;
     /** Design-for-test seam for the pre-meeting notification (production fire
      *  path is the main-side scheduler). Returns `shown` for the gate/suppression. */
@@ -1206,6 +1240,7 @@ export interface StenoaiBridge {
     updateDownloadProgress: Subscribe<UpdateProgressEvent>;
     updateDownloaded: Subscribe<UpdateDownloadedEvent>;
     updateError: Subscribe<UpdateErrorEvent>;
+    updateErrorCleared: Subscribe<void>;
     googleAuthChanged: Subscribe<{ connected: boolean }>;
     outlookAuthChanged: Subscribe<{ connected: boolean }>;
     shortcutStartRecording: Subscribe<ShortcutStartRecordingEvent>;
@@ -1216,6 +1251,10 @@ export interface StenoaiBridge {
     autoPauseRequested: Subscribe<void>;
     autoResumeRequested: Subscribe<void>;
     autoSummariseRequested: Subscribe<void>;
+    /** Main asks the renderer to generate notes for a transcript-only note in
+     *  the background (from the "Generate notes" action on the transcript-ready
+     *  notification). Renderer runs the same reprocess path as GenerateNotesBar. */
+    generateNotesRequested: Subscribe<{ summaryFile: string; name?: string | null }>;
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;

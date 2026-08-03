@@ -125,3 +125,61 @@ describe('escapeHtml', () => {
     expect(escapeHtml(`&<>"'`)).toBe('&amp;&lt;&gt;&quot;&#39;');
   });
 });
+
+/**
+ * A generated template report is free-form markdown, not the Standard note's
+ * structured fields — so when one is on screen the PDF must carry THAT, the way
+ * "Copy notes" already does (#318). The caller serialises the markdown with the
+ * same renderer the detail view uses and hands the HTML in; this builder only
+ * places it inside the branded shell.
+ */
+describe('buildNotesHtml with an open template report', () => {
+  const report = {
+    templateName: 'Shareable summary',
+    contentHtml: '<h2>Outcome</h2>\n<p>We ship on <strong>Friday</strong>.</p>',
+  };
+
+  test('renders the report instead of the Standard sections', () => {
+    const html = buildNotesHtml(full, report);
+    // The report's content is present…
+    expect(html).toContain('<p>We ship on <strong>Friday</strong>.</p>');
+    // …labelled with the template it came from…
+    expect(html).toContain('>Shareable summary</h2>');
+    // …and the Standard note's sections are NOT along for the ride.
+    expect(html).not.toContain('>Key Topics</h2>');
+    expect(html).not.toContain('Ship v2 in July');
+    expect(html).not.toContain('Ben: draft the announcement');
+  });
+
+  test('keeps the brand chrome, title and meta line', () => {
+    const html = buildNotesHtml(full, report);
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html).toContain('<h1>Weekly sync</h1>');
+    expect(html).toContain('Mon, Jun 23, 2026 · 45m');
+    expect(html).toContain('@font-face');
+  });
+
+  test('renders a report even when the Standard note is empty', () => {
+    // A transcript-only note (auto-summarise off) can still have a generated
+    // report — the export must not be gated on the Standard sections.
+    const empty: NotesPdfInput = {
+      name: 'Transcript only',
+      discussionAreas: [],
+      keyPoints: [],
+      actionItems: [],
+      participants: [],
+    };
+    const html = buildNotesHtml(empty, report);
+    expect(html).toContain('<p>We ship on <strong>Friday</strong>.</p>');
+    expect(html).toContain('<h1>Transcript only</h1>');
+  });
+
+  test('escapes the template name but passes the pre-rendered content through', () => {
+    const html = buildNotesHtml(full, {
+      templateName: 'Q3 <Review> & Notes',
+      contentHtml: '<p>kept &amp; intact</p>',
+    });
+    expect(html).toContain('Q3 &lt;Review&gt; &amp; Notes');
+    expect(html).toContain('<p>kept &amp; intact</p>');
+  });
+});

@@ -42,9 +42,9 @@ Expected: install completes, `astro build` completes with no errors, output list
 
 ```js
 export const MAC_DMG_URL =
-  "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+  "https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
 export const WINDOWS_EXE_URL =
-  "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+  "https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
 ```
 
 - [ ] **Step 2: Commit**
@@ -68,8 +68,8 @@ Find:
 import AppleIcon from "../components/icons/AppleIcon.astro";
 import WindowsIcon from "../components/icons/WindowsIcon.astro";
 
-const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
-const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+const DOWNLOAD_ARM = "https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+const DOWNLOAD_WIN = "https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
 ---
 ```
 
@@ -164,8 +164,8 @@ Find:
 import AppleIcon from "../components/icons/AppleIcon.astro";
 import WindowsIcon from "../components/icons/WindowsIcon.astro";
 
-const DOWNLOAD_ARM = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
-const DOWNLOAD_WIN = "https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
+const DOWNLOAD_ARM = "https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg";
+const DOWNLOAD_WIN = "https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-windows-x64.exe";
 ---
 ```
 

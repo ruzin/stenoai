@@ -48,9 +48,11 @@ jobs:
         working-directory: app
         run: npm run build:renderer
 
+      # `@perf` excluded - a measurement harness, not a release gate (see
+      # e2e.yml for the same exclusion).
       - name: Run T1 under xvfb
         working-directory: app
-        run: xvfb-run -a npm run test:e2e -- --project=t1
+        run: xvfb-run -a npm run test:e2e -- --project=t1 --grep-invert @perf
 
   build-macos:
     needs: gate-smoke
@@ -105,6 +107,17 @@ jobs:
         # mic-monitor arch guard below.
         file bin/ffmpeg
         file bin/ffmpeg | grep -q "arm64"
+
+    - name: Thin bundled binaries to ${{ matrix.arch }}
+      run: |
+        chmod +x scripts/thin-macos-bin.sh
+        # Idempotent — download-ollama.sh already ran it for the host arch. Run it
+        # again with the explicit target arch so a cached or hand-populated bin/
+        # can't smuggle x86_64 code into the signed bundle (#427). The script
+        # exits non-zero if any non-arm64 Mach-O survives.
+        ./scripts/thin-macos-bin.sh ${{ matrix.arch }}
+        file bin/ollama
+        file bin/ollama | grep -q "arm64"
 
     - name: Build mic-monitor helper (Swift)
       run: |
@@ -348,7 +361,7 @@ jobs:
           - Microphone access permissions
 
           ### Intel Mac users
-          Steno is **Apple Silicon only** (since v0.4.0). Intel users should stay on [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8), the last release supporting Intel Macs. Auto-update on existing Intel installs is gated and will not offer newer versions to those machines.
+          Steno is **Apple Silicon only** (since v0.4.0). Intel users should stay on [v0.3.8](https://github.com/stenolabs/stenoai/releases/tag/v0.3.8), the last release supporting Intel Macs. Auto-update on existing Intel installs is gated and will not offer newer versions to those machines.
         files: |
           release/*.dmg
           release/*.zip

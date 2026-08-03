@@ -52,8 +52,64 @@ SUPPORTS_PARTIALS = True
 PARAKEET_CHUNK_DURATION_S = 60.0
 PARAKEET_CHUNK_OVERLAP_S = 15.0
 
+# Ceiling on MLX's Metal buffer cache — freed-but-retained GPU buffers, not
+# live tensors. MLX defaults this to ~95% of system memory (22.8 GB of 24 GB on
+# the machine this was measured on), which is a sane default for a one-shot
+# script and a bad one for a long-lived recorder.
+#
+# The live consumer re-transcribes a GROWING speech buffer every 400 ms, so
+# nearly every generate() asks for a buffer size MLX has not seen before, and
+# each freed one is retained. Nothing releases them: parakeet-mlx's only
+# mx.clear_cache() lives in its streaming context manager's __exit__, and the
+# live path deliberately bypasses that API for the plain batch loop (see
+# transcribe_samples below).
+#
+# Measured by hand (CI cannot — see tests/test_parakeet_mlx_memory.py), driving
+# `transcribe-stream` with synthetic two-channel speech at real time.
+#
+# Growth run, 12 min of audio:
+#   without a limit   0.3 GB -> 10.7 GB after 1 audio-minute -> 12.6 GB at 1.6
+#   with this limit   flat at 1.9-2.6 GB across 3 audio-minutes
+#   throughput 242 vs 247 segments per audio-minute
+# An in-process probe over 730 inferences put mx.get_active_memory() at a
+# CONSTANT 1237 MB, so the memory the computation actually needs never grows —
+# everything above it was cache.
+#
+# Separate A/B on identical 60 s audio, the two trees differing only by this
+# limit:
+#   generate() p50 389 -> 359 ms, p95 582 -> 466 ms, max 2476 -> 1327 ms
+#   238 vs 252 segments, footprint 10.7 GB vs 1.9 GB
+# So bounding the cache does not cost latency; it wins some. The mechanism is
+# not pinned down — system swap grew by ~5.7 GB during the unbounded arm, but
+# page-zeroing an endless supply of never-seen buffer sizes would explain the
+# tail as well. Only the numbers are claimed, not the cause.
+#
+# 512 MB is empirical, not derived. Under this cap the cache rides 475-512 MB,
+# i.e. the cap BINDS — that is the point, and it is not evidence the value is
+# right. What makes it defensible is the A/B above: the pool still recycles at
+# this size rather than thrashing. Deliberately NOT a fraction of system
+# memory: what the cache needs follows from the model and the window length,
+# both fixed here, not from how much RAM the Mac has. Raising it trades memory
+# for nothing measurable; lowering it toward the observed 475 MB floor would
+# start costing the 400 ms partial path.
+MLX_CACHE_LIMIT_BYTES = 512 * 2**20
+
 _MODEL_CACHE: dict[str, object] = {}
 _MODEL_LOCK = threading.Lock()
+
+
+def _configure_mlx_memory(limit_bytes: int = MLX_CACHE_LIMIT_BYTES) -> int:
+    """Bound MLX's Metal buffer cache. Returns the previous limit in bytes.
+
+    Caps only retained-free buffers — never active allocations or peak usage —
+    so it cannot make an inference fail for want of memory the way
+    ``mx.set_memory_limit`` could. Applies to every caller of ``_load_model``,
+    which is why the batch file path (``transcribe_file``, used by
+    ``process-streaming``) is covered by the same call: parakeet-mlx's batch
+    ``transcribe()`` never clears the cache either.
+    """
+    import mlx.core as mx
+    return mx.set_cache_limit(limit_bytes)
 
 
 def _load_model(model_id: str):
@@ -95,8 +151,16 @@ def _load_model(model_id: str):
             ) from e
         logger.info("Loading Parakeet model: %s", model_id)
         model = from_pretrained(model_id)
+        # After the load, not before. The limit governs only retained-free
+        # buffers, so it could not constrain the load either way; putting it
+        # here just keeps from_pretrained's one-off transients out of the
+        # capped pool instead of having them evicted from it.
+        previous = _configure_mlx_memory()
+        logger.info(
+            "Parakeet model loaded (MLX cache limit %.0f MB, was %.0f MB)",
+            MLX_CACHE_LIMIT_BYTES / 2**20, previous / 2**20,
+        )
         _MODEL_CACHE[model_id] = model
-        logger.info("Parakeet model loaded")
         return model
 
 

@@ -101,7 +101,10 @@ test('empty batch transcription is rescued by the live transcript, marked, and t
   // stereo file fails the RMS energy gate on BOTH channels, so transcribe_diarised
   // returns the silence sentinel and transcribe_audio is never reached — no model
   // load or download in the fast t2 lane.
-  writeUserConfig(userDataDir, { ai_provider: 'local' });
+  // auto_summarize_enabled is off by default (#468 made summarisation a
+  // post-transcription choice), so this spec — which asserts the summariser ran
+  // and embedded the LIVE transcript in its prompt — must opt in explicitly.
+  writeUserConfig(userDataDir, { ai_provider: 'local', auto_summarize_enabled: true });
 
   // Silent STEREO wav -> both channels skip the RMS gate -> batch transcription
   // returns the silence sentinel with no model loaded.

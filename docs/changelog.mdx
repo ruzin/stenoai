@@ -3,6 +3,24 @@ title: "Changelog"
 description: "What's new in Steno -- recent releases and notable changes."
 ---
 
+<Update label="v0.6.6" description="August 3, 2026">
+**Changed**
+- **Transcript-first recordings** — Steno now stops at a transcript by default and lets you summarise on demand, rather than generating notes automatically. Turn on "Summarise after transcription" in Settings → AI to go back to automatic notes.
+
+**Improved**
+- **One-tap meeting notes** — tapping "Take Notes" on a detected meeting starts recording immediately and opens the live note. When the meeting ends Steno auto-stops, and once the transcript is ready a single "Summarise?" tap opens the note and generates it — the notification body and its button now do the same thing, so it's always one click. "Note ready" now shows the note's title.
+- Live transcription holds a flat render cost and bounds its GPU memory, so long meetings stay smooth.
+- Settings toggles respond instantly instead of waiting on a round-trip.
+- The global record shortcut can be turned on or off in Settings.
+
+**Fixed**
+- One auto-detected recording no longer appears as two entries in your list.
+- "Save as PDF" now exports the note you're viewing, not always the Standard summary.
+- Summaries and folders are written durably, so an interrupted save can't lose them.
+- Processing no longer spins forever when a stop produced no recording to process.
+- The About tab now says what actually failed when an update errors.
+</Update>
+
 <Update label="v0.6.5" description="July 26, 2026">
 **New**
 - **System audio without the Screen Recording permission** — record both sides of a call without granting Screen Recording. This uses Core Audio Process Taps, so Steno now requires macOS 14.4 or later. (Turn the "Record system audio" toggle off any time to record the microphone only.)

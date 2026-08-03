@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { Check, ChevronDown, Copy, Play, Search as SearchIcon, Square } from 'lucide-react';
+import { Check, ChevronDown, Copy, Languages, Play, Search as SearchIcon, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { useRecording } from '@/hooks/useRecording';
@@ -45,7 +46,8 @@ export function LiveTranscriptBar() {
   const isRecording = recording.status === 'recording';
   const stopped = !paused && !isRecording;
 
-  const { status, segments, priorSegments, error, slow } = useLiveTranscript(sessionName);
+  const { status, segments, finals, partials, priorSegments, error, slow } =
+    useLiveTranscript(sessionName);
 
   // On a resume/continue, prior finalised segments render before the live
   // tail so the bar shows earlier speech instead of starting blank. Merge for
@@ -67,6 +69,11 @@ export function LiveTranscriptBar() {
   // trailing text rather than just length so a partial that updates in
   // place (same array length, different last text) still triggers a scroll.
   //
+  // Deferred to the next animation frame: reading scrollHeight in the effect
+  // body forces a synchronous layout of the whole list in the middle of
+  // React's commit, several times a second, and the list can be thousands of
+  // rows deep in a long meeting. At frame time the layout is due anyway.
+  //
   // Skip the auto-scroll while the user has an active search query — they
   // were browsing past matches and a jump to the new tail would yank the
   // viewport away from what they were reading. They get the new segment
@@ -75,9 +82,26 @@ export function LiveTranscriptBar() {
   const filtering = query.trim().length > 0;
   React.useEffect(() => {
     if (filtering) return;
-    const el = bodyRef.current;
-    if (!el || !open) return;
-    el.scrollTop = el.scrollHeight;
+    if (!open) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      const el = bodyRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      // A row rendered for the first time replaces its reserved intrinsic
+      // height with its real one, which can grow the scroller a few pixels
+      // *after* the assignment above clamped to the old maximum - leaving the
+      // newest line a sliver below the fold. Re-assert on the next frame,
+      // once that layout has settled.
+      second = requestAnimationFrame(() => {
+        const node = bodyRef.current;
+        if (node) node.scrollTop = node.scrollHeight;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      if (second) cancelAnimationFrame(second);
+    };
   }, [allSegments.length, tailText, open, filtering]);
 
   const filtered = React.useMemo(() => {
@@ -133,15 +157,19 @@ export function LiveTranscriptBar() {
             <span />
           </span>
           <span className="mv-transcript-label">Transcript</span>
-          <button
-            type="button"
-            className="mv-chat-tool"
-            onClick={() => void copyAll()}
-            aria-label="Copy transcript"
-            title="Copy transcript"
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="mv-chat-tool"
+                onClick={() => void copyAll()}
+                aria-label="Copy transcript"
+              >
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{copied ? 'Copied!' : 'Copy transcript'}</TooltipContent>
+          </Tooltip>
           <button
             type="button"
             className="mv-chat-tool"
@@ -179,10 +207,12 @@ export function LiveTranscriptBar() {
           <LiveTranscriptBodyState
             status={status}
             error={error}
-            segments={filtered}
+            filtered={filtered}
             filtering={filtering}
+            priorSegments={priorSegments}
+            finals={finals}
+            partials={partials}
             slow={slow}
-            dividerAfter={filtering ? -1 : priorSegments.length}
           />
         </div>
 
@@ -217,7 +247,7 @@ export function LiveTranscriptBar() {
               onClick={onStop}
               aria-label="Stop recording"
               title="Stop recording"
-              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity"
+              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium transition-opacity hover:opacity-90"
               style={{ background: 'var(--recording)', color: '#FFFFFF' }}
             >
               <Square size={12} fill="currentColor" stroke="currentColor" />
@@ -235,25 +265,33 @@ export function LiveTranscriptBar() {
 // Body states
 // ---------------------------------------------------------------------------
 
+type Segments = ReturnType<typeof useLiveTranscript>['segments'];
+
 interface BodyStateProps {
   status: 'idle' | 'loading' | 'streaming' | 'error';
   error: { stage: string; message?: string } | null;
-  segments: ReturnType<typeof useLiveTranscript>['segments'];
+  /** The search result, rendered as one flat list while a query is active. */
+  filtered: Segments;
   filtering: boolean;
+  /** Unfiltered rendering runs in three lanes so that a partial tick - up to
+   *  ~5 a second - only invalidates the in-progress rows instead of every
+   *  finalised row above them. Order on screen: prior, divider, finals,
+   *  partials, which is the order the merged list had. */
+  priorSegments: Segments;
+  finals: Segments;
+  partials: Segments;
   slow: boolean;
-  /** Render an "Earlier" divider before this index (the boundary between
-   *  carried-over prior segments and the current session's live tail). -1
-   *  disables it (e.g. while filtering, where the boundary is meaningless). */
-  dividerAfter: number;
 }
 
 function LiveTranscriptBodyState({
   status,
   error,
-  segments,
+  filtered,
   filtering,
+  priorSegments,
+  finals,
+  partials,
   slow,
-  dividerAfter,
 }: BodyStateProps) {
   if (status === 'error' && error) {
     return (
@@ -275,7 +313,8 @@ function LiveTranscriptBodyState({
       />
     );
   }
-  if (segments.length === 0) {
+  const liveCount = finals.length + partials.length;
+  if (filtering ? filtered.length === 0 : priorSegments.length + liveCount === 0) {
     return (
       <EmptyState
         title={filtering ? 'No matches' : 'Listening…'}
@@ -296,54 +335,117 @@ function LiveTranscriptBodyState({
   // forming without confusing them for finalised text.
   return (
     <ul className="flex flex-col gap-0">
-      {segments.map((seg, i) => {
-        const isYou = seg.speaker !== 'Others';
-        const showDivider = i === dividerAfter && dividerAfter > 0;
-        return (
-          <React.Fragment key={i}>
-            {showDivider && (
-              <li
-                className="flex items-center gap-2 px-1 py-1.5"
-                aria-hidden="true"
-                data-testid="live-transcript-resume-divider"
-              >
-                <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
-                <span
-                  className="text-[10px] font-medium uppercase tracking-wide"
-                  style={{ color: 'var(--fg-2)' }}
-                >
-                  Resumed
-                </span>
-                <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
-              </li>
-            )}
+      {filtering ? (
+        <SegmentRows segments={filtered} lane="q" />
+      ) : (
+        <>
+          <SegmentRows segments={priorSegments} lane="e" />
+          {priorSegments.length > 0 && liveCount > 0 && (
             <li
-              className={cn(
-                'flex flex-col gap-0.5 px-1 py-0.5',
-                isYou ? 'items-end' : 'items-start'
-              )}
-              style={{ opacity: seg.isFinal ? 1 : 0.55 }}
+              className="flex items-center gap-2 px-1 py-1.5"
+              aria-hidden="true"
+              data-testid="live-transcript-resume-divider"
             >
-              <span className="px-1.5 text-[10.5px] tabular-nums" style={{ color: 'var(--fg-2)' }}>
-                {fmtTimestamp(seg.start)}
-              </span>
-              <div
-                className={cn(
-                  'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
-                  isYou
-                    ? 'bg-green-100 text-green-950 rounded-br-md dark:bg-green-900/40 dark:text-green-100'
-                    : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100'
-                )}
+              <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
+              <span
+                className="text-[10px] font-medium uppercase tracking-wide"
+                style={{ color: 'var(--fg-2)' }}
               >
-                {seg.text}
-              </div>
+                Resumed
+              </span>
+              <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
             </li>
-          </React.Fragment>
-        );
-      })}
+          )}
+          <SegmentRows segments={finals} lane="f" />
+          <SegmentRows segments={partials} lane="p" />
+        </>
+      )}
     </ul>
   );
 }
+
+/**
+ * One lane of bubbles.
+ *
+ * Memoised on the array identity, which is what makes the lane split pay off:
+ * a partial tick produces a new `partials` array but leaves `finals`
+ * untouched, so React skips the finalised rows entirely instead of
+ * re-creating and diffing every one of them.
+ *
+ * Keys are content-derived in the lanes that get inserted into. A final
+ * released late by the bleed-dedup hold is inserted *into* the sorted finals
+ * lane, and index keys made React re-bind every row below the insert point;
+ * start+speaker is unique there (one utterance per speaker can begin at a given
+ * instant within one recording) and stable. The partial lane keys on the
+ * speaker alone, so a speaker's growing utterance updates one node in place,
+ * tick after tick.
+ *
+ * The prior lane is the exception and keys on position: it carries the
+ * finalised text of EVERY earlier recording into this note (main.js prepends
+ * the existing priors on each continue), and `start` counts from zero within
+ * each recording - so the same speaker at the same offset in two sessions
+ * would collide. That lane is written once and never reordered, which is
+ * exactly the case an index key is right for.
+ *
+ * The filtered lane keys on position too, and there the index genuinely does
+ * point at a different segment after the query changes. It stays because these
+ * rows hold no state of their own - no input, no focus, no animation - so
+ * reusing a node just means React writes new text into it. Only the
+ * reconciliation is less efficient, and only while someone is typing in the
+ * search box.
+ */
+const SegmentRows = React.memo(function SegmentRows({
+  segments,
+  lane,
+}: {
+  segments: Segments;
+  lane: 'e' | 'f' | 'p' | 'q';
+}) {
+  // Granola-style bubbles. Speaker attribution is the mic/system channel the
+  // Python sidecar tagged the segment with: 'Others' renders grey/left,
+  // anything else (explicit 'You' or no attribution) renders green/right -
+  // the same charitable default as TranscriptPanel, since the recording
+  // mechanically belongs to the mic owner. Partials stay dimmed at 0.55
+  // opacity so the user can see them forming without confusing them for
+  // finalised text.
+  return (
+    <>
+      {segments.map((seg, i) => {
+        const isYou = seg.speaker !== 'Others';
+        const key =
+          lane === 'p'
+            ? `p:${isYou ? 'You' : 'Others'}`
+            : lane === 'q' || lane === 'e'
+              ? `${lane}:${i}`
+              : `f:${seg.start}:${isYou ? 'You' : 'Others'}`;
+        return (
+          <li
+            key={key}
+            className={cn(
+              'live-row flex flex-col gap-0.5 px-1 py-0.5',
+              isYou ? 'items-end' : 'items-start'
+            )}
+            style={{ opacity: seg.isFinal ? 1 : 0.55 }}
+          >
+            <span className="px-1.5 text-[10.5px] tabular-nums" style={{ color: 'var(--fg-2)' }}>
+              {fmtTimestamp(seg.start)}
+            </span>
+            <div
+              className={cn(
+                'max-w-[78%] rounded-2xl px-3 py-1.5 text-sm leading-[1.5]',
+                isYou
+                  ? 'bg-green-100 text-green-950 rounded-br-md dark:bg-green-900/40 dark:text-green-100'
+                  : 'bg-neutral-200/80 text-neutral-900 rounded-bl-md dark:bg-neutral-700/60 dark:text-neutral-100'
+              )}
+            >
+              {seg.text}
+            </div>
+          </li>
+        );
+      })}
+    </>
+  );
+});
 
 function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
   return (
@@ -394,21 +496,26 @@ function LanguageSelector() {
 
   return (
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium',
-            'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
-          )}
-          style={{ color: 'var(--fg-2)' }}
-          aria-label={`Language: ${display}`}
-          title="Change transcript language"
-        >
-          <span style={{ color: 'var(--fg-1)' }}>{display}</span>
-          <ChevronDown size={12} />
-        </button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium',
+                'cursor-pointer transition-colors hover:bg-[color:var(--surface-hover)]'
+              )}
+              style={{ color: 'var(--fg-2)' }}
+              aria-label={`Language: ${display}`}
+            >
+              <Languages size={12} />
+              <span style={{ color: 'var(--fg-1)' }}>{display}</span>
+              <ChevronDown size={12} />
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">Transcript language</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" sideOffset={8} className="w-56 p-1">
         {LANGUAGE_OPTIONS.map((opt) => {
           const active = opt.code === current;

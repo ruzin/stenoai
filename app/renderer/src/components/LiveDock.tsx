@@ -1,8 +1,9 @@
 import * as React from 'react';
 import { ChevronUp, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRecording } from '@/hooks/useRecording';
-import { useLiveTranscript } from '@/hooks/useLiveTranscript';
+import { useLiveTranscriptStatus } from '@/hooks/useLiveTranscript';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { useLiveTranscriptAvailable } from '@/hooks/useModels';
 
@@ -36,7 +37,11 @@ export function LiveDock() {
   // Gated to Parakeet via `liveAvailable` — Whisper never spawns the live
   // sidecar, so its status would sit at 'loading' forever. Only meaningful
   // while actively recording.
-  const live = useLiveTranscript(liveAvailable ? recording.sessionName : null);
+  //
+  // Status-only subscription on purpose: the pill is mounted for the entire
+  // meeting, and the full hook would keep a second complete copy of every
+  // segment just to decide whether to show one label.
+  const live = useLiveTranscriptStatus(liveAvailable ? recording.sessionName : null);
   const loadingModel = isRecording && live.status === 'loading';
   // Delay the label by ~500ms so a warm-cache load (the common case after
   // the offline-loading fix) goes straight to the timer with no
@@ -102,46 +107,58 @@ export function LiveDock() {
           drop). There is no manual pause: stop ends the segment and the note
           can be continued later. */}
       {paused && (
-        <button
-          type="button"
-          onClick={onResume}
-          aria-label="Resume recording"
-          title="Resume recording"
-          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
-          style={{ background: 'transparent', color: 'var(--fg-1)' }}
-        >
-          <Play size={13} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onResume}
+              aria-label="Resume recording"
+              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)]"
+              style={{ background: 'transparent', color: 'var(--fg-1)' }}
+            >
+              <Play size={13} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Resume recording</TooltipContent>
+        </Tooltip>
       )}
       {/* Expand — Parakeet only. Whisper recordings have no live drawer
           (post-stop pipeline produces the final transcript on the meeting
           detail page). Hiding the button entirely rather than disabling
           avoids the dead-control. */}
       {liveAvailable && (
-        <button
-          type="button"
-          onClick={toggleTranscript}
-          disabled={stopped}
-          aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
-          aria-pressed={transcriptOpen}
-          title={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
-          className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-          style={{ background: 'transparent', color: 'var(--fg-1)' }}
-        >
-          <ChevronUp size={14} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={toggleTranscript}
+              disabled={stopped}
+              aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}
+              aria-pressed={transcriptOpen}
+              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ background: 'transparent', color: 'var(--fg-1)' }}
+            >
+              <ChevronUp size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">{transcriptOpen ? 'Hide transcript' : 'Show transcript'}</TooltipContent>
+        </Tooltip>
       )}
-      <button
-        type="button"
-        onClick={onStop}
-        disabled={stopped}
-        aria-label="Stop recording"
-        title="Stop recording"
-        className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-        style={{ background: 'transparent', color: 'var(--recording)' }}
-      >
-        <Square size={12} fill="currentColor" stroke="currentColor" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onStop}
+            disabled={stopped}
+            aria-label="Stop recording"
+            className="inline-flex size-7 cursor-pointer items-center justify-center rounded-full border-0 transition-colors hover:bg-[color:var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: 'transparent', color: 'var(--recording)' }}
+          >
+            <Square size={12} fill="currentColor" stroke="currentColor" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">Stop recording</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

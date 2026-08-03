@@ -244,6 +244,8 @@ const stenoai = {
   settings: {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
+    getRecordHotkey: () => invoke('get-record-hotkey'),
+    setRecordHotkey: (v) => invoke('set-record-hotkey', v),
     getTelemetry: () => invoke('get-telemetry'),
     setTelemetry: (v, source) => invoke('set-telemetry', v, source),
     getDockIcon: () => invoke('get-dock-icon'),
@@ -273,6 +275,7 @@ const stenoai = {
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),
     showSilenceAutoStopNotification: (payload) => invoke('show-silence-auto-stop-notification', payload),
     showNoteReadyNotification: (payload) => invoke('show-note-ready-notification', payload),
+    showTranscriptReadyNotification: (payload) => invoke('show-transcript-ready-notification', payload),
     showSystemAudioMicOnlyNotification: () => invoke('show-system-audio-mic-only-notification'),
     // Design-for-test seam: the production fire path is the main-side scheduler
     // timer; this lets e2e drive the gate + suppression deterministically.
@@ -392,6 +395,10 @@ const stenoai = {
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),
     updateError: (cb) => subscribe('update-error', cb),
+    // Main cleared a failure the About tab may still be showing (a cycle that
+    // came back clean). Without this the banner would linger on a mounted tab
+    // until the user navigated away and back.
+    updateErrorCleared: (cb) => subscribe('update-error-cleared', cb),
     googleAuthChanged: (cb) => subscribe('google-auth-changed', cb),
     outlookAuthChanged: (cb) => subscribe('outlook-auth-changed', cb),
     shortcutStartRecording: (cb) => subscribe('shortcut-start-recording', cb),
@@ -402,6 +409,7 @@ const stenoai = {
     autoPauseRequested: (cb) => subscribe('auto-pause-requested', cb),
     autoResumeRequested: (cb) => subscribe('auto-resume-requested', cb),
     autoSummariseRequested: (cb) => subscribe('auto-summarise-requested', cb),
+    generateNotesRequested: (cb) => subscribe('generate-notes-requested', cb),
     navigateToMeeting: (cb) => subscribe('navigate-to-meeting', cb),
     trayOpenSettings: (cb) => subscribe('tray-open-settings', cb),
     showQuitDialog: (cb) => subscribe('show-quit-dialog', cb),

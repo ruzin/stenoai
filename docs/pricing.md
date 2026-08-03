@@ -14,7 +14,7 @@ organization-specific features, for teams that want that on top of the free app.
 ## Free — for everyone, including enterprise use
 - Price: $0
 - License: MIT (open source) -- no usage restrictions, including for commercial or enterprise deployments
-- Source code: https://github.com/ruzin/stenoai
+- Source code: https://github.com/stenolabs/stenoai
 - Account required: no
 - Includes: recording (system audio + microphone), on-device transcription (Parakeet and
   Whisper engines), on-device summarization (local models via Ollama), live transcription,
@@ -33,7 +33,7 @@ organization-specific features, for teams that want that on top of the free app.
 - Everything works with no cloud provider — the default pipeline is fully local and free.
 
 ## Platform
-- macOS only (macOS 14.4 Sonoma or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0).
+- macOS (macOS 14.4 Sonoma or later; Apple Silicon, M1 or later -- Intel Macs are not supported since v0.4.0) and Windows 10/11 (x64) in alpha (unsigned; Windows SmartScreen warns on first launch).
 
 ## Download
 - https://stenoai.co/#download

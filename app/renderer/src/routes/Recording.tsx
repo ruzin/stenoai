@@ -18,8 +18,12 @@ export function Recording() {
 
   // If we land on /recording with no active recording (e.g. cold reload after
   // it stopped), bounce back home so we don't leave the user on a dead page.
-  // Status 'processing' is handled by the global listener which redirects to
-  // /meetings/processing.
+  // We only bounce when the session is genuinely gone: a recording/paused
+  // status means one is active or just starting (via "Take Notes" from another
+  // route, whose ~2s Parakeet warm-up leaves live.active briefly false) — never
+  // bounce that, or the user gets kicked off the page they just opened and it
+  // reads as a no-op needing a second tap. Status 'processing' is handled by
+  // the global listener which redirects to /meetings/processing.
   //
   // 500ms grace period: during a normal stop, the optimistic cache write
   // briefly transitions status (idle ↔ processing) and live.active flips off
@@ -28,17 +32,21 @@ export function Recording() {
   // home — visible most reliably when the user had been typing notes (queue
   // poll cadence + cache updates landed in a different order). The delay
   // lets the transition settle before we make any bouncing decision.
+  const hasSession =
+    live.active ||
+    recording.status === 'recording' ||
+    recording.status === 'paused' ||
+    recording.status === 'processing';
   React.useEffect(() => {
     if (recording.isLoading) return;
-    if (live.active) return;
-    if (recording.status === 'processing') return;
+    if (hasSession) return;
     const t = setTimeout(() => {
-      if (!recording.isLoading && !live.active && recording.status !== 'processing') {
+      if (!recording.isLoading && !hasSession) {
         navigate('/');
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [recording.isLoading, live.active, recording.status, navigate]);
+  }, [recording.isLoading, hasSession, navigate]);
 
   const startedAt = live.startedAt ?? new Date();
 
@@ -55,7 +63,7 @@ export function Recording() {
               <button
                 type="button"
                 onClick={() => navigate('/')}
-                className="mb-6 inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent text-[13px] transition-colors hover:text-[color:var(--fg-1)]"
+                className="mb-6 inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 py-1 text-[13px] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
                 style={{ color: 'var(--fg-2)' }}
                 aria-label="Back to home"
               >

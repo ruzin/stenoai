@@ -358,6 +358,33 @@ class ConfigLaunchOnLoginTests(unittest.TestCase):
             self.assertTrue(reloaded.get_launch_on_login())
 
 
+class ConfigRecordHotkeyTests(unittest.TestCase):
+    def test_default_record_hotkey_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_record_hotkey_enabled())
+
+    def test_legacy_config_without_key_defaults_true(self):
+        # Existing installs whose config predates this key must default ON
+        # (back-compat: the shortcut was unconditionally registered before).
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "gemma3:4b"}))
+            config = Config(config_path=path)
+            self.assertTrue(config.get_record_hotkey_enabled())
+
+    def test_record_hotkey_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_record_hotkey_enabled(False))
+            self.assertFalse(config.get_record_hotkey_enabled())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_record_hotkey_enabled())
+            self.assertTrue(reloaded.set_record_hotkey_enabled(True))
+            self.assertTrue(reloaded.get_record_hotkey_enabled())
+
+
 class ConfigPrivacyNoticeTests(unittest.TestCase):
     def test_fresh_install_seeds_notice_seen_true(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -507,10 +534,12 @@ class ConfigKeepRecordingsTests(unittest.TestCase):
 
 
 class ConfigAutoSummarizeTests(unittest.TestCase):
-    def test_default_auto_summarize_is_true(self):
+    def test_default_auto_summarize_is_false(self):
+        # Default OFF: a fresh install stops at a transcript-only note; notes are
+        # generated on demand (meeting-end "Summarise" prompt / in-note CTA).
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
-            self.assertTrue(config.get_auto_summarize_enabled())
+            self.assertFalse(config.get_auto_summarize_enabled())
 
     def test_auto_summarize_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
