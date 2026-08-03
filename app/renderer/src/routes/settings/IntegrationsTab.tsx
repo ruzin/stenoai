@@ -43,18 +43,19 @@ export function IntegrationsTab() {
         className="flex items-start justify-between gap-6 py-4"
         style={{ borderBottom: '1px solid var(--border-subtle)' }}
       >
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          {/* Obsidian's crystal motif — the app's icon system is lucide, so use
-              its Gem (a faceted crystal) rather than a one-off brand SVG. */}
-          <Gem size={18} className="mt-[2px] shrink-0" style={{ color: '#7c6cf5' }} aria-hidden />
-          <div className="min-w-0">
-            <div className="text-[14px] font-normal" style={{ color: 'var(--fg-1)' }}>
-              Sync to Obsidian
-            </div>
-            <div className="mt-[2px] text-[13px]" style={{ color: 'var(--fg-2)' }}>
-              Mirror your notes into an Obsidian vault folder as Markdown. One-way
-              (Steno → vault); edits made in Obsidian are never overwritten.
-            </div>
+        <div className="min-w-0 flex-1">
+          <div
+            className="flex items-center gap-1.5 text-[14px] font-normal"
+            style={{ color: 'var(--fg-1)' }}
+          >
+            Sync to Obsidian
+            {/* Obsidian's crystal motif, inline after the name — the app's icon
+                system is lucide, so use its Gem rather than a one-off brand SVG. */}
+            <Gem size={14} style={{ color: '#7c6cf5' }} aria-hidden />
+          </div>
+          <div className="mt-[2px] text-[13px]" style={{ color: 'var(--fg-2)' }}>
+            Mirror your notes into an Obsidian vault folder as Markdown. One-way
+            (Steno → vault); edits made in Obsidian are never overwritten.
           </div>
         </div>
         <Switch
