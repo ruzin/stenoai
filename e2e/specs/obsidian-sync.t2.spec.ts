@@ -111,10 +111,15 @@ test('backfill writes a transcript-free note; rename moves it; external edits an
   // actual vault contents in the message so a failure is diagnosable.
   let files: string[] = [];
   await expect
-    .poll(() => { files = vaultFiles(vault); return files.includes(renamedName); },
-      { timeout: 20_000, intervals: [250] })
+    .poll(async () => {
+      files = vaultFiles(vault);
+      if (files.includes(renamedName) && !files.includes(targetName)) return true;
+      // Re-nudge a sync so a Windows file-lock that delayed the old-file unlink
+      // gets drained (re-setting the vault path re-runs a backfill → drainStale).
+      await page.evaluate((v) => (window as StenoWin).stenoai.settings.setObsidianVaultPath(v), vault);
+      return false;
+    }, { timeout: 30_000, intervals: [1000] })
     .toBe(true);
-  expect(files, `vault after rename: ${JSON.stringify(files)}`).not.toContain(targetName);
 
   // Externally edit the vault copy, then re-run a sync. Re-setting the vault
   // path re-triggers a backfill deterministically (an update-meeting with an

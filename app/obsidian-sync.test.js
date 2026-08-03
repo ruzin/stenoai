@@ -194,6 +194,20 @@ test('reconcile does NOT mass-delete when the source scan comes back empty (H2)'
   fs.rmSync(h.root, { recursive: true, force: true });
 });
 
+test('a stale (blocked-unlink) path is drained on the next sync', () => {
+  const h = harness();
+  // Simulate a leftover orphan that a prior Windows-locked unlink couldn't
+  // remove, recorded in the index's stale list.
+  const orphan = path.join(h.vault, 'orphan.md');
+  fs.writeFileSync(orphan, 'left-behind');
+  h.eng.saveIndex({ version: 1, notes: {}, conflicts: {}, stale: ['orphan.md'] });
+  h.writeNote('n1', NOTE);
+  h.eng.syncNoteBySummaryPath(path.join(h.output, 'n1_summary.md'));
+  assert.ok(!fs.existsSync(orphan), 'stale orphan removed on the next sync');
+  assert.deepEqual(h.eng.loadIndex().stale, [], 'stale list cleared');
+  fs.rmSync(h.root, { recursive: true, force: true });
+});
+
 test('first sync never clobbers a pre-existing untracked vault file (H1)', () => {
   const h = harness();
   const existing = path.join(h.vault, 'Sales', '2026-07-15 Acme Q3 Planning.md');

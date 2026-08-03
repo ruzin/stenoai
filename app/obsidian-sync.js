@@ -61,8 +61,11 @@ function retryTransient(fn, tries = 8) {
     }
   }
 }
+// Returns true if the path is gone after this call (removed or already absent),
+// false if it survived every retry (a persistently-locked file on Windows).
 function rmWithRetry(p) {
-  try { retryTransient(() => fs.unlinkSync(p)); } catch (_) { /* ENOENT / gave up */ }
+  try { retryTransient(() => fs.unlinkSync(p)); return true; }
+  catch (err) { return !!(err && err.code === 'ENOENT'); }
 }
 function renameWithRetry(from, to) { retryTransient(() => fs.renameSync(from, to)); }
 
@@ -214,10 +217,23 @@ function registerObsidianSync({
     try {
       const d = JSON.parse(fs.readFileSync(statePath(), 'utf8'));
       if (d && typeof d === 'object') {
-        return { version: STATE_VERSION, notes: d.notes || {}, conflicts: d.conflicts || {} };
+        return {
+          version: STATE_VERSION,
+          notes: d.notes || {},
+          conflicts: d.conflicts || {},
+          stale: Array.isArray(d.stale) ? d.stale : [],
+        };
       }
     } catch (_) { /* missing or corrupt → fresh */ }
-    return { version: STATE_VERSION, notes: {}, conflicts: {} };
+    return { version: STATE_VERSION, notes: {}, conflicts: {}, stale: [] };
+  }
+
+  // Vault-relative paths whose unlink was blocked by a persistent Windows lock
+  // during a rename/delete. Re-attempt them on every sync/reconcile so a
+  // transiently-locked file is never permanently orphaned (self-healing).
+  function drainStale(idx) {
+    if (!idx.stale || !idx.stale.length) return;
+    idx.stale = idx.stale.filter((rel) => !rmWithRetry(path.join(cached.vaultPath, rel)));
   }
 
   function atomicWriteFileSync(dest, data) {
@@ -266,6 +282,7 @@ function registerObsidianSync({
     const ownIdx = !idx;
     idx = idx || loadIndex();
     try {
+      drainStale(idx); // retry any previously-blocked unlink first
       if (!summaryPath || !summaryPath.endsWith(SUMMARY_SUFFIX)) {
         return { status: 'skipped' };
       }
@@ -310,7 +327,9 @@ function registerObsidianSync({
           if (ownIdx) saveIndex(idx);
           return { status: 'conflict' };
         }
-        rmWithRetry(absOld);
+        // If a persistent Windows lock blocks the unlink, remember the old path
+        // so a later sync/reconcile removes it — never a permanent orphan.
+        if (!rmWithRetry(absOld)) idx.stale.push(entry.vaultRelPath);
         try { fs.rmdirSync(path.dirname(absOld)); } catch (_) { /* not empty / root */ }
       }
 
@@ -367,7 +386,7 @@ function registerObsidianSync({
         saveIndex(idx);
         return { status: 'conflict' };
       }
-      rmWithRetry(abs);
+      if (!rmWithRetry(abs)) idx.stale.push(entry.vaultRelPath);
       try { fs.rmdirSync(path.dirname(abs)); } catch (_) { /* not empty / root */ }
       delete idx.notes[stem];
       delete idx.conflicts[stem];
@@ -416,6 +435,7 @@ function registerObsidianSync({
   async function reconcileOnLaunch() {
     if (!isActive()) return { status: 'disabled' };
     const idx = loadIndex();
+    drainStale(idx);
     const onDisk = new Map(
       listSummaryFiles().map((p) => [stemFromSummaryPath(p), p]));
     // Guard against a mass-delete on an untrustworthy scan: an empty scan while
