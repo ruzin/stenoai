@@ -45,35 +45,6 @@ function emit(app: ElectronApplication, channel: string, payload: unknown) {
   );
 }
 
-// The renderer attaches its IPC listeners in a useEffect that runs after the
-// initial paint, so there is a real window -- brief locally, wider under a
-// loaded CI runner -- where `processing-stage-label` is already visible but
-// nothing is listening yet. webContents.send has no queueing/replay, so an
-// event landing in that window is silently dropped. Resend on a short
-// interval until `check` actually observes the expected UI change, rather
-// than sending once and hoping; safe to repeat because every handler this
-// spec drives is idempotent once its target state is reached (a resend after
-// `check` has already passed never happens -- the loop returns as soon as it
-// does).
-async function emitUntil(
-  app: ElectronApplication,
-  channel: string,
-  payload: unknown,
-  check: () => Promise<void>,
-) {
-  const deadline = Date.now() + 5000;
-  for (;;) {
-    await emit(app, channel, payload);
-    try {
-      await check();
-      return;
-    } catch (err) {
-      if (Date.now() > deadline) throw err;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
-}
-
 test('walks transcribing -> diarizing -> summarizing -> finalizing without leaking a stale sub-label', async ({ launchApp }) => {
   const { app, page } = await launchApp({ mockIpc: true });
   await openProcessing(page);
@@ -82,32 +53,27 @@ test('walks transcribing -> diarizing -> summarizing -> finalizing without leaki
   await expect(label).toHaveText('Analyzing transcript');
   await expect(label).toHaveAttribute('data-stage', 'transcribing');
 
-  await emitUntil(app, 'processing-progress', { line: 'PROGRESS:diarize:You:start' }, () =>
-    expect(label).toHaveText('Diarizing You channel…', { timeout: 200 }),
-  );
+  await emit(app, 'processing-progress', { line: 'PROGRESS:diarize:You:start' });
+  await expect(label).toHaveText('Diarizing You channel…');
   await expect(label).toHaveAttribute('data-stage', 'diarizing');
 
   await emit(app, 'processing-progress', { line: 'PROGRESS:diarize:You:done' });
-  await emitUntil(app, 'processing-progress', { line: 'PROGRESS:diarize:Others:start' }, () =>
-    expect(label).toHaveText('Diarizing Others channel…', { timeout: 200 }),
-  );
+  await emit(app, 'processing-progress', { line: 'PROGRESS:diarize:Others:start' });
+  await expect(label).toHaveText('Diarizing Others channel…');
   await emit(app, 'processing-progress', { line: 'PROGRESS:diarize:Others:done' });
 
-  await emitUntil(app, 'processing-progress', { line: 'PROGRESS:summarize:1/3' }, () =>
-    expect(label).toHaveText('Summarizing part 1 of 3…', { timeout: 200 }),
-  );
+  await emit(app, 'processing-progress', { line: 'PROGRESS:summarize:1/3' });
+  await expect(label).toHaveText('Summarizing part 1 of 3…');
   await expect(label).toHaveAttribute('data-stage', 'summarizing');
 
-  await emitUntil(app, 'processing-progress', { line: 'PROGRESS:summarize:reducing' }, () =>
-    expect(label).toHaveText('Merging summaries…', { timeout: 200 }),
-  );
+  await emit(app, 'processing-progress', { line: 'PROGRESS:summarize:reducing' });
+  await expect(label).toHaveText('Merging summaries…');
 
   // The bug this spec exists to catch: chunkProgress used to persist
   // unconditionally across stage transitions, so a stale sub-label (here,
   // "Merging summaries…") could leak into 'finalizing'.
-  await emitUntil(app, 'summary-complete', { success: true, sessionName: 'test-session' }, () =>
-    expect(label).toHaveText('Almost done…', { timeout: 200 }),
-  );
+  await emit(app, 'summary-complete', { success: true, sessionName: 'test-session' });
+  await expect(label).toHaveText('Almost done…');
   await expect(label).toHaveAttribute('data-stage', 'finalizing');
 });
 
@@ -123,9 +89,8 @@ test('shows a ticking elapsed-time counter throughout diarization, since this br
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
-  await emitUntil(app, 'processing-progress', { line: 'PROGRESS:diarize:You:start' }, () =>
-    expect(label).toHaveText('Diarizing You channel…', { timeout: 200 }),
-  );
+  await emit(app, 'processing-progress', { line: 'PROGRESS:diarize:You:start' });
+  await expect(label).toHaveText('Diarizing You channel…');
 
   await expect(label).toHaveText(/Diarizing You channel… \(\d+s\)/, { timeout: 3000 });
 
@@ -137,25 +102,20 @@ test('a processing failure swaps to the error panel, and retrying does not leak 
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
-  await emitUntil(app, 'processing-progress', { line: 'PROGRESS:diarize:You:start' }, () =>
-    expect(label).toHaveText('Diarizing You channel…', { timeout: 200 }),
-  );
+  await emit(app, 'processing-progress', { line: 'PROGRESS:diarize:You:start' });
+  await expect(label).toHaveText('Diarizing You channel…');
 
   // On failure, the stage card is replaced entirely by a distinct error
   // panel (retry button, no processing-stage-label) rather than the label
   // just changing text in place.
-  await emitUntil(
-    app,
-    'processing-complete',
-    {
-      success: false,
-      sessionName: 'test-session',
-      audioFile: '/fake/audio.wav',
-      message: 'boom',
-    },
-    () => expect(page.getByText('Couldn’t process this recording.')).toBeVisible({ timeout: 200 }),
-  );
+  await emit(app, 'processing-complete', {
+    success: false,
+    sessionName: 'test-session',
+    audioFile: '/fake/audio.wav',
+    message: 'boom',
+  });
   await expect(label).toHaveCount(0);
+  await expect(page.getByText('Couldn’t process this recording.')).toBeVisible();
 
   // The bug this half of the spec exists to catch: without clearing
   // chunkProgress on the failure transition, clicking "Try again" (which
