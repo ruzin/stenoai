@@ -234,6 +234,71 @@ class TranscribeWindowsMergeTests(unittest.TestCase):
         merged = onnx_backend._transcribe_windows(model, self._eighty_seconds())
         self.assertEqual(merged.tokens, ["Hello", " world."])
 
+    def test_a_skipped_window_is_reported_not_just_swallowed(self):
+        # Skipping the window keeps the meeting alive, but the transcript now
+        # covers less audio than the recording holds. Downstream has to be
+        # able to see that -- silently handing back a short transcript is how
+        # a half-read file used to beat a complete live transcript.
+        # 80 s of audio, 60 s windows stepping 45 s: [0,60) and [45,80).
+        # Losing the second one costs only the 20 s it alone reached.
+        model = _FakeTsModel([
+            (["Hello", " world."], [(0.0, 0.5), (1.0, 1.5)]),
+            RuntimeError("onnx blew up on this window"),
+        ])
+        merged = onnx_backend._transcribe_windows(model, self._eighty_seconds())
+        self.assertAlmostEqual(merged.covered_seconds, 60.0)
+        self.assertAlmostEqual(merged.total_seconds, 80.0)
+        self.assertAlmostEqual(
+            onnx_backend._result_to_dict(merged, language=None)["window_coverage"], 0.75
+        )
+
+    def test_coverage_counts_audio_not_windows(self):
+        # Windows are not interchangeable: they overlap, and the last one is
+        # short. Losing the FIRST of these two costs 45 of 80 seconds, where
+        # counting windows would call either loss exactly half.
+        model = _FakeTsModel([
+            RuntimeError("onnx blew up on this window"),
+            ([" Bar."], [(20.0, 20.5)]),
+        ])
+        merged = onnx_backend._transcribe_windows(model, self._eighty_seconds())
+        self.assertAlmostEqual(merged.covered_seconds, 35.0)
+        self.assertAlmostEqual(
+            onnx_backend._result_to_dict(merged, language=None)["window_coverage"], 35.0 / 80.0
+        )
+
+    def test_a_window_dropped_for_bad_timing_is_not_counted_as_read(self):
+        # recognize() succeeded, but the window was discarded a few lines
+        # later for tokens and timestamps that disagree. Counting it at
+        # recognize() time reported full coverage for a file with a hole.
+        model = _FakeTsModel([
+            (["Hello", " world."], [(0.0, 0.5), (1.0, 1.5)]),
+            ([" Tail.", " Extra."], [(5.0, 5.5)]),  # 2 tokens, 1 timestamp
+        ])
+        merged = onnx_backend._transcribe_windows(model, self._eighty_seconds())
+        self.assertAlmostEqual(merged.covered_seconds, 60.0)
+        self.assertLess(
+            onnx_backend._result_to_dict(merged, language=None)["window_coverage"], 1.0
+        )
+
+    def test_a_clean_run_reports_full_coverage(self):
+        model = _FakeTsModel([
+            (["Hello", " world."], [(0.0, 0.5), (1.0, 1.5)]),
+            ([" Bar."], [(20.0, 20.5)]),
+        ])
+        merged = onnx_backend._transcribe_windows(model, self._eighty_seconds())
+        self.assertAlmostEqual(merged.covered_seconds, merged.total_seconds)
+        self.assertEqual(onnx_backend._result_to_dict(merged, language=None)["window_coverage"], 1.0)
+
+    def test_a_result_that_never_windowed_reports_unknown_not_complete(self):
+        # onnx-asr's own TimestampedResult carries no counters. That must read
+        # as "no figure available", never as a clean bill of health.
+        class _Plain:
+            text = "Hello world."
+            tokens = ["Hello", " world."]
+            timestamps = [(0.0, 0.5), (1.0, 1.5)]
+
+        self.assertIsNone(onnx_backend._result_to_dict(_Plain(), language=None)["window_coverage"])
+
     def test_all_windows_failing_raises_not_empty(self):
         # A broken model/session where EVERY window raises is a real failure,
         # not silence — _transcribe_windows must raise so the caller marks it

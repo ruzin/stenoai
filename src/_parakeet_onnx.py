@@ -286,12 +286,20 @@ def _result_to_dict(result: Any, language: Optional[str]) -> dict:
         duration = float(_ts_end(last_ts))
 
     detected_language = language if (language and language != "auto") else None
+    # None when the result came from a single non-windowed pass (onnx-asr's
+    # own TimestampedResult, or a file shorter than one window) -- there is
+    # no windowing there, so there is nothing that could have been lost.
+    total_s = float(getattr(result, "total_seconds", 0.0) or 0.0)
+    covered_s = float(getattr(result, "covered_seconds", 0.0) or 0.0)
+    coverage = min(1.0, covered_s / total_s) if total_s > 0 else None
+
     return {
         "text": text or None,
         "segments": segments,
         "duration_seconds": duration,
         "detected_language": detected_language,
         "detected_language_probability": None,
+        "window_coverage": coverage,
     }
 
 
@@ -406,10 +414,27 @@ class _SimpleResult:
     ``_group_tokens_into_sentences`` read — ``text``, ``tokens``,
     ``timestamps`` — so a merged multi-window transcript flows through the
     exact same shaping path as a single-window TimestampedResult.
+
+    ``covered_seconds`` / ``total_seconds`` carry how much of the file
+    actually made it through. A window whose ``recognize`` raises is skipped
+    on purpose (one bad window shouldn't fail a whole meeting), but the
+    resulting transcript then covers less audio than the recording holds, and
+    nothing downstream could tell.
+
+    Measured in SECONDS OF AUDIO, not in windows. Windows are not
+    interchangeable: they overlap, and the last one is usually short. On 61 s
+    of audio the two windows are [0, 60) and [45, 61); losing the first one
+    leaves 16 seconds of a 61-second meeting, which counting windows would
+    report as half.
+
+    onnx-asr's own TimestampedResult has neither field, so every reader goes
+    through ``getattr`` with a default.
     """
     text: str
     tokens: list
     timestamps: list
+    covered_seconds: float = 0.0
+    total_seconds: float = 0.0
 
 
 def _load_wav_16k_mono(audio_path: Path):
@@ -474,6 +499,11 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
     last_end = -1.0
     windows_attempted = 0
     windows_recognized = 0
+    # Union of the audio the surviving windows actually contributed, tracked
+    # in samples. Windows overlap, so a plain sum would over-count; walking
+    # them in start order lets a single monotonic watermark do the union.
+    covered_samples = 0
+    covered_upto = 0
     last_error: Optional[Exception] = None
 
     for start in range(0, len(samples), step_samples):
@@ -512,6 +542,15 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
                 break
             continue
 
+        # Only now has this window contributed anything. Counting it as
+        # covered right after recognize() would call a window whose tokens
+        # and timestamps disagree -- discarded a few lines up -- a success,
+        # and report full coverage for a file with a hole in it.
+        window_end = min(start + chunk_samples, len(samples))
+        if window_end > covered_upto:
+            covered_samples += window_end - max(start, covered_upto)
+            covered_upto = window_end
+
         for tok, ts in zip(tokens, timestamps):
             g_start = _ts_start(ts) + chunk_start_s
             g_end = _ts_end(ts) + chunk_start_s
@@ -539,4 +578,20 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
     text = "".join(
         tok if isinstance(tok, str) else str(tok) for tok in merged_tokens
     ).strip()
-    return _SimpleResult(text=text, tokens=merged_tokens, timestamps=merged_timestamps)
+    total_seconds = len(samples) / _SAMPLE_RATE
+    covered_seconds = covered_samples / _SAMPLE_RATE
+    if covered_seconds < total_seconds:
+        logger.warning(
+            "ONNX transcription read %.0fs of %.0fs (%d of %d windows usable) — "
+            "the transcript is missing roughly %.0fs of audio",
+            covered_seconds, total_seconds,
+            windows_recognized, windows_attempted,
+            total_seconds - covered_seconds,
+        )
+    return _SimpleResult(
+        text=text,
+        tokens=merged_tokens,
+        timestamps=merged_timestamps,
+        covered_seconds=covered_seconds,
+        total_seconds=total_seconds,
+    )

@@ -27,7 +27,30 @@ from src.transcriber import (
     _parse_channels_from_ffmpeg_stderr,
     _parse_duration_from_ffmpeg_stderr,
     _token_jaccard,
+    _worst_window_coverage,
 )
+
+
+class WorstWindowCoverageTests(unittest.TestCase):
+    def test_takes_the_worst_reporting_channel(self):
+        self.assertEqual(
+            _worst_window_coverage({"window_coverage": 1.0}, {"window_coverage": 0.4}), 0.4
+        )
+
+    def test_ignores_channels_that_report_nothing(self):
+        # A silent channel never runs and never reports. It must not drag the
+        # meeting's figure down, and it must not stand in for the other one.
+        self.assertEqual(_worst_window_coverage(None, {"window_coverage": 0.6}), 0.6)
+        self.assertEqual(_worst_window_coverage({}, {"window_coverage": 0.6}), 0.6)
+
+    def test_nothing_reported_is_unknown_not_complete(self):
+        # whisper.cpp and parakeet-mlx do no windowing of their own. Absence
+        # of a figure must never read as a clean bill of health.
+        self.assertIsNone(_worst_window_coverage(None, None))
+        self.assertIsNone(_worst_window_coverage({"window_coverage": None}, {}))
+
+    def test_zero_coverage_is_kept_not_treated_as_missing(self):
+        self.assertEqual(_worst_window_coverage({"window_coverage": 0.0}, None), 0.0)
 
 
 class FormatTimestampTests(unittest.TestCase):
