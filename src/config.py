@@ -740,7 +740,7 @@ class Config:
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "keep_recordings": False,
-            "auto_summarize_enabled": True,
+            "auto_summarize_enabled": False,
             # Default ON — when the app is idle and nothing is in flight, a
             # downloaded update installs itself and relaunches so the user
             # never has to click "Restart". The "update available/downloaded"
@@ -1119,10 +1119,12 @@ class Config:
 
     def get_auto_summarize_enabled(self) -> bool:
         """Get whether notes (summary/title/template report) are generated
-        automatically after transcription. Default on — existing users keep
-        the transcribe→summarize behaviour. When off, recordings stop at a
-        transcript-only note and the user generates notes on demand."""
-        return self._config.get("auto_summarize_enabled", True)
+        automatically after transcription. Default OFF — recordings stop at a
+        transcript-only note and the user generates notes on demand (the
+        meeting-end "Summarise" prompt, or the in-note "Generate notes" CTA).
+        Only the fallback default changed; users who previously set this keep
+        their stored value."""
+        return self._config.get("auto_summarize_enabled", False)
 
     def set_auto_summarize_enabled(self, enabled: bool) -> bool:
         """Set whether notes are generated automatically after transcription."""

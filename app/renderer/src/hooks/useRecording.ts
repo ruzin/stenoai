@@ -11,7 +11,7 @@ import { streamCache } from '@/lib/meetingDetailState';
 import {
   classifyCompletionNotification,
   meetingAlreadyHasNotes,
-  completionRouteAction,
+  completionActions,
 } from '@/lib/completionNotification';
 import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
 
@@ -200,7 +200,7 @@ export function useRecording() {
     [qc]
   );
 
-  const stopRecording = React.useCallback(async () => {
+  const stopRecording = React.useCallback(async ({ navigateToNote = true }: { navigateToNote?: boolean } = {}) => {
     // Optimistic: flip the queue cache to processing so the UI can swap the
     // pill for the processing dock instantly, before the backend SIGTERM
     // round-trip.
@@ -220,17 +220,26 @@ export function useRecording() {
       // continued note) and returns its path — land the user ON it, with the
       // batch transcribe/summarise upgrading it in the background. Whisper/
       // import return no summaryFile → the processing dock as before.
-      if (data.summaryFile) {
-        navigate(`/meetings/${encodeURIComponent(data.summaryFile)}`);
-      } else {
-        navigate('/meetings/processing');
+      //
+      // navigateToNote=false is used by the auto-stop path (meeting ended): the
+      // user isn't engaged, so we must NOT move them onto the note's route —
+      // otherwise, once macOS brings Steno forward as the meeting app closes,
+      // the completion handler sees "focused + on this note" and suppresses the
+      // "Transcript ready — Summarise?" notification. Leaving the route where it
+      // is keeps that notification firing.
+      if (navigateToNote) {
+        if (data.summaryFile) {
+          navigate(`/meetings/${encodeURIComponent(data.summaryFile)}`);
+        } else {
+          navigate('/meetings/processing');
+        }
       }
       qc.invalidateQueries({ queryKey: queueKey });
       return data;
     } catch (err) {
       // Stop failed before we learned the note path — fall back to the dock so
       // the user isn't stranded on the recording view.
-      navigate('/meetings/processing');
+      if (navigateToNote) navigate('/meetings/processing');
       qc.invalidateQueries({ queryKey: queueKey });
       throw err;
     }
@@ -360,10 +369,26 @@ export function useRecordingEvents() {
         void resumeRecording();
       }),
       bridge.on.autoSummariseRequested(() => {
-        // User chose "Wrap up" on the Meeting ended notification — stop the
-        // (auto-paused) recording so the pipeline runs; the summarise decision
-        // now happens after transcription, not here (#bug3).
-        if (status === 'recording' || status === 'paused') void stopRecording();
+        // Auto-stop of an ended auto-detected meeting — stop the (auto-paused)
+        // recording so the shared post-stop pipeline runs, exactly like a manual
+        // stop. Do NOT navigate to the note: the user isn't engaged (they're
+        // leaving the meeting), and navigating there would let the completion
+        // handler suppress the completion notification once macOS surfaces Steno
+        // as the meeting closes. The summarise decision then happens after
+        // transcription via the transcript-ready → "Summarise?" → note-ready
+        // notifications — no separate meeting-end prompt.
+        if (status === 'recording' || status === 'paused') {
+          // Surface a failed auto-stop: unlike startRecording, stopRecording
+          // re-throws without notifying, and this path deliberately doesn't
+          // navigate — so without this the meeting would silently fail to
+          // finalize with no user-visible signal. Route it through the same
+          // capture-error notification the start path uses.
+          void stopRecording({ navigateToNote: false }).catch((err) => {
+            ipc().recording.reportCaptureError(
+              err instanceof Error ? err.message : 'Recording could not stop'
+            );
+          });
+        }
       }),
       bridge.on.generateNotesRequested(({ summaryFile, name }) => {
         // User tapped "Summarise" on the transcript-ready notification. Run the
@@ -500,27 +525,31 @@ export function useRecordingProcessingEffects() {
         const currentRoute = routeFromHash(window.location.hash);
         const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
         // #bug1 lets an auto-detected recording run with the window HIDDEN
-        // (tray-only), so "the route is this note" no longer implies the user
-        // is looking at it. Gate the suppress-when-already-here logic on real
-        // visibility, not route alone — otherwise the wrap-up flow suppresses
-        // every post-transcription prompt on the default (Parakeet) engine:
-        // stopRecording navigates to the note's own route (useRecording.ts
-        // instant-stop path), so a route-only guard would always match and
-        // never notify. (visibilityState is 'hidden' for a hidden/minimised
-        // window.)
-        const windowVisible =
-          typeof document !== 'undefined' && document.visibilityState === 'visible';
-        const action = completionRouteAction({
+        // (tray-only) or backgrounded behind the meeting app, so "the route is
+        // this note" no longer implies the user is looking at it. Gate the
+        // suppress-when-already-here logic on FOCUS, not route alone and not
+        // visibilityState: after an auto-stop, stopRecording navigates to the
+        // note's own route, but Steno is usually behind the meeting window —
+        // where visibilityState is still 'visible' (the window is shown, just
+        // not frontmost), which wrongly suppressed the notification. hasFocus()
+        // is false whenever Steno isn't the active window (hidden, minimised, OR
+        // backgrounded), so we correctly notify unless the user is truly looking
+        // at this note.
+        const windowFocused =
+          typeof document !== 'undefined' && document.hasFocus();
+        const { navigate: shouldNavigate, notify: shouldNotify } = completionActions({
           currentRoute,
           finishedMeetingRoute,
           processingRoute: '/meetings/processing',
-          windowVisible,
+          windowFocused,
         });
-        if (action === 'navigate') {
-          // Watching it finish on the processing page → take them straight
-          // into the now-ready note.
+        if (shouldNavigate) {
+          // On the transient /processing screen → always advance to the note so
+          // the user is never stranded on a stuck spinner (regression fix),
+          // whether or not Steno is focused.
           navigate(finishedMeetingRoute);
-        } else if (action === 'notify') {
+        }
+        if (shouldNotify) {
           // A different route (Home, Chat, Settings, recording another note, a
           // different meeting) OR this note's route but the window is
           // hidden/minimised (tray-only after an auto-detected wrap-up) → fire a

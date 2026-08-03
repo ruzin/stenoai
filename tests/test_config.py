@@ -534,10 +534,12 @@ class ConfigKeepRecordingsTests(unittest.TestCase):
 
 
 class ConfigAutoSummarizeTests(unittest.TestCase):
-    def test_default_auto_summarize_is_true(self):
+    def test_default_auto_summarize_is_false(self):
+        # Default OFF: a fresh install stops at a transcript-only note; notes are
+        # generated on demand (meeting-end "Summarise" prompt / in-note CTA).
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
-            self.assertTrue(config.get_auto_summarize_enabled())
+            self.assertFalse(config.get_auto_summarize_enabled())
 
     def test_auto_summarize_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
