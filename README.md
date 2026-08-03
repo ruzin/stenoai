@@ -16,9 +16,9 @@
   <a href="#sponsors"><img src="https://img.shields.io/badge/Sponsors-%E2%9D%A4-EA4AAA?style=for-the-badge" alt="Sponsors"></a>
 </p>
 
-<p align="center">Steno is the privacy-first AI notepad for all your confidential conversations. No cloud, no usage limits and your private data never leaves your premises. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence, finance, legal and C-suite professionals with confidential data needs.</p>
+<p align="center">Steno is the privacy-first AI notepad for all your confidential conversations. No cloud, no usage limits and your private data never leaves your premises. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence and C-suite professionals with confidential data needs.</p>
 
-<p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Hashicorp</b>, <b>Rutgers</b> & <b>European Union</b>.</sub></p>
+<p align="center"><sub>Trusted by teams at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Hashicorp</b>, <b>Rutgers</b> & <b>European Union</b>.</sub></p>
 
 <div align="center">
   <picture>
@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
+- **2026-08-03** 🔔 One-tap meeting notes — "Take Notes" starts recording instantly, meetings auto-stop when they end, and a single "Summarise?" tap opens the note and generates it. Recordings are transcript-first now — turn on auto-summarise in Settings → AI for automatic notes.
 - **2026-07-26** 🎙️ System audio without Screen Recording — record both sides of a call with no Screen Recording permission. Now requires macOS 14.4 or later.
 - **2026-07-26** ⬇️ Automatic updates — Steno installs a downloaded update while you're idle and relaunches, never mid-recording. Turn it off in Settings to keep the manual prompt.
 - **2026-07-26** ↩️ Undo delete + re-transcribe — restore a note right after deleting it, and re-transcribe an existing recording from its detail view.
-- **2026-07-26** 🌏 Chinese transcription — pick Simplified or Traditional Chinese when the Whisper engine is selected.
 
 
 ## Features

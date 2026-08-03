@@ -65,6 +65,7 @@ const processingLog = require('./processing-log');
 const { isMeetingApp, allowsDeviceLevelFallback, isMacos14Plus } = require('./meeting-detect');
 const { sweepOrphanedLiveSnapshots } = require('./live-snapshot-sweep');
 const { userNotesFilePath } = require('./notes-file');
+const { buildNoteReadyNotificationOptions, buildTranscriptReadyBody } = require('./notification-copy');
 const { makeLineReader } = require('./backend-stream');
 // Pure deep-link (stenoai://) parsing/sanitizing lives in ./shortcut-url
 // (unit-tested). The stateful side — window creation, IPC dispatch,
@@ -371,6 +372,19 @@ class Notification extends EventEmitter {
       height: 70,
       x: x + width - 425,
       y: y + 1,
+      // Create HIDDEN and only ever show via showInactive() in ready-to-show
+      // below. Without this, `show` defaults to true, so the constructor shows
+      // the window with the *activating* show() — which brings the whole app to
+      // the foreground (firing app.on('activate') → mainWindow.show()/focus()),
+      // so a passive toast appearing wrongly refocuses Steno. focusable:false
+      // stops the toast taking key focus but does NOT stop app activation; only
+      // show:false + showInactive() keeps the app in the background.
+      show: false,
+      // Because the toast now stays in a backgrounded app, a click on its
+      // buttons would otherwise be swallowed as the app-activating click (so the
+      // user has to click twice — once to activate, once to act). acceptFirstMouse
+      // makes that first click register as a real click on the button.
+      acceptFirstMouse: true,
       frame: false,
       transparent: true,
       alwaysOnTop: true,
@@ -2084,6 +2098,7 @@ if (!gotSingleInstanceLock) {
     if (!IS_E2E && loadShowMenuBarIconEnabled()) createTray();
     setupAutoUpdater();
     setupAutoMeetingDetector();
+    setupDevNotificationTriggers();
     // Pre-meeting heads-up scheduler (calendar-time based). Skipped under E2E —
     // tests drive the show-premeeting-notification IPC seam directly; this would
     // otherwise start a background calendar poll.
@@ -3004,16 +3019,43 @@ ipcMain.handle('reprocess-meeting', async (event, summaryFile, regenerateTitle, 
           // it into the vault (#413) if sync is on. Use the canonical realPath
           // (not the renderer alias) so it indexes under the true summary stem.
           try { if (realPath) obsidianSync.syncNoteBySummaryPath(realPath); } catch (_) {}
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('processing-complete', {
-              success: true,
-              sessionName,
-              summaryFile,
-              notesGenerated: summarizationCompleted,
-              message: 'Reprocessing completed successfully'
-            });
-          }
-          resolve();
+          // Look up the saved meeting so the completion event carries meetingData
+          // with the note's CURRENT title — reprocess may have generated an LLM
+          // title, so `sessionName` here can still be the 'Note' placeholder. The
+          // renderer's note-ready notification reads meetingData.session_info.name
+          // for its body; without this it falls back to the generic string and
+          // the note title never shows. Mirrors the recording-complete path.
+          runPythonScript('simple_recorder.py', ['list-meetings'], true)
+            .then((meetingsResult) => {
+              const allMeetings = JSON.parse(meetingsResult);
+              const processedMeeting =
+                allMeetings.find((m) => m.session_info?.summary_file === summaryFile) || null;
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName,
+                  summaryFile,
+                  meetingData: processedMeeting,
+                  notesGenerated: summarizationCompleted,
+                  message: 'Reprocessing completed successfully'
+                });
+              }
+            })
+            .catch((error) => {
+              console.error('Error fetching reprocessed meeting:', error);
+              // Fall back to firing without meetingData — the note-ready title
+              // may be generic, but the note is still in the list + sidebar.
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('processing-complete', {
+                  success: true,
+                  sessionName,
+                  summaryFile,
+                  notesGenerated: summarizationCompleted,
+                  message: 'Reprocessing completed successfully'
+                });
+              }
+            })
+            .finally(() => resolve());
         } else {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('processing-complete', {
@@ -6714,7 +6756,7 @@ const MEETING_END_DEBOUNCE_MS = 3_000;
 // brief device switch — since auto-resume cancels the auto-stop if the mic
 // returns within it. Because a released mic reliably means the call ended (not
 // mute), we finalize automatically after this rather than prompting the user.
-const MEETING_END_AUTOSTOP_GRACE_MS = 20_000;
+const MEETING_END_AUTOSTOP_GRACE_MS = 10_000;
 
 let micMonitorProc = null;
 let micMonitorRespawnTimer = null;
@@ -6831,6 +6873,8 @@ async function handleMicEvent(line) {
         clearTimeout(autoStartedSession.autoStopTimer);
         autoStartedSession.autoStopTimer = null;
       }
+      // Meeting came back before the grace window elapsed — cancel the auto-stop
+      // and keep capturing.
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('auto-resume-requested');
       }
@@ -6885,14 +6929,15 @@ function handleMicStop(evt) {
       mainWindow.webContents.send('auto-pause-requested');
     }
     sendDebugLog(`[auto-detect] meeting ended (paused): ${autoStartedSession.appName}`);
-    // Don't finalize immediately — the mic can briefly drop on a device switch.
-    // Hold paused for a short grace; if the mic comes back, handleMicEvent above
-    // cancels this timer and auto-resumes. Otherwise the meeting has genuinely
-    // ended (a released mic ≠ mute — Zoom/Meet/Teams keep the stream open while
-    // muted, see MEETING_END_DEBOUNCE_MS), so auto-stop and let the pipeline run.
-    // No "Wrap up" prompt: mic-release is a reliable end signal, so we finalize
-    // automatically and the user's only end-of-meeting prompt is the
-    // post-transcription "Summarise" / "Note ready".
+    // Meeting ended: auto-stop silently after a short grace, then let the shared
+    // post-stop pipeline run. The summarise decision happens AFTER transcription
+    // via the same transcript-ready → "Summarise?" → note-ready notifications as
+    // a manual stop — no separate meeting-end prompt (it was redundant and made
+    // summarise a two-step flow). If the mic comes back within the grace,
+    // handleMicEvent above cancels this timer and auto-resumes. Otherwise the
+    // meeting has genuinely ended (a released mic ≠ mute — Zoom/Meet/Teams keep
+    // the stream open while muted, see MEETING_END_DEBOUNCE_MS), so we auto-stop
+    // — a meeting is never left stranded paused.
     if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
     autoStartedSession.autoStopTimer = setTimeout(() => {
       autoStartedSession.autoStopTimer = null;
@@ -6912,9 +6957,11 @@ function showMeetingDetectedNotification(appName, originatingEvt, calEvent) {
     body: calEvent?.title || appName,
     actions: [{ type: 'button', text: 'Take Notes' }],
   });
+  // Both the "Take Notes" button and the notification body start recording — one
+  // action, so a single tap anywhere works.
   const trigger = () => requestAutoRecord(appName, originatingEvt, calEvent);
   notif.on('action', (_evt, _index) => trigger()); // shown when banner style = Alerts
-  notif.on('click', trigger);                       // body tap (always available)
+  notif.on('click', () => trigger());              // body tap (always available)
   trackNotificationLifecycle(notif, 'meeting_detected');
   notif.show();
 }
@@ -6957,12 +7004,12 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
 // through the grace window (see handleMicStop). STOPS the paused recording,
 // which drives the shared post-stop pipeline; the *summarise* decision then
 // happens after transcription (transcript-ready / note-ready notifications),
-// not here. Sent on the `auto-summarise-requested` channel (whose renderer
-// handler already just stops the recording); the channel name predates the
-// auto-stop rework and is kept to avoid 4-file churn.
+// not here — identical to a manual stop. Sent on the `auto-summarise-requested`
+// channel (whose renderer handler just stops the recording); the channel name
+// predates the auto-stop rework and is kept to avoid 4-file churn.
 function autoStopEndedMeeting() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('auto-summarise-requested');
+    mainWindow.webContents.send('auto-summarise-requested', {});
   }
   clearAutoStartedSession();
 }
@@ -6972,6 +7019,57 @@ function clearAutoStartedSession() {
   if (autoStartedSession.pauseTimer) clearTimeout(autoStartedSession.pauseTimer);
   if (autoStartedSession.autoStopTimer) clearTimeout(autoStartedSession.autoStopTimer);
   autoStartedSession = null;
+}
+
+// Opt-in dev tool: global shortcuts to fire each completion notification on
+// demand, so their native macOS click/action behavior is verifiable in
+// `npm start` without a real meeting or a DMG rebuild. Enabled only in a dev
+// build with STENOAI_DEV_NOTIF_TRIGGERS=1 (never packaged, never E2E) so it
+// doesn't grab shortcuts from other contributors by default. These fire the SAME
+// functions the real flow uses (showMeetingDetected/TranscriptReady/NoteReady),
+// so what you see here matches a real meeting.
+//   Ctrl+Alt+1 → "Meeting detected" (Take Notes)
+//   Ctrl+Alt+2 → "Transcript ready" (Summarise) for the most recent note
+//   Ctrl+Alt+3 → "Note ready" for the most recent note
+const DEV_NOTIF_TRIGGERS_ENV = 'STENOAI_DEV_NOTIF_TRIGGERS';
+function setupDevNotificationTriggers() {
+  if (IS_E2E || app.isPackaged || !process.env[DEV_NOTIF_TRIGGERS_ENV]) return;
+  const latestNote = async () => {
+    try {
+      const meetings = JSON.parse(await runPythonScript('simple_recorder.py', ['list-meetings'], true));
+      const withNotes = meetings.filter((m) => m.session_info?.summary_file);
+      const m = withNotes[0];
+      return m
+        ? { summaryFile: m.session_info.summary_file, title: m.session_info.name || 'Untitled note' }
+        : null;
+    } catch (e) {
+      sendDebugLog(`[dev-notify] list-meetings failed: ${e.message}`);
+      return null;
+    }
+  };
+  const register = (accel, label, fn) => {
+    try {
+      if (!globalShortcut.register(accel, fn)) {
+        console.warn(`[dev-notify] failed to register ${accel} (${label})`);
+      }
+    } catch (e) {
+      console.warn(`[dev-notify] register threw for ${accel}: ${e.message}`);
+    }
+  };
+  register('Control+Alt+1', 'meeting-detected', () => {
+    showMeetingDetectedNotification('DevMeeting', { pid: 0, app_id: 'dev.meeting' }, null);
+  });
+  register('Control+Alt+2', 'transcript-ready', async () => {
+    const note = await latestNote();
+    if (!note) { sendDebugLog('[dev-notify] no note for transcript-ready'); return; }
+    void showTranscriptReadyNotification({ title: note.title, summaryFile: note.summaryFile, name: note.title });
+  });
+  register('Control+Alt+3', 'note-ready', async () => {
+    const note = await latestNote();
+    if (!note) { sendDebugLog('[dev-notify] no note for note-ready'); return; }
+    void showNoteReadyNotification({ title: note.title, summaryFile: note.summaryFile });
+  });
+  sendDebugLog('[dev-notify] triggers registered (Ctrl+Alt+1/2/3)');
 }
 
 function setupAutoMeetingDetector() {
@@ -8156,44 +8254,27 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
 // navigate-to-meeting event — and only falls back to focus-only when
 // `summaryFile` is absent (the hardFailure case: nothing was ever written,
 // so there's nothing to open).
+async function showNoteReadyNotification(payload) {
+  // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
+  if (!(await notificationsEnabled())) return { success: true, shown: false };
+  const { summaryFile } = payload || {};
+  const { title, body, iconType, outcome } = buildNoteReadyNotificationOptions(payload);
+  const notif = new Notification({ title, body, iconType });
+  notif.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
+    }
+  });
+  trackNotificationLifecycle(notif, 'note_ready', { outcome });
+  notif.show();
+  return { success: true, shown: true };
+}
+
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
-    // `shown` = passed the notifications_enabled gate (see show-silence-auto-stop).
-    if (!(await notificationsEnabled())) return { success: true, shown: false };
-    const { title, failed, hardFailure, summaryFile } = payload || {};
-    // Three honest states:
-    //  - hardFailure: processing crashed (or an import never enqueued) so no
-    //    note was written — there's nothing to "open". Keep the message
-    //    neutral: it's shared by recording crashes, import crashes and import
-    //    enqueue failures, and over-promising ("audio kept") is either hollow
-    //    (no UI surfaces the orphaned audio) or wrong (enqueue failure).
-    //  - failed: a graceful transcription failure DID write a marked note —
-    //    the recording was preserved and the note explains it on open.
-    //  - otherwise: the note is genuinely ready.
-    const notif = new Notification({
-      title: hardFailure
-        ? 'Processing failed'
-        : failed
-          ? 'Transcription failed'
-          : 'Note ready',
-      body: hardFailure
-        ? `Steno couldn't process ${title ? `"${title}"` : 'your note'}.`
-        : failed
-          ? 'Your recording was preserved — open the note for details.'
-          : (title || 'Your note has finished processing'),
-      iconType: (hardFailure || failed) ? 'alert' : 'success',
-    });
-    notif.on('click', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
-        if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
-      }
-    });
-    const outcome = hardFailure ? 'hard_failure' : failed ? 'failed' : 'success';
-    trackNotificationLifecycle(notif, 'note_ready', { outcome });
-    notif.show();
-    return { success: true, shown: true };
+    return await showNoteReadyNotification(payload);
   } catch (e) {
     sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
     return { success: false, error: e.message };
@@ -8204,43 +8285,45 @@ ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
 // transcription but NO notes were generated (auto_summarize off → transcript-
 // only note). Unlike note-ready, this prompts the user to summarise, and is the
 // correctly-timed replacement for the old premature meeting-end "Summarise?"
-// prompt (#bug2/#bug3). Tapping "Summarise" kicks off generation in the
-// BACKGROUND — no focus-steal — because when it finishes the note-ready
-// notification (click → opens the note) is the moment we bring the user in, so
-// there's no need to pull the window forward now. A body tap opens the note to
-// read the transcript.
+// prompt (#bug2/#bug3). One-click, matching "Take Notes": tapping "Summarise" —
+// the button OR the notification body — brings the window forward, opens the
+// note, and starts generation there, so the user watches it stream in-place;
+// "Note ready" still fires on completion.
+async function showTranscriptReadyNotification(payload) {
+  // `shown` = passed the notifications_enabled gate (see show-note-ready).
+  if (!(await notificationsEnabled())) return { success: true, shown: false };
+  const { title, summaryFile, name } = payload || {};
+  const notif = new Notification({
+    title: 'Transcript ready',
+    body: buildTranscriptReadyBody(title),
+    actions: [{ type: 'button', text: 'Summarise' }],
+    iconType: 'success',
+  });
+  // The whole notification means "yes, summarise": a body tap AND the "Summarise"
+  // button both open the note and start generation there, so the user watches it
+  // stream in-place ("Note ready" still fires on completion). Wiring both to the
+  // same action is what makes it one-click (like "Take Notes") — a body tap that
+  // only navigated was the source of the two-click ("first click opens, second
+  // click summarises"). Bring the window forward, navigate to the note, THEN
+  // kick off generation.
+  const startSummarise = () => {
+    if (mainWindow && !mainWindow.isDestroyed() && summaryFile) {
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
+      mainWindow.webContents.send('generate-notes-requested', { summaryFile, name });
+    }
+  };
+  notif.on('action', () => startSummarise());
+  notif.on('click', () => startSummarise());
+  trackNotificationLifecycle(notif, 'transcript_ready');
+  notif.show();
+  return { success: true, shown: true };
+}
+
 ipcMain.handle('show-transcript-ready-notification', async (_event, payload) => {
   try {
-    // `shown` = passed the notifications_enabled gate (see show-note-ready).
-    if (!(await notificationsEnabled())) return { success: true, shown: false };
-    const { title, summaryFile, name } = payload || {};
-    const notif = new Notification({
-      title: 'Transcript ready',
-      body: title ? `Summarise "${title}"?` : 'Summarise?',
-      actions: [{ type: 'button', text: 'Summarise' }],
-      iconType: 'success',
-    });
-    // Background: kick off generation without pulling the window forward. The
-    // note-ready notification that fires on completion is where we bring the
-    // user in (its click opens the note).
-    const startSummarise = () => {
-      if (mainWindow && !mainWindow.isDestroyed() && summaryFile) {
-        mainWindow.webContents.send('generate-notes-requested', { summaryFile, name });
-      }
-    };
-    notif.on('action', () => startSummarise());
-    // Body tap just opens the note to read the transcript (no generation) — the
-    // in-note GenerateNotesBar is there if they change their mind.
-    notif.on('click', () => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
-        if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
-      }
-    });
-    trackNotificationLifecycle(notif, 'transcript_ready');
-    notif.show();
-    return { success: true, shown: true };
+    return await showTranscriptReadyNotification(payload);
   } catch (e) {
     sendDebugLog(`Failed to show transcript-ready notification: ${e.message}`);
     return { success: false, error: e.message };
