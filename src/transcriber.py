@@ -1183,18 +1183,6 @@ def _tag_channel_segments(
         finally:
             print(f"PROGRESS:diarize:{legacy_label}:done", flush=True)
 
-    # Only borrowing the WRONG speaker is a problem, and with a single
-    # distinct cluster there is no wrong one -- a gap line's provenance is
-    # unambiguous however far it sits from the nearest segment. Bound the
-    # lookup only where a second cluster exists to be borrowed from (the
-    # dominance-collapsed shape), so the common single-voice channel keeps
-    # exact provenance for every line.
-    provenance_tolerance = (
-        DIAR_LABEL_FALLBACK_TOLERANCE_S
-        if diar_segments_for_provenance
-        and len({seg["speaker"] for seg in diar_segments_for_provenance}) > 1
-        else None
-    )
     legacy_tagged: list[tuple[float, str, str, Optional[str]]] = []
     for s in asr_segments:
         text = (s.get("text") or "").strip()
@@ -1212,11 +1200,20 @@ def _tag_channel_segments(
             # this path's visible output -- still required to be
             # byte-identical to the pre-Phase-8 legacy behaviour. This is
             # purely a read-only side lookup for exact-match provenance.
+            #
+            # Bounded like the labeling path, and for the same reason even
+            # when the channel holds a single cluster: raw_sid claims THIS
+            # cluster produced THIS line, and a line sitting far outside
+            # every segment the diarizer emitted has no evidence behind
+            # that claim -- it may well be someone the diarizer never
+            # segmented at all. A later rename would then put a name on a
+            # line that was never that person's. None is the honest answer;
+            # the text still reaches the transcript under legacy_label.
             idx = _find_nearest_diar_segment(
                 start,
                 float(s.get("end") or start),
                 diar_segments_for_provenance,
-                provenance_tolerance,
+                DIAR_LABEL_FALLBACK_TOLERANCE_S,
             )
             if idx is not None:
                 raw_sid = diar_segments_for_provenance[idx]["speaker"]

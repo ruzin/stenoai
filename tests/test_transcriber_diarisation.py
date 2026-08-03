@@ -972,6 +972,31 @@ class AssignAsrSegmentsToDiarSegmentsTests(unittest.TestCase):
         self.assertEqual(diar_segments[1]["text"], "three")
         self.assertEqual(unplaceable, [])
 
+    def test_unplaceable_word_stays_put_even_when_the_next_turn_is_nearer(self):
+        # Deliberate behaviour change, not a side effect: this word used to
+        # go to whichever segment was nearest, so being closer to the NEXT
+        # speaker moved it there. Out of tolerance, "nearest" is not
+        # evidence -- continuing the turn the word is already in beats
+        # opening one for a speaker who starts five seconds later.
+        diar_segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0"},
+            {"start": 20.0, "end": 23.0, "speaker": "SPEAKER_1"},
+        ]
+        tokens = [
+            {"text": " one", "start": 1.0, "end": 1.5},
+            # Nearer to SPEAKER_1 (5s) than to SPEAKER_0 (12s), but far
+            # outside both.
+            {"text": " two", "start": 15.0, "end": 15.5},
+            {"text": " three", "start": 21.0, "end": 21.5},
+        ]
+        unplaceable = _assign_asr_segments_to_diar_segments(
+            [{"text": "one two three", "start": 1.0, "end": 21.5, "tokens": tokens}],
+            diar_segments,
+        )
+        self.assertEqual(diar_segments[0]["text"], "one two")
+        self.assertEqual(diar_segments[1]["text"], "three")
+        self.assertEqual(unplaceable, [])
+
     def test_leading_unplaceable_words_lead_the_first_real_turn(self):
         # Words before the first placeable one have no turn to stay with
         # yet -- they must still keep their position in the sentence.
@@ -1173,6 +1198,32 @@ class TagChannelSegmentsTests(unittest.TestCase):
         self.assertEqual([turn[0] for turn in result], sorted(turn[0] for turn in result))
         # The two placeable lines still get their exact cluster provenance.
         self.assertEqual([turn[3] for turn in result[1:]], ["SPEAKER_0", "SPEAKER_1"])
+
+    def test_single_cluster_does_not_claim_provenance_for_a_far_away_line(self):
+        # A single distinct cluster leaves no OTHER speaker to borrow, but
+        # raw_sid still claims this cluster produced this line. A line far
+        # outside every segment the diarizer emitted has nothing behind
+        # that claim -- it may be someone the diarizer never segmented --
+        # and a later rename would put a name on words that were never
+        # that person's. The text still ships under the channel label.
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "system.wav"
+        channel_path.write_bytes(b"stub")
+
+        diar_segments = [{"start": 100.0, "end": 101.0, "speaker": "SPEAKER_0"}]
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
+            result = _tag_channel_segments(
+                [
+                    {"text": "Miles away.", "start": 0.0, "end": 1.0},
+                    {"text": "Right here.", "start": 100.2, "end": 100.8},
+                ],
+                channel_path, 120.0, "Others",
+            )
+        self.assertEqual(result, [
+            (0.0, "Others", "Miles away.", None),
+            (100.2, "Others", "Right here.", "SPEAKER_0"),
+        ])
 
     def test_prints_progress_diarize_start_and_done_around_a_successful_run(self):
         # Processing.tsx (the renderer) drives its 'diarizing' stage/sub-label
