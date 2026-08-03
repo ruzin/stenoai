@@ -58,6 +58,12 @@ export interface Meeting {
   is_diarised?: boolean;
   diarised_text?: string | null;
   folders?: string[];
+  /** Whether the ORIGINAL recording is still on disk (list-meetings only —
+   *  derived from one directory listing, extension-agnostic). keep_recordings
+   *  defaults off, so this is false for most notes, and everything that needs
+   *  the audio (re-transcribe, speaker samples, any future re-diarization) is
+   *  quietly unavailable without it. */
+  has_audio?: boolean;
   /** User notes as persisted + returned by the backend (`_parse_meeting_markdown` -> `user_notes`). */
   user_notes?: string | null;
   /** Renderer-side notes for the in-progress / draft recording (live + processing views). */
