@@ -28,6 +28,11 @@ async function openProcessing(page: Page) {
     window.location.hash = '/meetings/processing';
   });
   await expect(page.getByTestId('processing-stage-label')).toBeVisible();
+  // The queue poll that first reports this recording bumps Processing's
+  // `generation`, whose render-phase reset clears stage + retryAudioFile.
+  // Wait until that has landed (the header switches from 'Note' to the
+  // session name) so a later emit can't race the reset.
+  await expect(page.getByRole('heading', { name: 'test-session' })).toBeVisible();
 }
 
 function emit(app: ElectronApplication, channel: string, payload: unknown) {
