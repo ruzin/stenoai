@@ -1517,6 +1517,20 @@ def _join_texts(texts: list, max_chars: int) -> Optional[str]:
     return combined or None
 
 
+# Below this a clip cannot carry a voice, however faithfully its quote
+# matches it -- and matching the quote is not the point of the panel,
+# recognising a speaker is. Without this floor, preferring turns that
+# survive both display caps handed a 0.1 s "Ja" priority over a 19 s turn
+# whose quote missed the character cap by one character.
+#
+# CHOSEN, not measured, unlike SUGGESTION_MIN_AVG_TURN_SECONDS above (which
+# is ground-truthed against a real library, but answers a different
+# question: whether a cluster's average turn looks like an artifact). Two
+# seconds is about the shortest clip a listener can place a voice from; it
+# sits just above that measured 1.55 s neighbour, which is the right order
+# of magnitude but not evidence for this number.
+SAMPLE_MIN_USEFUL_SECONDS = 2.0
+
 # A review clip is never longer than this, even when the next transcript
 # line is minutes away (a long pause, or the speaker holding the floor
 # uninterrupted). Nobody listens to five minutes to recognise a voice, and
@@ -1730,7 +1744,15 @@ def extract_segment_samples(
             # 20 s of audio. Reading one sentence while hearing twenty
             # seconds reads as the wrong clip, even though both start at
             # the same instant.
-            "fits": len(text) <= max_chars and (end - begin) < SAMPLE_MAX_SECONDS,
+            # `<=` on both caps: a turn ending exactly at the audio limit
+            # survives it whole, exactly as a quote of exactly max_chars
+            # does. And a clip too short to place a voice earns no
+            # preference, however completely it is quoted.
+            "fits": (
+                len(text) <= max_chars
+                and (end - begin) <= SAMPLE_MAX_SECONDS
+                and (end - begin) >= SAMPLE_MIN_USEFUL_SECONDS
+            ),
         })
 
     # Whole turns first, longest among them; overflowing ones only fill the
