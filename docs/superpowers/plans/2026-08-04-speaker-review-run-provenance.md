@@ -200,11 +200,11 @@
 - Consumes: everything above.
 - Produces: the standing-rule coverage for a user-facing change.
 
-- [ ] **Step 1: Write the failing spec.** Drive `window.stenoai.speakers.setClusterReviewState` through the preload bridge against the real backend, then read the meeting's `_speakers.json` from disk and assert the `review_state` key on the right cluster; clear it and assert it is gone. Model-free, following the existing T2 speaker specs.
-- [ ] **Step 2: Run and watch it fail.** `npm run test:e2e -- --project=t2 --grep-invert @pipeline`.
-- [ ] **Step 3: Confirm the compatibility proof still holds.** `speaker-naming.t2` and `speaker-multi-marking.t2` must pass against the **unchanged**, legacy-shaped `writeSpeakersSidecar` fixture. If a change to that fixture was needed to make anything pass, the backward compatibility is broken and the cause is in Tasks 1-6, not in the fixture.
-- [ ] **Step 4: Full verification.** `ruff check .`, `python -m unittest discover tests`, `npm run typecheck:renderer`, `npm run lint:renderer`, `npx vitest run`, T1 and model-free T2. Compare every number against the baseline in Global Constraints and classify any difference.
-- [ ] **Step 5: Commit.**
+- [x] **Step 1: Write the failing spec.** Drive `window.stenoai.speakers.setClusterReviewState` through the preload bridge against the real backend, then read the meeting's `_speakers.json` from disk and assert the `review_state` key on the right cluster; clear it and assert it is gone. Model-free, following the existing T2 speaker specs.
+- [x] **Step 2: Run and watch it fail.** `npm run test:e2e -- --project=t2 --grep-invert @pipeline`.
+- [x] **Step 3: Confirm the compatibility proof still holds.** `speaker-naming.t2` and `speaker-multi-marking.t2` must pass against the **unchanged**, legacy-shaped `writeSpeakersSidecar` fixture. If a change to that fixture was needed to make anything pass, the backward compatibility is broken and the cause is in Tasks 1-6, not in the fixture.
+- [x] **Step 4: Full verification.** `ruff check .`, `python -m unittest discover tests`, `npm run typecheck:renderer`, `npm run lint:renderer`, `npx vitest run`, T1 and model-free T2. Compare every number against the baseline in Global Constraints and classify any difference.
+- [x] **Step 5: Commit.**
 
 ---
 
