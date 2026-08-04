@@ -4,6 +4,7 @@ import {
   Code2,
   Info,
   LayoutTemplate,
+  Plug,
   Settings2,
   Sparkles,
   Wrench,
@@ -20,6 +21,7 @@ export type SettingsTabId =
   | 'ai'
   | 'templates'
   | 'organisation'
+  | 'integrations'
   | 'advanced'
   | 'developer'
   | 'about';
@@ -50,6 +52,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     header: 'System',
     items: [
+      { id: 'integrations', label: 'Integrations', icon: Plug },
       { id: 'advanced', label: 'Advanced', icon: Wrench },
       { id: 'developer', label: 'Developer', icon: Code2 },
       { id: 'about', label: 'About', icon: Info },
