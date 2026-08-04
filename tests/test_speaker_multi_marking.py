@@ -472,6 +472,47 @@ class SampleSegmentsTests(unittest.TestCase):
             )
             self.assertEqual([s["text"] for s in samples], ["one"])
 
+    def test_two_adjacent_turns_swapped_in_the_manifest_are_refused(self):
+        # Found by the cross-family review of the check above. Half a second
+        # of slop on each side made the accepted window two seconds wide for
+        # a one-second bucket, so two turns a second apart could be swapped
+        # and still pass -- and a swap is exactly what a reordered manifest
+        # is. No slop is needed: the manifest's `start` and the line's
+        # [MM:SS] are the SAME float, one of them truncated by
+        # src.transcriber._format_timestamp, so this can be checked exactly.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Speaker 2] alice speaking\n[00:11] [Speaker 3] bob speaking\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript, [{"start": 10.0, "end": 10.9}],
+                turn_manifest=[
+                    {"start": 11.0, "channel": "system", "diarization_speaker_id": "SPEAKER_1"},
+                    {"start": 10.5, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(
+                [s["text"] for s in samples], [None],
+                "a swapped manifest must not put bob's line under alice's cluster",
+            )
+
+    def test_a_manifest_entry_that_is_not_an_object_is_refused_not_raised(self):
+        # Also from that review: the sidecar is JSON, so an entry can be
+        # anything, while every caller reaches straight for entry.get(...) --
+        # and cluster_transcript_lines documents a never-raises contract.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text("[00:10] [Speaker 2] hello\n", encoding="utf-8")
+            samples = extract_segment_samples(
+                transcript, [{"start": 10.0, "end": 14.0}],
+                turn_manifest=[None],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual([s["text"] for s in samples], [None])
+
     def test_two_turns_in_the_same_displayed_second_never_widen_the_clip(self):
         # Found by review, and it is the same failure class as the one
         # reported from real use. Transcript timestamps render as [MM:SS],

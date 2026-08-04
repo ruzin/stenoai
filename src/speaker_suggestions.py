@@ -936,11 +936,17 @@ def _manifest_describes_lines(line_starts: list, turn_manifest: list) -> bool:
     from one person shown under another's, which is precisely the failure
     the exact-provenance path exists to remove.
 
-    The evidence that the two belong together is already in both of them.
-    Each entry carries the turn's `start` in seconds; the line carries that
-    same number truncated to the second by src.transcriber._format_timestamp
-    (so `[00:20]` accepts 20.0 through 20.999...). Compared with the same
-    slop the rest of this module uses for float/boundary noise.
+    The evidence that the two belong together is already in both of them,
+    and it is exact rather than approximate: src.transcriber builds the
+    entry's `start` and the line's `[MM:SS]` from the SAME float in the same
+    loop, the latter through _format_timestamp, which is `max(0, int(...))`.
+    So the check mirrors that formatting instead of allowing slop around it.
+    It has to: a window merely a second wide accepts the NEIGHBOURING turn,
+    and two turns swapped is exactly what a reordered manifest looks like.
+
+    Refused outright: an entry that is not an object at all. The sidecar is
+    JSON and every caller then reaches for `entry.get(...)`, so this is both
+    the safe answer and the one that keeps their never-raises contract.
 
     Skipped rather than failed: an entry with no usable `start` (or a
     non-finite one, which _format_timestamp itself renders as 00:00) and a
@@ -949,16 +955,14 @@ def _manifest_describes_lines(line_starts: list, turn_manifest: list) -> bool:
     that are fine.
     """
     for line_start, entry in zip(line_starts, turn_manifest):
+        if not isinstance(entry, dict):
+            return False
         if line_start is None:
             continue
-        start = entry.get("start") if isinstance(entry, dict) else None
+        start = entry.get("start")
         if not isinstance(start, (int, float)) or not math.isfinite(start):
             continue
-        if not (
-            line_start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-            <= start
-            < line_start + 1 + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        ):
+        if max(0, int(start)) != int(line_start):
             return False
     return True
 

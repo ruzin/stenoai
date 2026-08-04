@@ -983,6 +983,17 @@ class RelabelTranscriptExactTests(unittest.TestCase):
             self.assertIn("[00:05] [Speaker 2] first", text)
             self.assertIn("[00:10] [Speaker 3] second", text)
 
+    def test_a_manifest_entry_that_is_not_an_object_is_refused_not_raised(self):
+        # This function documents the same never-raises contract as
+        # relabel_transcript_speaker, and the manifest comes out of a JSON
+        # sidecar, so an entry can be anything -- while the pairing loop
+        # reaches straight for entry.get(...).
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
+            changed = relabel_transcript_exact(path, [None], {("mic", "SPEAKER_0")}, "Julian")
+            self.assertEqual(changed, 0)
+            self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
+
     def test_length_mismatch_refuses_to_guess_and_returns_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(
