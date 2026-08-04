@@ -23,6 +23,11 @@
 const fs = require('fs');
 const { EXPORT_CANCELED } = require('./ipc-sentinels');
 
+// A real (silent, zero-sample) 16-bit mono 16kHz WAV file's bytes,
+// base64-encoded -- valid enough for the renderer's blob: URL + <audio>
+// playback path to actually decode, unlike an arbitrary placeholder string.
+const MINIMAL_WAV_BASE64 = 'UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=';
+
 // A deterministic meeting the transcript-export T1 spec navigates to. Seeded
 // only when STENOAI_E2E_SEED_MEETING=1 so the other T1 specs keep an empty Home.
 // Shape mirrors the renderer's Meeting (session_info + transcript/notes/etc.);
@@ -143,6 +148,29 @@ const seededMeeting = () =>
     ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: seedActiveReport }
     : SEED_MEETING;
 
+// A diarised meeting for the speaker-review T1 spec -- seeded only when
+// STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS=1. summary_file's stem
+// ("speaker-review-mtg") matches the meetingStem key used by the
+// speakerState.suggestions seed below, since SpeakerReviewPanel derives the
+// stem from summary_file client-side (meetingStemFromSummaryFile).
+const SPEAKER_SEED_MEETING = {
+  session_info: {
+    name: 'Speaker Review Meeting',
+    summary_file: 'speaker-review-mtg_summary.json',
+    processed_at: '2026-06-19T12:00:00Z',
+    duration_seconds: 900,
+    transcription_failed: false,
+  },
+  transcript: '',
+  is_diarised: true,
+  diarised_text: '[00:05] [Speaker 2] hello there',
+  participants: [],
+  summary: 'A test meeting for speaker review.',
+  key_points: [],
+  action_items: [],
+  discussion_areas: [],
+};
+
 /**
  * Carried-over segments for the resume/continue case, keyed off
  * STENOAI_E2E_SEED_PRIOR_SEGMENTS: `1` is one earlier recording, `twice` is a
@@ -213,6 +241,96 @@ function install({ ipcMain }) {
     const o = meetingOverlay[m.session_info.summary_file];
     return o ? { ...m, ...o } : m;
   };
+
+  // Speaker-review (SpeakerReviewPanel) mock state -- seeded only when a
+  // spec sets STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS=1 so the other T1 specs
+  // are unaffected. Shape mirrors the real suggest-speakers/list-person-
+  // profiles JSON (see src.speaker_suggestions + app/docs/ipc-contract.md's
+  // "6b. Speakers" section). Mutated by confirm/create/rename/delete so a
+  // spec can click a real action and assert the panel re-renders from the
+  // (mocked) refetch, the same way org-login/org-status do for org state.
+  const seedSpeakers = process.env.STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS === '1';
+  const speakerState = {
+    personProfiles: seedSpeakers
+      ? [
+          { person_id: 'p-julian', display_name: 'Julian', prototype_counts: { remote: 2 }, hard_negative_counts: {}, updated_at: 0 },
+          { person_id: 'p-christian', display_name: 'Christian Weyer', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
+        ]
+      : [],
+    // channels -> { diarization_speaker_id: SpeakerSuggestion }
+    suggestions: seedSpeakers
+      ? {
+          mic: {
+            SPEAKER_0: {
+              status: 'confirmed', suggested_person_id: 'p-julian', suggested_name: 'Julian',
+              merged_from: [],
+              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.05, hard_negative_conflict: false, negative_distance: null }],
+              reasons: [],
+              speech_duration_seconds: 245, segment_count: 60, first_timestamp: '02:10',
+              sample_text: 'I think we should ship this on Friday',
+              is_likely_artifact: false,
+              confirmed_by_user: null,
+            },
+            // "possible" still carries a suggested_person_id/suggested_name
+            // (the real suggest_speaker always attaches the best candidate,
+            // regardless of confidence tier) -- only "none" has them null.
+            SPEAKER_1: {
+              status: 'possible', suggested_person_id: 'p-christian', suggested_name: 'Christian Weyer',
+              merged_from: [],
+              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.28, hard_negative_conflict: false, negative_distance: null }],
+              reasons: [],
+              speech_duration_seconds: 80, segment_count: 20, first_timestamp: '05:45',
+              sample_text: 'let me check the numbers again',
+              is_likely_artifact: false,
+              confirmed_by_user: null,
+            },
+            // status "none" but with a below-threshold candidate still
+            // attached -- shown (Change/New person/Keep, no Approve),
+            // unlike a truly empty-candidates "none" row (hidden).
+            SPEAKER_2: {
+              status: 'none', suggested_person_id: null, suggested_name: null,
+              merged_from: [],
+              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.55, hard_negative_conflict: false, negative_distance: null }],
+              reasons: [],
+              speech_duration_seconds: 30, segment_count: 8, first_timestamp: '00:42',
+              sample_text: null,
+              is_likely_artifact: false,
+              confirmed_by_user: null,
+            },
+            SPEAKER_3: {
+              status: 'none', suggested_person_id: null, suggested_name: null,
+              merged_from: [], candidates: [], reasons: [],
+              speech_duration_seconds: 5, segment_count: 1, first_timestamp: '10:02',
+              sample_text: null,
+              is_likely_artifact: false,
+              confirmed_by_user: null,
+            },
+            // Real-library shape (short scattered turns) -- hidden by
+            // default behind the panel's "Show N filtered rows" toggle.
+            SPEAKER_4: {
+              status: 'possible', suggested_person_id: 'p-christian', suggested_name: 'Christian Weyer',
+              merged_from: [],
+              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.35, hard_negative_conflict: false, negative_distance: null }],
+              reasons: [],
+              speech_duration_seconds: 12, segment_count: 20, first_timestamp: '08:03',
+              sample_text: null,
+              is_likely_artifact: true,
+              confirmed_by_user: null,
+            },
+          },
+        }
+      : {},
+  };
+
+  // Mirrors Config._person_name_taken's case/whitespace-insensitive
+  // uniqueness check (src/config.py) -- keeps the mock's error path
+  // consistent with the real backend for the T1 duplicate-name tests.
+  function personNameTaken(name, excludeId) {
+    const normalized = name.trim().toLowerCase();
+    return speakerState.personProfiles.some(
+      (p) => p.person_id !== excludeId && p.display_name.trim().toLowerCase() === normalized,
+    );
+  }
 
   // Channels with behaviour a test depends on. Each is (event, ...args) like a
   // real ipcMain.handle callback. Mirror the real handlers' return shapes from
@@ -386,6 +504,9 @@ function install({ ipcMain }) {
       if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
         return { success: true, meetings: [PROCESSING_MEETING] };
       }
+      if (seedSpeakers) {
+        return { success: true, meetings: [SPEAKER_SEED_MEETING] };
+      }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [seededMeeting()] };
       }
@@ -421,6 +542,9 @@ function install({ ipcMain }) {
       }
       if (process.env.STENOAI_E2E_SEED_PROCESSING_NOTE === '1') {
         return { success: true, meeting: applyOverlay(PROCESSING_MEETING) };
+      }
+      if (seedSpeakers) {
+        return { success: true, meeting: SPEAKER_SEED_MEETING };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         // seededMeeting() carries main's optional template-report; applyOverlay
@@ -615,6 +739,143 @@ function install({ ipcMain }) {
         return new Promise(() => {});
       }
       return { success: true, message: 'Ollama and AI model ready' };
+    },
+
+    'list-person-profiles': async () => ({ success: true, person_profiles: speakerState.personProfiles }),
+
+    'suggest-speakers': async (_event, meetingStem) => ({
+      success: true,
+      meeting_id: meetingStem,
+      recording_available: seedSpeakers,
+      channels: speakerState.suggestions,
+    }),
+
+    // Deterministic fake clip -- no real ffmpeg/audio decode in T1. Always
+    // "succeeds" when speaker suggestions are seeded, mirroring
+    // recording_available: true above.
+    'get-speaker-sample-audio': async (_event, _meetingStem, _channel, _diarizationSpeakerId) => {
+      if (!seedSpeakers) return { success: false, error: 'no source audio available' };
+      // A real (if silent/empty) minimal 16-bit mono WAV -- so the renderer's
+      // blob: URL construction + <audio> playback path is exercised with
+      // valid audio data, not just a placeholder string.
+      return { success: true, audio_base64: MINIMAL_WAV_BASE64 };
+    },
+
+    // Accepts either --person-id (Change) or --new-person (New person) mode,
+    // mirroring the real CLI's exactly-one-of contract. Mutates
+    // speakerState so a subsequent suggest-speakers refetch (the panel's
+    // real post-confirm behaviour) reflects the confirmation.
+    'confirm-speaker': async (_event, params) => {
+      // Test-only seam: STENOAI_E2E_CONFIRM_SPEAKER_DELAY_MS holds this
+      // mutation pending for a bit so a spec can assert on the panel's
+      // in-flight disabled state (e.g. that a SECOND row's buttons are also
+      // disabled while a FIRST row's confirm is still resolving -- a real
+      // gap found in production: overlapping confirm-speaker calls both
+      // rewrite the same saved transcript, so any two must never run
+      // concurrently). No effect when unset.
+      const delayMs = Number(process.env.STENOAI_E2E_CONFIRM_SPEAKER_DELAY_MS || 0);
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const { meetingStem, channel, diarizationSpeakerId, personId, newPersonName } = params || {};
+      if (!meetingStem || !channel || !diarizationSpeakerId) {
+        return { success: false, error: 'missing required fields' };
+      }
+      if (Boolean(personId) === Boolean(newPersonName)) {
+        return { success: false, error: 'Specify exactly one of personId or newPersonName' };
+      }
+      let person = personId
+        ? speakerState.personProfiles.find((p) => p.person_id === personId)
+        : null;
+      if (newPersonName) {
+        if (personNameTaken(newPersonName)) {
+          return { success: false, error: `A person named '${newPersonName.trim()}' already exists` };
+        }
+        person = {
+          person_id: `p-${newPersonName.toLowerCase().replace(/\s+/g, '-')}`,
+          display_name: newPersonName,
+          prototype_counts: {}, hard_negative_counts: {}, updated_at: Date.now(),
+        };
+        speakerState.personProfiles.push(person);
+      }
+      if (!person) return { success: false, error: `No person profile with id ${personId}` };
+
+      // Preserve the cluster's identification anchors (duration/segment
+      // count/first_timestamp never change just because a name was
+      // confirmed) -- only the suggestion fields are overwritten.
+      const channelSuggestions = speakerState.suggestions[channel] || (speakerState.suggestions[channel] = {});
+      const previous = channelSuggestions[diarizationSpeakerId] || {
+        speech_duration_seconds: 0, segment_count: 0, first_timestamp: null,
+        sample_text: null, is_likely_artifact: false, confirmed_by_user: null,
+      };
+      channelSuggestions[diarizationSpeakerId] = {
+        ...previous,
+        status: 'confirmed', suggested_person_id: person.person_id, suggested_name: person.display_name,
+        merged_from: [],
+        candidates: [{ person_id: person.person_id, display_name: person.display_name, distance: 0, hard_negative_conflict: false, negative_distance: null }],
+        reasons: [],
+        // Real persisted evidence now exists for this cluster -- mirrors the
+        // real backend's confirmed_by_user derivation (a matching
+        // SpeakerPrototype), so it survives a simulated navigate-away-and-back
+        // (a fresh suggest-speakers refetch) even after this panel unmounts.
+        confirmed_by_user: person.display_name,
+      };
+
+      return {
+        success: true,
+        person_id: person.person_id,
+        display_name: person.display_name,
+        prototype_id: `proto-${diarizationSpeakerId}`,
+        resolved_diarization_speaker_id: diarizationSpeakerId,
+        merged_from: [],
+        hard_negatives_added_against: [],
+        reassigned_from: [],
+        relabeled_lines: 0,
+      };
+    },
+
+    'create-person-profile': async (_event, displayName) => {
+      if (personNameTaken(displayName)) {
+        return { success: false, error: `A person named '${displayName.trim()}' already exists` };
+      }
+      const person = {
+        person_id: `p-${displayName.toLowerCase().replace(/\s+/g, '-')}`,
+        display_name: displayName,
+        prototype_counts: {}, hard_negative_counts: {}, updated_at: Date.now(),
+      };
+      speakerState.personProfiles.push(person);
+      return { success: true, person_id: person.person_id, display_name: person.display_name };
+    },
+
+    'rename-person-profile': async (_event, id, displayName) => {
+      const person = speakerState.personProfiles.find((p) => p.person_id === id);
+      if (!person) return { success: false };
+      if (personNameTaken(displayName, id)) {
+        return { success: false, error: `A person named '${displayName.trim()}' already exists` };
+      }
+      person.display_name = displayName;
+      return { success: true };
+    },
+
+    // Mirrors the real backend: suggest-speakers recomputes candidates/
+    // confirmed_by_user from person_profiles on every call, so a deleted
+    // person's references disappear from any cluster that pointed at them.
+    'delete-person-profile': async (_event, id) => {
+      const before = speakerState.personProfiles.length;
+      speakerState.personProfiles = speakerState.personProfiles.filter((p) => p.person_id !== id);
+      const deleted = speakerState.personProfiles.length < before;
+      if (deleted) {
+        for (const channelSuggestions of Object.values(speakerState.suggestions)) {
+          for (const suggestion of Object.values(channelSuggestions)) {
+            if (suggestion.suggested_person_id === id) {
+              suggestion.status = 'none';
+              suggestion.suggested_person_id = null;
+              suggestion.suggested_name = null;
+              suggestion.confirmed_by_user = null;
+              suggestion.candidates = suggestion.candidates.filter((c) => c.person_id !== id);
+            }
+          }
+        }
+      }
+      return { success: deleted };
     },
   };
 

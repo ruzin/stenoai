@@ -335,6 +335,8 @@ class Config:
         self._migrate_privacy_notice_seen()
         self._normalize_templates()
         self._seed_sample_template()
+        self._normalize_voiceprints()
+        self._normalize_person_profiles()
 
     def _migrate_language_zh(self) -> None:
         """Migrate the legacy single ``"zh"`` language to Simplified (``zh-Hans``).
@@ -747,6 +749,15 @@ class Config:
             # notification is unchanged; this only removes the manual click,
             # and main.js keeps autoInstallOnAppQuit as the safe fallback.
             "auto_install_when_idle": True,
+            # Default ON — cross-recording speaker identification (matching
+            # a diarized voice against stored person profiles/voiceprints).
+            # Independent of diarization itself: turning this off stops per-
+            # meeting speaker embeddings from ever being extracted/stored/
+            # suggested, but "Speaker N" splitting within a meeting is
+            # unaffected (it only depends on diarizer segments, not
+            # embeddings). See src.transcriber's allow_self_match/
+            # clusters_out gating.
+            "identity_matching_enabled": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
@@ -932,6 +943,423 @@ class Config:
         del overrides[template_id]
         return self._save()
 
+    def _normalize_voiceprints(self) -> None:
+        """Coerce persisted voiceprint state into a list of dicts on every
+        load, mirroring `_normalize_templates` — a malformed-but-parseable
+        config must not crash later voiceprint reads/writes."""
+        if self._load_failed:
+            return
+        raw = self._config.get("voiceprints", [])
+        self._config["voiceprints"] = (
+            [v for v in raw if isinstance(v, dict) and "id" in v and "name" in v]
+            if isinstance(raw, list)
+            else []
+        )
+
+    def get_voiceprints(self) -> list:
+        """All stored voiceprints, each `{id, name, embeddings,
+        centroid, centroid_sample_count, updated_at, is_self}`.
+
+        Two matching anchors per voiceprint (ported from
+        StoredSpeaker/SpeakerMatcher, github.com/pasrom/meeting-transcriber):
+        `centroid` is the long-term running mean, the primary anchor;
+        `embeddings` is a small recent-samples FIFO that can rescue a
+        borderline centroid match. See src.transcriber._voiceprint_distance.
+        """
+        return list(self._config.get("voiceprints", []))
+
+    def get_voiceprint(self, name: str) -> Optional[dict]:
+        return next(
+            (v for v in self.get_voiceprints() if v.get("name") == name), None
+        )
+
+    # Minimum speaking time (seconds) for an embedding to be folded into a
+    # voiceprint's long-term centroid — short/noisy snippets are still kept
+    # in the recent-samples FIFO as a fallback anchor but don't pollute the
+    # running average. `duration=None` (manual CLI enrollment — a
+    # deliberate action, not an automatic per-meeting confirmation) always
+    # qualifies. Ported from SpeakerMatcher.minSpeakingTimeForCentroid.
+    VOICEPRINT_MIN_DURATION_FOR_CENTROID = 3.0
+    # Recent-samples FIFO cap. Ported from SpeakerMatcher.maxRecentSamples.
+    VOICEPRINT_MAX_RECENT_SAMPLES = 3
+
+    def save_voiceprint(
+        self, name: str, embedding: list, is_self: bool = False,
+        duration: Optional[float] = None,
+    ) -> dict:
+        """Upsert a voiceprint by name.
+
+        `duration` is the speaking time (seconds) `embedding` was extracted
+        from. When it clears `VOICEPRINT_MIN_DURATION_FOR_CENTROID` (or is
+        omitted entirely), the embedding is folded into the long-term
+        running-mean `centroid` via `(centroid * count + embedding) /
+        (count + 1)`. Every embedding, regardless of duration, is appended
+        to the recent-samples FIFO (capped at `VOICEPRINT_MAX_RECENT_SAMPLES`,
+        oldest dropped first). At most one `is_self` entry exists — saving a
+        new one demotes any previous self voiceprint to a regular (named)
+        one. Ported from StoredSpeaker/SpeakerMatcher.applyConfirmation.
+        """
+        voiceprints = self._config.setdefault("voiceprints", [])
+        if is_self:
+            for v in voiceprints:
+                v["is_self"] = False
+
+        qualifies = duration is None or duration >= self.VOICEPRINT_MIN_DURATION_FOR_CENTROID
+
+        existing = next((v for v in voiceprints if v.get("name") == name), None)
+        if existing is not None:
+            samples = list(existing.get("embeddings") or [])
+            samples.append(list(embedding))
+            if len(samples) > self.VOICEPRINT_MAX_RECENT_SAMPLES:
+                samples = samples[-self.VOICEPRINT_MAX_RECENT_SAMPLES:]
+
+            centroid = existing.get("centroid")
+            centroid_count = existing.get("centroid_sample_count", 0) or 0
+            if qualifies:
+                if centroid and len(centroid) == len(embedding):
+                    new_count = centroid_count + 1
+                    centroid = [
+                        (o * centroid_count + n) / new_count
+                        for o, n in zip(centroid, embedding)
+                    ]
+                    centroid_count = new_count
+                else:
+                    centroid = list(embedding)
+                    centroid_count = 1
+
+            existing["embeddings"] = samples
+            existing["centroid"] = centroid
+            existing["centroid_sample_count"] = centroid_count
+            existing["updated_at"] = time.time()
+            existing["is_self"] = is_self
+            saved = dict(existing)
+        else:
+            saved = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "embeddings": [list(embedding)],
+                "centroid": list(embedding) if qualifies else None,
+                "centroid_sample_count": 1 if qualifies else 0,
+                "updated_at": time.time(),
+                "is_self": is_self,
+            }
+            voiceprints.append(saved)
+        self._save()
+        return dict(saved)
+
+    def delete_voiceprint(self, name: str) -> bool:
+        voiceprints = self._config.get("voiceprints", [])
+        remaining = [v for v in voiceprints if v.get("name") != name]
+        if len(remaining) == len(voiceprints):
+            return False  # no such voiceprint
+        self._config["voiceprints"] = remaining
+        return self._save()
+
+    # PersonProfile/SpeakerPrototype: the named (non-self) speaker-identity
+    # store, replacing the named-matching half of the old flat `voiceprints`
+    # schema (self-match "You" keeps using `voiceprints`/`save_voiceprint`
+    # unchanged — it never had the same-room confusable-pair problem this
+    # design targets). Unlike a single running-averaged embedding per person,
+    # each confirmation is kept as its own `SpeakerPrototype` — separated by
+    # `recording_type` since in-person/shared-mic audio and remote/per-device
+    # audio are genuinely different-shaped comparisons (see the plan doc for
+    # the AMI Meeting Corpus findings that motivated this) — plus a parallel
+    # `hard_negatives` list: when a meeting confirms multiple different real
+    # people, each one's profile records the others as confirmed-NOT-this-
+    # person evidence, not just an in-pass "already assigned" guard.
+    VALID_RECORDING_TYPES = {"in_person", "remote", "imported", "unknown"}
+    VALID_PROTOTYPE_SOURCES = {"user_confirmed", "user_corrected", "manual_enrollment"}
+    # Channels a prototype's cluster can come from -- mirrors the sidecar's
+    # per-channel structure (src.speaker_suggestions.write_speakers_sidecar).
+    VALID_PROTOTYPE_CHANNELS = {"mic", "system"}
+
+    def _normalize_person_profiles(self) -> None:
+        """Coerce persisted person-profile state into a list of dicts on
+        every load, mirroring `_normalize_voiceprints` — a malformed-but-
+        parseable config must not crash later reads/writes."""
+        if self._load_failed:
+            return
+        raw = self._config.get("person_profiles", [])
+        self._config["person_profiles"] = (
+            [
+                p for p in raw
+                if isinstance(p, dict) and "person_id" in p and "display_name" in p
+            ]
+            if isinstance(raw, list)
+            else []
+        )
+
+    def get_person_profiles(self) -> list:
+        """All stored person profiles, each `{person_id, display_name,
+        created_at, updated_at, prototypes, hard_negatives}`. See
+        `add_speaker_prototype` for the `SpeakerPrototype` shape."""
+        return list(self._config.get("person_profiles", []))
+
+    def get_person_profile(self, person_id: str) -> Optional[dict]:
+        return next(
+            (p for p in self.get_person_profiles() if p.get("person_id") == person_id),
+            None,
+        )
+
+    def _person_name_taken(self, display_name: str, *, exclude_person_id: Optional[str] = None) -> bool:
+        """Case/whitespace-insensitive collision check -- without this,
+        the "New person" flow (both the plain CLI and confirm-speaker
+        --new-person) can silently create a second profile for someone who
+        already has one, splitting their evidence across two person_ids."""
+        normalized = display_name.strip().casefold()
+        return any(
+            p.get("person_id") != exclude_person_id
+            and (p.get("display_name") or "").strip().casefold() == normalized
+            for p in self.get_person_profiles()
+        )
+
+    def create_person_profile(self, display_name: str) -> dict:
+        """Create a new, empty person profile (no prototypes yet).
+
+        Raises ValueError if a person with this name (case/whitespace
+        insensitive) already exists -- names must stay unique so a
+        confirmed cluster always resolves to one real person's evidence.
+        """
+        if self._person_name_taken(display_name):
+            raise ValueError(f"A person named {display_name.strip()!r} already exists")
+        profiles = self._config.setdefault("person_profiles", [])
+        now = time.time()
+        profile = {
+            "person_id": str(uuid.uuid4()),
+            "display_name": display_name,
+            "created_at": now,
+            "updated_at": now,
+            "prototypes": [],
+            "hard_negatives": [],
+        }
+        profiles.append(profile)
+        self._save()
+        return dict(profile)
+
+    def rename_person_profile(self, person_id: str, display_name: str) -> bool:
+        """Raises ValueError if another person already has this name (same
+        uniqueness invariant as create_person_profile)."""
+        profile = self.get_person_profile(person_id)
+        if profile is None:
+            return False
+        if self._person_name_taken(display_name, exclude_person_id=person_id):
+            raise ValueError(f"A person named {display_name.strip()!r} already exists")
+        profile["display_name"] = display_name
+        profile["updated_at"] = time.time()
+        return self._save()
+
+    def delete_person_profile(self, person_id: str) -> bool:
+        """Delete a person profile and, critically, the derived evidence of
+        them stored in EVERYONE ELSE's profiles.
+
+        `confirm-speaker` creates mutual hard negatives: confirming person A
+        next to person B writes a hard-negative entry into B's profile whose
+        embedding is literally A's own voice sample, tagged with the
+        meeting/channel/diarization_speaker_id A was confirmed under (see
+        that command's "Mutual hard negatives" section). Without this
+        cleanup, deleting A leaves that sample sitting in B's profile
+        indefinitely -- a deleted person's voice would outlive their own
+        profile.
+
+        Walks A's own (about-to-be-deleted) `prototypes` -- each already
+        carries the exact meeting/channel/sid tuple A was confirmed under --
+        and reuses `remove_speaker_evidence` (the same removal primitive the
+        correction path already relies on) to strip any hard-negative entry
+        in another profile derived from that specific confirmation.
+        """
+        profiles = self._config.get("person_profiles", [])
+        target = next((p for p in profiles if p.get("person_id") == person_id), None)
+        if target is None:
+            return False  # no such profile
+
+        for proto in target.get("prototypes") or []:
+            meeting_id = proto.get("meeting_id")
+            sid = proto.get("diarization_speaker_id")
+            if not meeting_id or not sid:
+                continue
+            for other in profiles:
+                if other.get("person_id") == person_id:
+                    continue
+                self.remove_speaker_evidence(
+                    other["person_id"], meeting_id=meeting_id,
+                    channel=proto.get("channel"),
+                    channel_recording_type=proto.get("recording_type"),
+                    sids={sid}, negative=True,
+                )
+
+        remaining = [p for p in profiles if p.get("person_id") != person_id]
+        self._config["person_profiles"] = remaining
+        return self._save()
+
+    @staticmethod
+    def _prototype_quality_score(speech_duration_seconds: float, segment_count: int) -> float:
+        """Simple, documented heuristic: rewards clearing the same stability
+        bar the suggestion service gates suggestions on (>=20s speaking time,
+        >=3 agreeing segments) rather than an arbitrary scale."""
+        duration_component = min(1.0, speech_duration_seconds / 20.0)
+        segment_component = min(1.0, segment_count / 3.0)
+        return round(duration_component * segment_component, 4)
+
+    def add_speaker_prototype(
+        self,
+        person_id: str,
+        embedding: list,
+        *,
+        recording_type: str,
+        meeting_id: str,
+        diarization_speaker_id: str,
+        speech_duration_seconds: float,
+        segment_count: int,
+        created_from: str,
+        channel: Optional[str] = None,
+        negative: bool = False,
+    ) -> Optional[dict]:
+        """Append a `SpeakerPrototype` to a person's positive `prototypes`
+        (default) or `hard_negatives` (`negative=True`) list. Returns None
+        if `person_id` doesn't exist. Unlike `save_voiceprint`, this never
+        averages into a running centroid — each confirmation is kept as its
+        own context-tagged prototype so a same-room-contaminated in-person
+        sample never blends into a clean remote-audio sample for the same
+        person (see module comment above `VALID_RECORDING_TYPES`).
+
+        `channel` is which sidecar channel ("mic"/"system") the cluster came
+        from. It must be stored, not just known at confirm time: mic and
+        system channels number their diarizer clusters independently (a mic
+        "SPEAKER_0" and a system "SPEAKER_0" are unrelated), so a
+        `(meeting_id, diarization_speaker_id)` pair alone is ambiguous and
+        cross-channel id collisions once produced hard negatives derived
+        from the wrong channel's clusters. `None` is allowed only for
+        legacy/enrollment paths with no channel to record — matchers fall
+        back to `recording_type` as a channel proxy for those (see
+        src.speaker_suggestions.prototype_channel_matches)."""
+        profile = self.get_person_profile(person_id)
+        if profile is None:
+            return None
+        if recording_type not in self.VALID_RECORDING_TYPES:
+            raise ValueError(f"Invalid recording_type: {recording_type}")
+        if created_from not in self.VALID_PROTOTYPE_SOURCES:
+            raise ValueError(f"Invalid created_from: {created_from}")
+        if channel is not None and channel not in self.VALID_PROTOTYPE_CHANNELS:
+            raise ValueError(f"Invalid channel: {channel}")
+
+        prototype = {
+            "prototype_id": str(uuid.uuid4()),
+            "person_id": person_id,
+            "embedding_mean": list(embedding),
+            "sample_count": 1,
+            "quality_score": self._prototype_quality_score(speech_duration_seconds, segment_count),
+            "recording_type": recording_type,
+            "meeting_id": meeting_id,
+            "diarization_speaker_id": diarization_speaker_id,
+            "speech_duration_seconds": speech_duration_seconds,
+            "segment_count": segment_count,
+            "created_from": created_from,
+            "created_at": time.time(),
+        }
+        if channel is not None:
+            prototype["channel"] = channel
+        key = "hard_negatives" if negative else "prototypes"
+        profile.setdefault(key, []).append(prototype)
+        profile["updated_at"] = time.time()
+        self._save()
+        return dict(prototype)
+
+    def remove_speaker_evidence(
+        self,
+        person_id: str,
+        *,
+        meeting_id: str,
+        channel: Optional[str],
+        channel_recording_type: Optional[str],
+        sids: Optional[set] = None,
+        negative: bool = False,
+    ) -> int:
+        """Remove a person's positive prototypes (or hard negatives, with
+        `negative=True`) belonging to one meeting+channel, optionally
+        restricted to specific diarization_speaker_ids. Returns the number
+        of entries removed (0 when the person doesn't exist or nothing
+        matched; saves only when something was removed).
+
+        This is the mutation half of the correction path: confirming a
+        cluster that someone ELSE was previously confirmed as (the review
+        UI's "Change" flow re-confirms with a different person) must remove
+        the superseded evidence, or the wrong person keeps a prototype of a
+        voice that isn't theirs and min-distance matching stays poisoned
+        forever. Channel matching uses the same channel-or-recording_type
+        fallback rule as everything else
+        (src.speaker_suggestions.prototype_channel_matches), so legacy
+        entries without a channel field are covered too.
+        """
+        from src.speaker_suggestions import prototype_channel_matches
+
+        profile = self.get_person_profile(person_id)
+        if profile is None:
+            return 0
+        key = "hard_negatives" if negative else "prototypes"
+        entries = profile.get(key) or []
+        kept = [
+            entry for entry in entries
+            if not (
+                entry.get("meeting_id") == meeting_id
+                and prototype_channel_matches(entry, channel, channel_recording_type)
+                and (sids is None or entry.get("diarization_speaker_id") in sids)
+            )
+        ]
+        removed = len(entries) - len(kept)
+        if removed:
+            profile[key] = kept
+            profile["updated_at"] = time.time()
+            self._save()
+        return removed
+
+    def remove_speaker_evidence_by_ids(
+        self, person_id: str, entry_ids: set, *, negative: bool = False,
+    ) -> int:
+        """Remove specific prototypes/hard-negatives by their
+        `prototype_id`. The precision counterpart to
+        `remove_speaker_evidence`'s meeting+channel matching -- used by the
+        repair CLI, which decides exactly which entries to drop during its
+        dry-run analysis and must then remove exactly those. Returns the
+        count removed; saves only when something was."""
+        profile = self.get_person_profile(person_id)
+        if profile is None or not entry_ids:
+            return 0
+        key = "hard_negatives" if negative else "prototypes"
+        entries = profile.get(key) or []
+        kept = [e for e in entries if e.get("prototype_id") not in entry_ids]
+        removed = len(entries) - len(kept)
+        if removed:
+            profile[key] = kept
+            profile["updated_at"] = time.time()
+            self._save()
+        return removed
+
+    def set_speaker_evidence_channels(
+        self, person_id: str, channels_by_entry_id: dict, *, negative: bool = False,
+    ) -> int:
+        """Backfill the `channel` field onto existing prototypes/hard-
+        negatives (`{prototype_id: "mic" | "system"}`) -- for entries
+        written before `add_speaker_prototype` recorded channels, whose
+        channel the repair CLI recovered from their meeting's sidecar.
+        Returns how many entries were updated; saves only when any were."""
+        profile = self.get_person_profile(person_id)
+        if profile is None or not channels_by_entry_id:
+            return 0
+        for channel in channels_by_entry_id.values():
+            if channel not in self.VALID_PROTOTYPE_CHANNELS:
+                raise ValueError(f"Invalid channel: {channel}")
+        key = "hard_negatives" if negative else "prototypes"
+        updated = 0
+        for entry in profile.get(key) or []:
+            channel = channels_by_entry_id.get(entry.get("prototype_id"))
+            if channel is not None and entry.get("channel") != channel:
+                entry["channel"] = channel
+                updated += 1
+        if updated:
+            profile["updated_at"] = time.time()
+            self._save()
+        return updated
+
     def get_model_info(self, model_name: str) -> Optional[Dict[str, str]]:
         """
         Get metadata about a specific model.
@@ -1115,6 +1543,18 @@ class Config:
     def set_auto_install_when_idle(self, enabled: bool) -> bool:
         """Set whether idle auto-install is enabled."""
         self._config["auto_install_when_idle"] = enabled
+        return self._save()
+
+    def get_identity_matching_enabled(self) -> bool:
+        """Get whether cross-recording speaker identification is enabled.
+        Default on. Independent of diarization itself -- see the module
+        comment above the default-config `identity_matching_enabled` entry
+        for what turning this off actually stops."""
+        return self._config.get("identity_matching_enabled", True)
+
+    def set_identity_matching_enabled(self, enabled: bool) -> bool:
+        """Set whether cross-recording speaker identification is enabled."""
+        self._config["identity_matching_enabled"] = enabled
         return self._save()
 
     def get_auto_summarize_enabled(self) -> bool:

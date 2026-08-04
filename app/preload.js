@@ -199,6 +199,17 @@ const stenoai = {
     reset: (id) => invoke('reset-template', id),
   },
 
+  speakers: {
+    listProfiles: () => invoke('list-person-profiles'),
+    suggestForMeeting: (meetingStem) => invoke('suggest-speakers', meetingStem),
+    confirm: (params) => invoke('confirm-speaker', params),
+    createProfile: (displayName) => invoke('create-person-profile', displayName),
+    renameProfile: (id, displayName) => invoke('rename-person-profile', id, displayName),
+    deleteProfile: (id) => invoke('delete-person-profile', id),
+    getSampleAudio: (meetingStem, channel, diarizationSpeakerId) =>
+      invoke('get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId),
+  },
+
   models: {
     checkOllama: () => invoke('check-ollama-installed'),
     list: () => invoke('list-models'),
@@ -257,6 +268,8 @@ const stenoai = {
     setAutoSummarize: (v) => invoke('set-auto-summarize', v),
     getAutoInstallWhenIdle: () => invoke('get-auto-install-when-idle'),
     setAutoInstallWhenIdle: (v) => invoke('set-auto-install-when-idle', v),
+    getIdentityMatchingEnabled: () => invoke('get-identity-matching-enabled'),
+    setIdentityMatchingEnabled: (v) => invoke('set-identity-matching-enabled', v),
     getSilenceAutoStop: () => invoke('get-silence-auto-stop'),
     setSilenceAutoStopEnabled: (v) => invoke('set-silence-auto-stop-enabled', v),
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),

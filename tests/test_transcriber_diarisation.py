@@ -15,6 +15,8 @@ import math
 import struct
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 import wave
 from pathlib import Path
@@ -26,7 +28,10 @@ from src.transcriber import (
     DIARISED_SPLIT_TIMEOUT_S,
     MIN_RMS_THRESHOLD,
     STENO_DIARIZE_MERGE_GAP_S,
+    VOICEPRINT_CONFIDENCE_MARGIN,
+    VOICEPRINT_DISTANCE_THRESHOLD,
     WhisperTranscriber,
+    _apply_voiceprint_matches,
     _assign_asr_segments_to_diar_segments,
     _cluster_channel_labels,
     _diarised_split_timeout,
@@ -38,6 +43,7 @@ from src.transcriber import (
     _run_steno_diarize,
     _tag_channel_segments,
     _token_jaccard,
+    _voiceprint_distance,
 )
 
 
@@ -166,7 +172,7 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
             {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
         ]
         system_diar = [{"start": 9.0, "end": 9.5, "speaker": "SPEAKER_0"}]
-        with patch("src.transcriber._run_steno_diarize", side_effect=[mic_diar, system_diar]):
+        with patch("src.transcriber._run_steno_diarize", side_effect=[(mic_diar, {}), (system_diar, {})]):
             self.transcriber.transcribe_audio = Mock(side_effect=[
                 {"text": "Hi there. Not bad. Great.", "segments": [
                     {"text": "Hi there.", "start": 0.5, "end": 1.5},
@@ -182,6 +188,163 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         self.assertIn("[You] Great.", result["diarised_text"])
         self.assertIn("[Others] Ok.", result["diarised_text"])
 
+    def test_speaker_clusters_populated_from_the_same_diarization_pass(self):
+        # The live pipeline must be able to write a {stem}_speakers.json
+        # sidecar from data this SAME call already computed -- no second,
+        # separate diarization run (previously only the manual
+        # backfill-speaker-embeddings CLI command ever produced this data;
+        # a normal recording never did, so it never got a Speakers panel).
+        mic_diar = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
+        ]
+        system_diar = [{"start": 9.0, "end": 9.5, "speaker": "SPEAKER_0"}]
+        mic_embeddings = {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]}
+        system_embeddings = {"SPEAKER_0": [0.5, 0.6]}
+        with patch(
+            "src.transcriber._run_steno_diarize",
+            side_effect=[(mic_diar, mic_embeddings), (system_diar, system_embeddings)],
+        ):
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Hi there. Not bad. Great.", "segments": [
+                    {"text": "Hi there.", "start": 0.5, "end": 1.5},
+                    {"text": "Not bad.", "start": 3.0, "end": 3.8},
+                    {"text": "Great.", "start": 6.0, "end": 6.8},
+                ]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 9.2, "end": 9.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        clusters = result["speaker_clusters"]
+        self.assertEqual(clusters["mic"]["recording_type"], "in_person")
+        self.assertEqual(set(clusters["mic"]["clusters"].keys()), {"SPEAKER_0", "SPEAKER_1"})
+        self.assertEqual(clusters["mic"]["clusters"]["SPEAKER_1"]["embedding"], [0.3, 0.4])
+        # The system channel's diarization result here is a single trivial
+        # cluster (see the sibling test above) -- _cluster_channel_labels
+        # correctly treats that as "no real second speaker" and the
+        # TRANSCRIPT falls back to legacy labeling (no [Speaker N] split).
+        # But a single-dominant-speaker channel is still real, usable
+        # voiceprint data (see TagChannelSegmentsTests'
+        # test_single_dominant_speaker_still_populates_clusters_out) -- a
+        # normal call's "Others" side is very often exactly this shape, so
+        # it must still show up here even without a transcript-level split.
+        self.assertEqual(clusters["system"]["recording_type"], "remote")
+        self.assertEqual(clusters["system"]["clusters"]["SPEAKER_0"]["embedding"], [0.5, 0.6])
+
+    def test_speaker_clusters_empty_and_no_self_match_when_identity_matching_disabled(self):
+        # identity_matching_enabled=False must stop per-meeting speaker
+        # embeddings from ever reaching speaker_clusters (so nothing is
+        # persisted to a {stem}_speakers.json sidecar) and stop
+        # self-voiceprint matching -- but "Speaker N" splitting itself only
+        # depends on segments, not embeddings, so it must be unaffected.
+        # Sets up a mic embedding closer to "self" than the threshold, so if
+        # allow_self_match were (wrongly) still True, the dominant mic
+        # cluster would get re-anchored -- asserting the ORIGINAL dominant-
+        # by-duration label survives is what actually proves self-matching
+        # never ran, not just that it no-op'd by coincidence.
+        mic_diar = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
+        ]
+        system_diar = [{"start": 9.0, "end": 9.5, "speaker": "SPEAKER_0"}]
+        mic_embeddings = {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]}
+        system_embeddings = {"SPEAKER_0": [0.5, 0.6]}
+        self_voiceprint = {"is_self": True, "centroid": [0.3, 0.4]}  # matches SPEAKER_1
+        with patch("src.transcriber._identity_matching_enabled", return_value=False), \
+             patch(
+                "src.transcriber._run_steno_diarize",
+                side_effect=[(mic_diar, mic_embeddings), (system_diar, system_embeddings)],
+             ), \
+             patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = [self_voiceprint]
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Hi there. Not bad. Great.", "segments": [
+                    {"text": "Hi there.", "start": 0.5, "end": 1.5},
+                    {"text": "Not bad.", "start": 3.0, "end": 3.8},
+                    {"text": "Great.", "start": 6.0, "end": 6.8},
+                ]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 9.2, "end": 9.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertEqual(result["speaker_clusters"], {})
+        # Dominant-by-duration labeling survives untouched: SPEAKER_1 stays
+        # "Speaker 2", it is NOT re-anchored to "You" despite matching the
+        # self voiceprint above -- proving self-matching never ran.
+        self.assertTrue(result["is_diarised"])
+        self.assertIn("[You] Hi there.", result["diarised_text"])
+        self.assertIn("[Speaker 2] Not bad.", result["diarised_text"])
+
+    def test_speaker_clusters_empty_when_diarization_falls_back_to_legacy(self):
+        # No embeddings means no diarization cluster to persist -- must not
+        # produce a bogus/empty sidecar entry for a channel that fell back.
+        with patch("src.transcriber._run_steno_diarize", return_value=None):
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Hi.", "segments": [{"text": "Hi.", "start": 0.5, "end": 1.5}]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 9.2, "end": 9.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertEqual(result["speaker_clusters"], {})
+
+    def test_turn_manifest_records_exact_channel_and_raw_sid_per_turn(self):
+        # See the plan doc's Phase 8: this is the data a later confirm-
+        # speaker call uses for EXACT (not fuzzy-timestamp) relabeling.
+        # One manifest entry per merged turn, in the same order as
+        # diarised_text's turns, each carrying the channel it actually
+        # came from and its raw (pre-"Speaker N"-resolution) cluster id.
+        mic_diar = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
+        ]
+        system_diar = [{"start": 9.0, "end": 9.5, "speaker": "SPEAKER_0"}]
+        with patch("src.transcriber._run_steno_diarize", side_effect=[(mic_diar, {}), (system_diar, {})]):
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Hi there. Not bad. Great.", "segments": [
+                    {"text": "Hi there.", "start": 0.5, "end": 1.5},
+                    {"text": "Not bad.", "start": 3.0, "end": 3.8},
+                    {"text": "Great.", "start": 6.0, "end": 6.8},
+                ]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 9.2, "end": 9.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        manifest = result["turn_manifest"]
+        # 4 turns: [You/mic/SPEAKER_0, Speaker2/mic/SPEAKER_1, You/mic/SPEAKER_0, Others/system/SPEAKER_0]
+        self.assertEqual(len(manifest), 4)
+        self.assertEqual(
+            [(m["channel"], m["diarization_speaker_id"]) for m in manifest],
+            [("mic", "SPEAKER_0"), ("mic", "SPEAKER_1"), ("mic", "SPEAKER_0"), ("system", "SPEAKER_0")],
+        )
+        # Turn 0 (multi-cluster mic path, diar_tagged) starts from the DIAR
+        # segment's own start (0.0, not the ASR segment's 0.5). Turn 3
+        # (system's single-dominant-speaker fallback, legacy_tagged) is
+        # built from asr_segments instead, so it keeps the ASR start (9.2)
+        # -- both are exactly what each path already fed into the saved
+        # transcript's own [MM:SS] markers, so the manifest and the visible
+        # transcript timestamps always agree.
+        self.assertEqual(manifest[0]["start"], 0.0)
+        self.assertEqual(manifest[3]["start"], 9.2)
+
+    def test_turn_manifest_has_none_raw_sid_entries_when_diarization_totally_fails(self):
+        # is_diarised is about cross-channel label distinctness (You vs
+        # Others), not per-channel diarization success -- a total
+        # diarization failure on BOTH channels still produces a "diarised"
+        # (You/Others-split) transcript, so turn_manifest still gets one
+        # entry per turn (matching the transcript's own line count/order,
+        # required for relabel_transcript_exact's positional pairing) --
+        # just with diarization_speaker_id: None, since there's genuinely
+        # no raw cluster id to report.
+        with patch("src.transcriber._run_steno_diarize", return_value=None):
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Hi.", "segments": [{"text": "Hi.", "start": 0.5, "end": 1.5}]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 9.2, "end": 9.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+        self.assertEqual(result["turn_manifest"], [
+            {"start": 0.5, "channel": "mic", "diarization_speaker_id": None},
+            {"start": 9.2, "channel": "system", "diarization_speaker_id": None},
+        ])
+
     def test_mic_only_multi_speaker_is_diarised_even_with_system_silent(self):
         # Regression: an in-person conversation with no computer audio
         # playing at all (system channel genuinely silent, not bled/dropped)
@@ -195,7 +358,7 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
             {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
             {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
         ]
-        with patch("src.transcriber._run_steno_diarize", return_value=mic_diar):
+        with patch("src.transcriber._run_steno_diarize", return_value=(mic_diar, {})):
             self.transcriber._check_rms_energy = Mock(side_effect=[True, False])
             self.transcriber.transcribe_audio = Mock(return_value={
                 "text": "Hi there. Not bad. Great.", "segments": [
@@ -225,7 +388,7 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
             {"start": 15.0, "end": 16.0, "speaker": "SPEAKER_1"},  # minor
             {"start": 20.0, "end": 24.0, "speaker": "SPEAKER_0"},  # dominant -> "You"
         ]
-        with patch("src.transcriber._run_steno_diarize", side_effect=[mic_diar, system_diar]):
+        with patch("src.transcriber._run_steno_diarize", side_effect=[(mic_diar, {}), (system_diar, {})]):
             self.transcriber.transcribe_audio = Mock(side_effect=[
                 {"text": "Mic minor. Mic dominant.", "segments": [
                     {"text": "Mic minor.", "start": 15.2, "end": 15.8},
@@ -255,7 +418,7 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         # must fall back to plain You/Others, not "Speaker 1" everywhere.
         mic_diar = [{"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"}]
         system_diar = [{"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"}]
-        with patch("src.transcriber._run_steno_diarize", side_effect=[mic_diar, system_diar]):
+        with patch("src.transcriber._run_steno_diarize", side_effect=[(mic_diar, {}), (system_diar, {})]):
             self.transcriber.transcribe_audio = Mock(side_effect=[
                 {"text": "Hello.", "segments": [{"text": "Hello.", "start": 1.0, "end": 1.5}]},
                 {"text": "Reply.", "segments": [{"text": "Reply.", "start": 2.0, "end": 2.5}]},
@@ -308,7 +471,7 @@ class TranscribeDiarisedMonoTests(unittest.TestCase):
             {"start": 2.5, "end": 4.5, "speaker": "SPEAKER_1"},
             {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_0"},
         ]
-        with patch("src.transcriber._run_steno_diarize", return_value=diar_segments):
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
             self.transcriber.transcribe_audio = Mock(return_value={
                 "text": "Hi there. Not bad. Great.",
                 "segments": [
@@ -330,7 +493,7 @@ class TranscribeDiarisedMonoTests(unittest.TestCase):
         # Byte-identical-to-legacy fast path: one real cluster means nothing
         # to disambiguate, matching the pre-diarization mono behaviour.
         diar_segments = [{"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"}]
-        with patch("src.transcriber._run_steno_diarize", return_value=diar_segments):
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
             self.transcriber.transcribe_audio = Mock(return_value={
                 "text": "Just me talking.",
                 "segments": [{"text": "Just me talking.", "start": 0.5, "end": 1.5}],
@@ -801,22 +964,23 @@ class ClusterChannelLabelsTests(unittest.TestCase):
 
 class ResolveSpeakerPlaceholdersTests(unittest.TestCase):
     def test_legacy_labels_are_untouched(self):
-        tagged = [(0.0, "You", "hi"), (1.0, "Others", "hey")]
+        tagged = [(0.0, "You", "hi", "mic", "SPEAKER_0"), (1.0, "Others", "hey", "system", "SPEAKER_0")]
         self.assertEqual(_resolve_speaker_placeholders(tagged), tagged)
 
     def test_placeholders_numbered_from_two_by_first_appearance(self):
         tagged = [
-            (0.0, "You", "a"),
-            (1.0, "__diar__You__SPEAKER_1", "b"),
-            (2.0, "__diar__Others__SPEAKER_1", "c"),
-            (3.0, "__diar__You__SPEAKER_1", "d"),
+            (0.0, "You", "a", "mic", "SPEAKER_0"),
+            (1.0, "__diar__You__SPEAKER_1", "b", "mic", "SPEAKER_1"),
+            (2.0, "__diar__Others__SPEAKER_1", "c", "system", "SPEAKER_1"),
+            (3.0, "__diar__You__SPEAKER_1", "d", "mic", "SPEAKER_1"),
         ]
         resolved = _resolve_speaker_placeholders(tagged)
-        self.assertEqual(resolved[0], (0.0, "You", "a"))
-        self.assertEqual(resolved[1], (1.0, "Speaker 2", "b"))
-        self.assertEqual(resolved[2], (2.0, "Speaker 3", "c"))
+        self.assertEqual(resolved[0], (0.0, "You", "a", "mic", "SPEAKER_0"))
+        self.assertEqual(resolved[1], (1.0, "Speaker 2", "b", "mic", "SPEAKER_1"))
+        self.assertEqual(resolved[2], (2.0, "Speaker 3", "c", "system", "SPEAKER_1"))
         # Same placeholder key reuses the same number on a later turn.
-        self.assertEqual(resolved[3], (3.0, "Speaker 2", "d"))
+        self.assertEqual(resolved[3], (3.0, "Speaker 2", "d", "mic", "SPEAKER_1"))
+        # channel/raw_sid pass through untouched -- only label is rewritten.
 
 
 class TagChannelSegmentsTests(unittest.TestCase):
@@ -829,7 +993,279 @@ class TagChannelSegmentsTests(unittest.TestCase):
     def test_no_channel_path_uses_legacy_labeling(self):
         asr_segments = [{"text": "Hi.", "start": 0.0, "end": 1.0}]
         result = _tag_channel_segments(asr_segments, None, 5.0, "You")
-        self.assertEqual(result, [(0.0, "You", "Hi.")])
+        # No diarization at all -> no raw cluster id to record.
+        self.assertEqual(result, [(0.0, "You", "Hi.", None)])
+
+    def test_single_dominant_speaker_still_populates_clusters_out(self):
+        # _cluster_channel_labels returns None for a single real speaker
+        # (or one that overwhelmingly dominates) -- correctly NOT a
+        # diarization failure, just nothing to split in the transcript.
+        # But this is the cleanest possible case for a voiceprint (one
+        # continuous real voice) -- a normal 1:1 call's remote side is
+        # very often exactly this shape, and previously could NEVER
+        # contribute a named-speaker candidate because it never reached
+        # the multi-cluster branch that populated clusters_out.
+        import tempfile
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "system.wav"
+        channel_path.write_bytes(b"stub")
+
+        diar_segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 5.0, "speaker": "SPEAKER_0"},
+        ]
+        embeddings = {"SPEAKER_0": [0.7, 0.1]}
+        asr_segments = [
+            {"text": "Hello there.", "start": 0.5, "end": 1.5},
+            {"text": "Sounds good.", "start": 3.5, "end": 4.5},
+        ]
+        clusters_out: dict = {}
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, embeddings)):
+            result = _tag_channel_segments(
+                asr_segments, channel_path, 5.0, "Others", clusters_out=clusters_out,
+            )
+        # Transcript labeling is unaffected -- plain legacy label, no split.
+        # This falls through to the legacy_tagged path (built from
+        # asr_segments, not diar_segments), but raw_sid is now the single
+        # genuinely-distinct diarizer id (SPEAKER_0) -- exactly one real
+        # speaker was found, safe to record as exact provenance even
+        # though the transcript itself stays unsplit (see the plan doc's
+        # Phase 8: this is what lets a 1:1 call's dominant-speaker channel
+        # still support exact-match relabeling).
+        self.assertEqual(result, [
+            (0.5, "Others", "Hello there.", "SPEAKER_0"), (3.5, "Others", "Sounds good.", "SPEAKER_0"),
+        ])
+        # But the sidecar-bound clusters_out now has the real embedding.
+        self.assertEqual(set(clusters_out.keys()), {"SPEAKER_0"})
+        self.assertEqual(clusters_out["SPEAKER_0"]["embedding"], [0.7, 0.1])
+
+    def test_prints_progress_diarize_start_and_done_around_a_successful_run(self):
+        # Processing.tsx (the renderer) drives its 'diarizing' stage/sub-label
+        # entirely off these two lines -- they must bracket the call
+        # regardless of which internal branch (multi-cluster, single-
+        # dominant-speaker, or legacy fallback) the result takes.
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "mic.wav"
+        channel_path.write_bytes(b"stub")
+
+        diar_segments = [{"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"}]
+        embeddings = {"SPEAKER_0": [0.7, 0.1]}
+        asr_segments = [{"text": "Hello there.", "start": 0.5, "end": 1.5}]
+
+        buf = io.StringIO()
+        with patch("sys.stdout", buf), \
+             patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, embeddings)):
+            _tag_channel_segments(asr_segments, channel_path, 5.0, "You")
+        lines = [l for l in buf.getvalue().splitlines() if l.startswith("PROGRESS:diarize:")]
+        self.assertEqual(lines, ["PROGRESS:diarize:You:start", "PROGRESS:diarize:You:done"])
+
+    def test_prints_progress_diarize_done_even_when_diarization_fails(self):
+        # The bracket is a try/finally around the whole call -- :done must
+        # still fire on the legacy-fallback path (steno-diarize unavailable
+        # or unusable), not just the success path.
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "mic.wav"
+        channel_path.write_bytes(b"stub")
+        asr_segments = [{"text": "Hello there.", "start": 0.5, "end": 1.5}]
+
+        buf = io.StringIO()
+        with patch("sys.stdout", buf), \
+             patch("src.transcriber._run_steno_diarize", return_value=None):
+            result = _tag_channel_segments(asr_segments, channel_path, 5.0, "You")
+        lines = [l for l in buf.getvalue().splitlines() if l.startswith("PROGRESS:diarize:")]
+        self.assertEqual(lines, ["PROGRESS:diarize:You:start", "PROGRESS:diarize:You:done"])
+        self.assertEqual(result, [(0.5, "You", "Hello there.", None)])
+
+    def test_progress_sink_passed_to_run_steno_diarize_emits_embedding_lines(self):
+        # _run_steno_diarize's progress_sink is exactly the closure that
+        # turns real Swift-side chunk progress into PROGRESS:diarize:
+        # {label}:embedding:i/n on Python's own stdout -- verify the
+        # closure _tag_channel_segments builds actually does that, since
+        # RunStenoDiarizeTests only proves the sink gets CALLED correctly,
+        # not what this call site's specific sink does with it.
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "mic.wav"
+        channel_path.write_bytes(b"stub")
+        asr_segments = [{"text": "Hello there.", "start": 0.5, "end": 1.5}]
+        diar_segments = [{"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"}]
+        embeddings = {"SPEAKER_0": [0.7, 0.1]}
+
+        def _fake_run_steno_diarize(channel_path, timeout, progress_sink=None):
+            if progress_sink:
+                progress_sink(1, 2)
+                progress_sink(2, 2)
+            return diar_segments, embeddings
+
+        buf = io.StringIO()
+        with patch("sys.stdout", buf), \
+             patch("src.transcriber._run_steno_diarize", side_effect=_fake_run_steno_diarize):
+            _tag_channel_segments(asr_segments, channel_path, 5.0, "You")
+        lines = [l for l in buf.getvalue().splitlines() if l.startswith("PROGRESS:diarize:")]
+        self.assertEqual(
+            lines,
+            [
+                "PROGRESS:diarize:You:start",
+                "PROGRESS:diarize:You:embedding:1/2",
+                "PROGRESS:diarize:You:embedding:2/2",
+                "PROGRESS:diarize:You:done",
+            ],
+        )
+
+
+class HeartbeatWhileWaitingTests(unittest.TestCase):
+    """A real ~3.5h recording measured steno-diarize taking longer than
+    Electron's 8-minute inactivity watchdog, which killed a healthy process
+    mid-run because nothing was printed to stdout while it waited (unlike
+    Parakeet/Whisper's chunk-progress heartbeat, steno-diarize is an opaque
+    external binary with no per-chunk checkpoint). This is the fix: a
+    background thread prints HEARTBEAT: lines for the duration of the
+    wrapped call, regardless of how long it blocks."""
+
+    def test_prints_heartbeat_lines_while_waiting(self):
+        import io
+        from src.transcriber import _heartbeat_while_waiting
+
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            with _heartbeat_while_waiting("diarize:You", interval_s=0.02):
+                time.sleep(0.09)
+        lines = [l for l in buf.getvalue().splitlines() if l == "HEARTBEAT:diarize:You"]
+        self.assertGreaterEqual(len(lines), 2)
+
+    def test_background_thread_stops_when_context_exits(self):
+        from src.transcriber import _heartbeat_while_waiting
+
+        with _heartbeat_while_waiting("diarize:You", interval_s=0.02) as _:
+            threads_during = threading.active_count()
+        time.sleep(0.05)
+        self.assertLess(threading.active_count(), threads_during)
+
+    def test_does_not_swallow_exceptions_from_wrapped_block(self):
+        from src.transcriber import _heartbeat_while_waiting
+
+        with self.assertRaises(ValueError):
+            with _heartbeat_while_waiting("diarize:You", interval_s=10.0):
+                raise ValueError("real failure")
+
+    def test_return_value_of_wrapped_call_is_unaffected(self):
+        from src.transcriber import _heartbeat_while_waiting
+
+        with _heartbeat_while_waiting("diarize:You", interval_s=10.0):
+            result = {"ok": True}
+        self.assertEqual(result, {"ok": True})
+
+
+class VoiceprintDistanceTests(unittest.TestCase):
+    """_voiceprint_distance takes the minimum distance over BOTH a stored
+    voiceprint's long-term centroid and its recent-samples FIFO (either
+    anchor can rescue a borderline match) — port of SpeakerMatcher.distance."""
+
+    def test_distance_to_centroid_only(self):
+        vp = {"centroid": [1.0, 0.0], "embeddings": []}
+        self.assertAlmostEqual(_voiceprint_distance([1.0, 0.0], vp), 0.0, places=6)
+        self.assertAlmostEqual(_voiceprint_distance([0.0, 1.0], vp), 1.0, places=6)
+
+    def test_takes_minimum_over_recent_samples_and_centroid(self):
+        # Centroid is far (orthogonal); one recent sample is an exact match.
+        vp = {"centroid": [0.0, 1.0], "embeddings": [[5.0, 0.0], [1.0, 0.0]]}
+        self.assertAlmostEqual(_voiceprint_distance([1.0, 0.0], vp), 0.0, places=6)
+
+    def test_no_anchors_returns_infinity(self):
+        vp = {"centroid": None, "embeddings": []}
+        self.assertEqual(_voiceprint_distance([1.0, 0.0], vp), float("inf"))
+
+
+class ApplyVoiceprintMatchesTests(unittest.TestCase):
+    """_apply_voiceprint_matches must never raise or fail a meeting — any
+    problem (no embeddings, no self voiceprint stored) leaves cluster_labels
+    exactly as _cluster_channel_labels produced them.
+
+    NAMED (non-self) matching used to be covered here too, but that path
+    was removed — validating it against real ground truth (AMI Meeting
+    Corpus) found same-room speakers score artificially similar to each
+    other, so silent automatic named matching isn't safe. Named
+    identification is now a human-confirmed suggestion via
+    src.speaker_suggestions (see the plan doc), not an automatic relabel."""
+
+    def setUp(self):
+        self.cluster_labels = {
+            "SPEAKER_0": "You",
+            "SPEAKER_1": "__diar__You__SPEAKER_1",
+        }
+
+    def test_self_match_relabels_and_demotes_previous_you(self):
+        # The device owner talked less than a guest on the mic channel —
+        # self-match must re-anchor "You" onto the correct cluster and
+        # demote the dominant-by-duration cluster back to a placeholder.
+        speaker_embeddings = {
+            "SPEAKER_0": [1.0, 0.0],  # guest, currently "You"
+            "SPEAKER_1": [0.0, 1.0],  # actually the device owner
+        }
+        voiceprints = [
+            {"name": "ignored", "centroid": [0.0, 1.0], "embeddings": [], "is_self": True},
+        ]
+        with patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = voiceprints
+            result = _apply_voiceprint_matches(
+                speaker_embeddings, self.cluster_labels, "You", allow_self_match=True,
+            )
+        self.assertEqual(result["SPEAKER_1"], "You")
+        self.assertEqual(result["SPEAKER_0"], "__diar__You__SPEAKER_0")
+
+    def test_self_match_ignored_when_not_allowed(self):
+        # System-audio channel (allow_self_match=False): matching is skipped
+        # entirely — config isn't even loaded, since there's nothing left
+        # for this function to do without self-match (named matching moved
+        # to src.speaker_suggestions).
+        speaker_embeddings = {
+            "SPEAKER_0": [1.0, 0.0],
+            "SPEAKER_1": [0.0, 1.0],
+        }
+        with patch("src.config.get_config") as mock_get_config:
+            result = _apply_voiceprint_matches(
+                speaker_embeddings, self.cluster_labels, "Others", allow_self_match=False,
+            )
+        mock_get_config.assert_not_called()
+        self.assertEqual(result, self.cluster_labels)
+
+    def test_no_self_match_above_threshold_leaves_labels_unchanged(self):
+        speaker_embeddings = {
+            "SPEAKER_0": [1.0, 0.0],
+            "SPEAKER_1": [0.0, 1.0],
+        }
+        # Orthogonal to both cluster embeddings -> distance 1.0, well above
+        # VOICEPRINT_DISTANCE_THRESHOLD, so no self-match is found.
+        voiceprints = [{"name": "ignored", "centroid": [-1.0, 0.0], "embeddings": [], "is_self": True}]
+        with patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = voiceprints
+            result = _apply_voiceprint_matches(
+                speaker_embeddings, self.cluster_labels, "You", allow_self_match=True,
+            )
+        self.assertEqual(result, self.cluster_labels)
+
+    def test_no_embeddings_skips_config_entirely(self):
+        with patch("src.config.get_config") as mock_get_config:
+            result = _apply_voiceprint_matches(
+                {}, self.cluster_labels, "You", allow_self_match=True,
+            )
+        mock_get_config.assert_not_called()
+        self.assertEqual(result, self.cluster_labels)
+
+    def test_no_stored_voiceprints_leaves_labels_unchanged(self):
+        speaker_embeddings = {
+            "SPEAKER_0": [1.0, 0.0],
+            "SPEAKER_1": [0.0, 1.0],
+        }
+        with patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = []
+            result = _apply_voiceprint_matches(
+                speaker_embeddings, self.cluster_labels, "You", allow_self_match=True,
+            )
+        self.assertEqual(result, self.cluster_labels)
 
 
 class _FakePopen:
@@ -873,59 +1309,146 @@ class RunStenoDiarizeTests(unittest.TestCase):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
     def test_parses_json_with_e5rt_warning_prefix_on_stdout(self):
-        payload = json.dumps([
-            {"speakerId": "SPEAKER_1", "start": 1.0, "end": 2.0},
-            {"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9},
-        ]).encode()
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_1", "start": 1.0, "end": 2.0},
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9},
+            ],
+            "speakers": {
+                "SPEAKER_0": [0.1, 0.2],
+                "SPEAKER_1": [0.3, 0.4],
+            },
+        }).encode()
         stdout = b"E5RT encountered an STL exception. msg = unordered_map::at: key not found." + payload
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
              _patch_popen(stdout=stdout, stderr=b"", returncode=0):
             result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        segments, embeddings = result
         self.assertEqual(
-            result,
+            segments,
             [
                 {"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"},
                 {"start": 1.0, "end": 2.0, "speaker": "SPEAKER_1"},
             ],
         )
+        self.assertEqual(embeddings, {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]})
 
     def test_parses_json_with_trailing_warning_after_payload(self):
-        # A late CoreML/Metal warning printed to stdout AFTER the JSON
-        # payload (at teardown) -- json.loads() requires the entire
-        # remaining string to be clean JSON and raises "Extra data" on
-        # trailing text, discarding an otherwise-successful diarization
-        # result. raw_decode() must tolerate this.
-        payload = json.dumps([{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}]).encode()
+        # A real ~3.5h channel measured a late CoreML/Metal warning printed
+        # to stdout AFTER the JSON payload (at teardown) -- json.loads()
+        # requires the entire remaining string to be clean JSON and raises
+        # "Extra data" on trailing text, discarding an otherwise-successful
+        # 18-minute diarization result. raw_decode() must tolerate this.
+        payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}],
+            "speakers": {"SPEAKER_0": [0.1, 0.2]},
+        }).encode()
         stdout = payload + b"\nMetal warning: some late teardown message"
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
              _patch_popen(stdout=stdout, stderr=b"", returncode=0):
             result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
-        self.assertEqual(result, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+        segments, embeddings = result
+        self.assertEqual(segments, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+        self.assertEqual(embeddings, {"SPEAKER_0": [0.1, 0.2]})
 
-    def test_skips_an_interstitial_array_that_is_not_segment_shaped(self):
-        # A non-payload array (no "speakerId" keys) printed BEFORE the real
-        # payload must not be mistaken for it -- keep scanning for an array
-        # of segment-shaped dicts.
-        real_payload = json.dumps([{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}]).encode()
-        stdout = b'["not", "a", "segment"]\n' + real_payload
+    def test_skips_an_interstitial_json_blob_that_is_not_the_real_payload(self):
+        # A real ~18-minute diarization run measured a non-payload JSON-
+        # shaped blob (e.g. a status/progress object with no "segments"
+        # key) printed BEFORE the real payload -- the version of this
+        # function that only ever looked at the first '{' in stdout picked
+        # that one and raised KeyError('segments'), discarding an
+        # otherwise-successful result. Must skip anything that isn't a
+        # dict with a "segments" key and keep scanning for the real one.
+        real_payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}],
+            "speakers": {"SPEAKER_0": [0.1, 0.2]},
+        }).encode()
+        stdout = b'{"status": "starting"}\n' + real_payload
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
              _patch_popen(stdout=stdout, stderr=b"", returncode=0):
             result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
-        self.assertEqual(result, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+        segments, embeddings = result
+        self.assertEqual(segments, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+        self.assertEqual(embeddings, {"SPEAKER_0": [0.1, 0.2]})
 
     def test_prefers_the_last_matching_payload_when_multiple_exist(self):
-        # If more than one array in stdout looks segment-shaped (shouldn't
-        # normally happen, but the scan must have a defined, sane tie-break
-        # rather than an arbitrary one) -- the real payload is printed once,
-        # at the end, when diarization actually finishes, so prefer the
-        # LAST match.
-        first_payload = json.dumps([{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}]).encode()
-        second_payload = json.dumps([{"speakerId": "SPEAKER_1", "start": 5.0, "end": 6.0}]).encode()
+        # If more than one JSON blob in stdout DOES have a "segments" key
+        # (shouldn't normally happen, but the scan must have a defined,
+        # sane tie-break rather than an arbitrary one) -- the real payload
+        # is written once, at the end, when diarization actually finishes,
+        # so prefer the LAST match.
+        first_payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}],
+            "speakers": {"SPEAKER_0": [0.1, 0.2]},
+        }).encode()
+        second_payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_1", "start": 5.0, "end": 6.0}],
+            "speakers": {"SPEAKER_1": [0.9, 0.9]},
+        }).encode()
         stdout = first_payload + b"\n" + second_payload
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
              _patch_popen(stdout=stdout, stderr=b"", returncode=0):
             result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
-        self.assertEqual(result, [{"start": 5.0, "end": 6.0, "speaker": "SPEAKER_1"}])
+        segments, embeddings = result
+        self.assertEqual(segments, [{"start": 5.0, "end": 6.0, "speaker": "SPEAKER_1"}])
+        self.assertEqual(embeddings, {"SPEAKER_1": [0.9, 0.9]})
+
+    def test_falls_back_to_bare_segments_array_when_no_output_object_exists(self):
+        # Traced against a REAL ~3.5h recording via a direct, wrapper-free
+        # capture of steno-diarize's raw stdout: on a run this large,
+        # embedding extraction can hit an internal FluidAudio/CoreML
+        # failure that skips main.swift's normal Output-struct print
+        # entirely, leaving only the E5RT warning immediately followed by
+        # a BARE JSON ARRAY of the raw segments -- no "segments"/"speakers"
+        # wrapper at all. The segments themselves are still real,
+        # load-bearing diarization data (main.swift's own comment: they're
+        # the load-bearing output, embeddings are best-effort) and must
+        # not be discarded just because the wrapper never appeared.
+        stdout = (
+            b"E5RT encountered an STL exception. msg = unordered_map::at: key not found."
+            b'[{"speakerId":"SPEAKER_0","end":1.5999999046325684,"start":0.5600000023841858},'
+            b'{"speakerId":"SPEAKER_1","end":11.4399995803833,"start":10.880000114440918}]'
+        )
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/mic-real.wav"), \
+             _patch_popen(stdout=stdout, stderr=b"", returncode=0):
+            result = _run_steno_diarize(Path("/fake/mic-real.wav"), 13131)
+        segments, embeddings = result
+        self.assertEqual(
+            segments,
+            [
+                {"start": 0.5600000023841858, "end": 1.5999999046325684, "speaker": "SPEAKER_0"},
+                {"start": 10.880000114440918, "end": 11.4399995803833, "speaker": "SPEAKER_1"},
+            ],
+        )
+        # Degraded result: real diarization, no voiceprint/embedding data.
+        self.assertEqual(embeddings, {})
+
+    def test_object_payload_is_preferred_over_a_bare_array_when_both_exist(self):
+        # A proper Output-struct object (with real embeddings) must win
+        # over a degraded bare-array fallback, regardless of which one
+        # appears first in stdout -- the object is strictly more complete.
+        bare_array = b'[{"speakerId":"SPEAKER_0","start":0.0,"end":1.0}]'
+        object_payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_1", "start": 5.0, "end": 6.0}],
+            "speakers": {"SPEAKER_1": [0.9, 0.9]},
+        }).encode()
+        stdout = bare_array + b"\n" + object_payload
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/mic.wav"), \
+             _patch_popen(stdout=stdout, stderr=b"", returncode=0):
+            result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        segments, embeddings = result
+        self.assertEqual(segments, [{"start": 5.0, "end": 6.0, "speaker": "SPEAKER_1"}])
+        self.assertEqual(embeddings, {"SPEAKER_1": [0.9, 0.9]})
+
+    def test_missing_speakers_key_returns_empty_embeddings(self):
+        payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}],
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, embeddings = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [{"start": 0.0, "end": 0.9, "speaker": "SPEAKER_0"}])
+        self.assertEqual(embeddings, {})
 
     def test_nonzero_exit_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
@@ -934,18 +1457,43 @@ class RunStenoDiarizeTests(unittest.TestCase):
 
     def test_unparseable_json_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             _patch_popen(stdout=b"[not json", stderr=b"", returncode=0):
+             _patch_popen(stdout=b"{not json", stderr=b"", returncode=0):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
-    def test_no_bracket_in_stdout_returns_none(self):
+    def test_no_brace_in_stdout_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
              _patch_popen(stdout=b"nothing useful", stderr=b"", returncode=0):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
 
     def test_timeout_returns_none(self):
         with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
-             _patch_popen(raise_timeout_once=True):
+             _patch_popen(stdout=b"", stderr=b"", returncode=0, raise_timeout_once=True):
             self.assertIsNone(_run_steno_diarize(Path("/fake/mic.wav"), 60))
+
+    def test_progress_sink_called_with_parsed_embedding_progress(self):
+        payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}],
+            "speakers": {"SPEAKER_0": [0.1, 0.2]},
+        }).encode()
+        stderr = b"PROGRESS:embedding:1/3\nPROGRESS:embedding:2/3\nPROGRESS:embedding:3/3\n"
+        calls = []
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=stderr, returncode=0):
+            result = _run_steno_diarize(Path("/fake/mic.wav"), 60, progress_sink=lambda i, n: calls.append((i, n)))
+        self.assertIsNotNone(result)
+        self.assertEqual(calls, [(1, 3), (2, 3), (3, 3)])
+
+    def test_progress_sink_not_required_and_unmatched_stderr_lines_ignored(self):
+        payload = json.dumps({
+            "segments": [{"speakerId": "SPEAKER_0", "start": 0.0, "end": 0.9}],
+            "speakers": {"SPEAKER_0": [0.1, 0.2]},
+        }).encode()
+        stderr = b"some unrelated diagnostic line\nsteno-diarize: 1 chunk(s) failed embedding extraction\n"
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=stderr, returncode=0):
+            # No progress_sink passed at all -- must not raise.
+            result = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertIsNotNone(result)
 
 
 if __name__ == '__main__':

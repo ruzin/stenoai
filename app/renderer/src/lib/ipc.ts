@@ -426,6 +426,88 @@ export type ListTemplatesResponse = Result<{
 }>;
 export type SaveTemplateResponse = Result<{ template: Template }>;
 
+export interface PersonProfile {
+  person_id: string;
+  display_name: string;
+  prototype_counts: Record<string, number>;
+  hard_negative_counts: Record<string, number>;
+  updated_at: number;
+}
+export type ListPersonProfilesResponse = Result<{ person_profiles: PersonProfile[] }>;
+export type CreatePersonProfileResponse = Result<{ person_id: string; display_name: string }>;
+
+export interface SpeakerCandidate {
+  person_id: string;
+  display_name: string;
+  distance: number;
+  hard_negative_conflict: boolean;
+  /** Distance to this person's nearest stored hard-negative, or null when
+   *  they have none -- explains hard_negative_conflict (suppression is
+   *  relative: negative evidence must rival the positive to suppress). */
+  negative_distance: number | null;
+}
+export interface SpeakerSuggestion {
+  status: 'confirmed' | 'possible' | 'none';
+  suggested_person_id: string | null;
+  suggested_name: string | null;
+  merged_from: string[];
+  candidates: SpeakerCandidate[];
+  reasons: string[];
+  // Identification anchors -- without these, "Unidentified speaker" gives a
+  // human nothing to go on to figure out who it actually is.
+  speech_duration_seconds: number;
+  segment_count: number;
+  /** "MM:SS" / "H:MM:SS" of this cluster's earliest segment, or null if the
+   *  sidecar has no segment timestamps (a pre-this-feature sidecar). */
+  first_timestamp: string | null;
+  /** Quoted excerpt of what this cluster said, at its longest (most
+   *  trustworthy) segment -- null if no saved transcript overlaps it. */
+  sample_text: string | null;
+  /** True when duration/segment-count shape matches the real-data-validated
+   *  echo/crosstalk artifact pattern (SUGGESTION_MIN_AVG_TURN_SECONDS) --
+   *  a UI hint only, never excludes the cluster from confirm-speaker. */
+  is_likely_artifact: boolean;
+  /** Display name of the person this exact cluster was already confirmed
+   *  as, from a real SpeakerPrototype in config.json -- null if never
+   *  confirmed. Persists across navigation/reload unlike the panel's
+   *  transient post-click feedback, which is plain component state. */
+  confirmed_by_user: string | null;
+}
+export type SuggestSpeakersResponse = Result<{
+  meeting_id: string;
+  /** Whether the source recording still exists on disk (keep_recordings
+   *  defaults off, so this is false for most older backfilled meetings) --
+   *  checked once per meeting; gates whether a play button can render. */
+  recording_available: boolean;
+  channels: Record<string, Record<string, SpeakerSuggestion>>;
+}>;
+
+export interface ConfirmSpeakerParams {
+  meetingStem: string;
+  channel: string;
+  diarizationSpeakerId: string;
+  personId?: string;
+  newPersonName?: string;
+}
+export type ConfirmSpeakerResponse = Result<{
+  person_id: string;
+  display_name: string;
+  prototype_id: string;
+  resolved_diarization_speaker_id: string;
+  merged_from: string[];
+  hard_negatives_added_against: string[];
+  /** Display names of people whose previous confirmation of this SAME
+   *  cluster was superseded by this confirm (the "Change" flow) -- their
+   *  stale prototype and derived hard negatives were removed. */
+  reassigned_from: string[];
+  relabeled_lines: number;
+}>;
+
+// audio_base64 (a WAV clip), not a filesystem path: the renderer's CSP
+// (media-src 'self' blob:) has no file: allowance, so a raw path could
+// never actually play -- the renderer builds a blob: URL from these bytes.
+export type GetSpeakerSampleAudioResponse = Result<{ audio_base64: string }>;
+
 export interface Report {
   id: string;
   template_id: string;
@@ -534,6 +616,8 @@ export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
 export type GetAutoSummarizeResponse = Result<{ auto_summarize_enabled: boolean }>;
 
 export type GetAutoInstallWhenIdleResponse = Result<{ auto_install_when_idle: boolean }>;
+
+export type GetIdentityMatchingEnabledResponse = Result<{ identity_matching_enabled: boolean }>;
 
 export type GetSilenceAutoStopResponse = Result<{
   silence_auto_stop_enabled: boolean;
@@ -957,6 +1041,19 @@ export interface StenoaiBridge {
     reset: RequestFn<[id: string], Result<Record<string, never>>>;
   };
 
+  speakers: {
+    listProfiles: RequestFn<[], ListPersonProfilesResponse>;
+    suggestForMeeting: RequestFn<[meetingStem: string], SuggestSpeakersResponse>;
+    confirm: RequestFn<[params: ConfirmSpeakerParams], ConfirmSpeakerResponse>;
+    createProfile: RequestFn<[displayName: string], CreatePersonProfileResponse>;
+    renameProfile: RequestFn<[id: string, displayName: string], Result<Record<string, never>>>;
+    deleteProfile: RequestFn<[id: string], Result<Record<string, never>>>;
+    getSampleAudio: RequestFn<
+      [meetingStem: string, channel: string, diarizationSpeakerId: string],
+      GetSpeakerSampleAudioResponse
+    >;
+  };
+
   models: {
     checkOllama: RequestFn<[], CheckOllamaResponse>;
     list: RequestFn<[], ListModelsResponse>;
@@ -1018,6 +1115,8 @@ export interface StenoaiBridge {
     setAutoSummarize: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getAutoInstallWhenIdle: RequestFn<[], GetAutoInstallWhenIdleResponse>;
     setAutoInstallWhenIdle: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getIdentityMatchingEnabled: RequestFn<[], GetIdentityMatchingEnabledResponse>;
+    setIdentityMatchingEnabled: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
     setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
     setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;

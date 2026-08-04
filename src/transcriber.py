@@ -39,9 +39,10 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from src._heartbeat import _emit_heartbeat
+from src.speaker_suggestions import build_clusters_from_diarization, determine_recording_type
 
 logger = logging.getLogger(__name__)
 
@@ -123,19 +124,27 @@ RMS_MAX_WINDOWS = 60
 # validated against real meeting audio in the research playground.
 STENO_DIARIZE_MERGE_GAP_S = 0.3
 
-# Floor for the steno-diarize subprocess timeout. Measured runtime against
-# real meeting-length audio is single-digit-to-tens-of-seconds; this leaves
-# generous headroom under Electron's 8-minute inactivity watchdog while
-# still bounding a runaway on pathological input. Scaled up by duration for
-# long recordings, same pattern as _diarised_split_timeout.
+# Floor for the steno-diarize subprocess timeout. Real measured runtime
+# varies a lot with recording length: single-digit-to-tens-of-seconds for
+# short/typical meetings, but a real ~3.5h recording measured ~18 minutes
+# for the embedding-extraction phase alone on the pre-highContextV2 config
+# (segmentation + embedding combined dropped to ~23s for a real ~21-minute
+# file after switching to SortformerConfig.highContextV2 for long enough
+# recordings -- see main.swift's sortformerHighContextMinDuration). This
+# floor leaves generous headroom under Electron's 8-minute inactivity
+# watchdog while still bounding a runaway on pathological input; it's
+# scaled up by duration for long recordings, same pattern as
+# _diarised_split_timeout, so the real ceiling tracks recording length.
 STENO_DIARIZE_TIMEOUT_FLOOR_S = 120
 
 # If one diarizer cluster holds this share (or more) of a channel's total
 # speaking time, the channel is treated as single-speaker — any other
 # cluster is almost certainly a brief misdiarization blip (observed
 # empirically: short/overlapping noise segments from Sortformer on
-# single-mic audio), not a real second speaker. Gates the "Speaker N"
-# placeholder path (_cluster_channel_labels).
+# single-mic audio), not a real second speaker. Gates both the legacy
+# "Speaker N" placeholder path (_cluster_channel_labels) and voiceprint
+# matching, since a spurious cluster shouldn't get embedded and matched
+# either.
 CHANNEL_DOMINANCE_THRESHOLD = 0.92
 
 # Sentinel text substituted when transcription produces no usable output
@@ -635,11 +644,14 @@ def _heartbeat_while_waiting(label: str, interval_s: float = STENO_DIARIZE_HEART
     src._heartbeat's chunk-progress registry only works for backends that
     call back into Python from INSIDE their own per-chunk loop (Parakeet,
     Whisper.cpp) -- steno-diarize is an opaque external binary invoked via a
-    single blocking call, with no such checkpoint to hang a callback off of.
-    Without this, a diarization run on an hours-long channel prints nothing
-    for its entire duration, which Electron's inactivity watchdog
-    (app/main.js) can't tell apart from a hung process -- and kills,
-    discarding a real, working meeting.
+    single blocking subprocess.run() call, with no such checkpoint to hang a
+    callback off of. Without this, a diarization run on an hours-long
+    channel prints nothing for its entire duration, which Electron's
+    inactivity watchdog (app/main.js) can't tell apart from a hung process
+    -- and kills, discarding a real, working meeting (confirmed against a
+    real ~3.5h recording: steno-diarize needed longer than the 8-minute
+    watchdog window and got killed mid-run, losing already-completed
+    transcription work along with it).
 
     Never affects the wrapped call's own return value or exceptions --
     the background thread only ever writes heartbeat lines.
@@ -663,22 +675,45 @@ def _heartbeat_while_waiting(label: str, interval_s: float = STENO_DIARIZE_HEART
         t.join(timeout=1.0)
 
 
-def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]:
+def _run_steno_diarize(
+    channel_path: Path, timeout: int,
+    progress_sink: Optional[Callable[[int, int], None]] = None,
+    extra_env: Optional[dict[str, str]] = None,
+) -> Optional[tuple[list[dict], dict[str, list[float]]]]:
     """Run the steno-diarize sidecar on a single mono channel WAV.
 
-    Returns merged diarizer segments (each ``{"start", "end", "speaker"}``)
-    on success. Returns None on ANY failure — missing binary, timeout,
-    non-zero exit, or unparseable output — so callers always have a safe
-    fallback to legacy channel-only labeling and this can never fail a
-    meeting.
+    Returns ``(segments, speaker_embeddings)`` on success: merged diarizer
+    segments (each ``{"start", "end", "speaker"}``), and a
+    ``{"SPEAKER_0": [256 floats], ...}`` voiceprint centroid map (one entry
+    per active speaker slot, extracted via FluidAudio's own WeSpeaker model
+    with overlap-excluded, multi-chunk-averaged embeddings — see
+    diarize-sidecar/Sources/main.swift). The embeddings map can be empty
+    even on success (voiceprint extraction is best-effort inside the
+    sidecar and never fails diarization itself).
 
-    Uses Popen with two concurrent reader threads rather than
-    subprocess.run(capture_output=True) so stdout and stderr are both
-    drained WHILE the process is still running -- matching what
-    subprocess.run's own communicate() does internally to avoid the
-    classic pipe-deadlock (real stdout payloads have measured up to
+    ``progress_sink(i, n)``, if given, is called in real time as the
+    sidecar's embedding-extraction loop reports ``PROGRESS:embedding:i/n``
+    lines on stderr -- the one phase of a long-recording diarization run
+    that has an actual per-chunk checkpoint to report from (segmentation
+    itself has none, and stays covered only by the caller's
+    _heartbeat_while_waiting). Uses Popen with two concurrent reader
+    threads rather than subprocess.run(capture_output=True) specifically
+    so stderr can be watched WHILE the process is still running --
+    matching what subprocess.run's own communicate() does internally to
+    avoid the classic pipe-deadlock (stdout payloads have measured up to
     ~211KB in production, well past an OS pipe buffer, so neither stream
-    can safely be read to completion only after the process exits).
+    can be read to completion only after the process exits).
+
+    ``extra_env``, if given, is merged over the inherited environment --
+    e.g. ``{"STENOAI_DIARIZE_COMPUTE_UNITS": "cpuAndGPU"}`` to opt a
+    one-off/manual invocation into GPU instead of the sidecar's own
+    power/thermal-efficient ANE default (see main.swift's
+    resolveComputeUnits()). Callers on the normal per-meeting pipeline
+    should leave this unset.
+
+    Returns None on ANY failure — missing binary, timeout, non-zero exit,
+    or unparseable output — so callers always have a safe fallback to
+    legacy channel-only labeling and this can never fail a meeting.
     """
     binary = _resolve_steno_diarize()
     if not binary:
@@ -687,6 +722,7 @@ def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]
         proc = subprocess.Popen(
             [binary, str(channel_path)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env={**os.environ, **extra_env} if extra_env else None,
         )
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
@@ -696,8 +732,18 @@ def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]
                 stdout_chunks.append(chunk)
 
         def _read_stderr():
+            buf = b""
             for chunk in iter(lambda: proc.stderr.read(4096), b""):
                 stderr_chunks.append(chunk)
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if progress_sink and line.startswith(b"PROGRESS:embedding:"):
+                        try:
+                            i_str, n_str = line[len(b"PROGRESS:embedding:"):].split(b"/", 1)
+                            progress_sink(int(i_str), int(n_str))
+                        except (ValueError, IndexError):
+                            pass
 
         t_out = threading.Thread(target=_read_stdout, daemon=True)
         t_err = threading.Thread(target=_read_stderr, daemon=True)
@@ -725,30 +771,52 @@ def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]
         stdout = b"".join(stdout_chunks).decode(errors="replace")
         # Known FluidAudio/CoreML warnings ("E5RT encountered an STL
         # exception... key not found") can print directly to stdout
-        # BEFORE, BETWEEN, or AFTER the real JSON payload -- skipping to
-        # the first '[' assumes stdout is pure JSON, which breaks the
-        # moment any warning text (or an interstitial, incomplete blob)
-        # appears ahead of the real array. Scan every '[' in stdout with a
-        # real JSON decoder and keep the LAST array of segment-shaped
-        # dicts -- better than latching onto the first bracket found.
+        # BEFORE, BETWEEN, or AFTER the real JSON payload — a real ~3.5h
+        # run measured all three: leading warning text, an interstitial
+        # non-payload JSON blob ahead of the real one, and (traced with a
+        # direct, wrapper-free capture of steno-diarize's raw stdout) a
+        # case where the normal {"segments":...,"speakers":...} object
+        # (main.swift's Output struct, printed once via a single print())
+        # never appears AT ALL: the E5RT error is FluidAudio's own
+        # internal embedding-extraction failure escaping in a way that
+        # skips Output entirely, leaving just a bare JSON ARRAY of the raw
+        # segments (still real, load-bearing diarization data — see
+        # main.swift's own comment that segments are the load-bearing
+        # output, embeddings are best-effort). Scan every '{'/'[' in
+        # stdout; prefer the LAST dict with a "segments" key (the normal,
+        # complete case, with embeddings), but degrade to the LAST bare
+        # array of segment-shaped dicts (no embeddings/voiceprint data for
+        # this cluster) if no proper object payload was ever found —
+        # better than discarding a real diarization result outright.
         raw_segments = None
+        raw_embeddings: dict = {}
+        found_object_payload = False
         decoder = json.JSONDecoder()
         search_from = 0
         while True:
+            next_brace = stdout.find("{", search_from)
             next_bracket = stdout.find("[", search_from)
-            if next_bracket < 0:
+            starts = [p for p in (next_brace, next_bracket) if p >= 0]
+            if not starts:
                 break
+            start = min(starts)
             try:
-                candidate, end = decoder.raw_decode(stdout, next_bracket)
+                candidate, end = decoder.raw_decode(stdout, start)
             except json.JSONDecodeError:
-                search_from = next_bracket + 1
+                search_from = start + 1
                 continue
-            if (
-                isinstance(candidate, list) and candidate
+            if isinstance(candidate, dict) and "segments" in candidate:
+                raw_segments = candidate["segments"]
+                raw_embeddings = candidate.get("speakers") or {}
+                found_object_payload = True
+            elif (
+                not found_object_payload
+                and isinstance(candidate, list) and candidate
                 and all(isinstance(s, dict) and "speakerId" in s for s in candidate)
             ):
                 raw_segments = candidate
-            search_from = max(end, next_bracket + 1)
+                raw_embeddings = {}
+            search_from = max(end, start + 1)
         if raw_segments is None:
             logger.warning(
                 "steno-diarize produced no usable JSON output "
@@ -756,7 +824,7 @@ def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]
                 len(stdout), stdout[-500:],
             )
             return None
-    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+    except (subprocess.TimeoutExpired, OSError, ValueError, KeyError) as e:
         logger.warning("steno-diarize failed: %s", e)
         return None
 
@@ -771,7 +839,9 @@ def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]
         ),
         key=lambda s: s["start"],
     )
-    return _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
+    merged = _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
+    embeddings = {str(k): [float(x) for x in v] for k, v in raw_embeddings.items()}
+    return merged, embeddings
 
 
 def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Optional[dict[str, str]]:
@@ -802,13 +872,140 @@ def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Opt
     }
 
 
+# Cosine-distance threshold + confidence margin for voiceprint matching
+# (distance = 1 - cosine_similarity). Ported from the matching algorithm in
+# github.com/pasrom/meeting-transcriber's SpeakerMatcher.swift (verified via
+# GitHub's raw content API), which pairs a real WeSpeaker-embedding pipeline
+# with these exact starting values. The margin matters as much as the
+# threshold: a bare similarity/distance cutoff let ambiguous near-ties
+# through in real-recording testing (a distance-only check would have
+# accepted several unrelated cross-recording speakers as "matches").
+# Requiring the best candidate to clearly beat the runner-up rejects those.
+VOICEPRINT_DISTANCE_THRESHOLD = 0.40
+VOICEPRINT_CONFIDENCE_MARGIN = 0.10
+
+
+def _voiceprint_distance(embedding: list, voiceprint: dict) -> float:
+    """Cosine distance from `embedding` to a stored voiceprint, taking the
+    minimum over its long-term centroid and recent-samples FIFO (either
+    anchor can rescue a borderline match) — port of
+    SpeakerMatcher.distance. Returns +inf if the voiceprint has no usable
+    anchors at all.
+    """
+    from src.voiceprint import cosine_distance
+    anchors = list(voiceprint.get("embeddings") or [])
+    centroid = voiceprint.get("centroid")
+    if centroid:
+        anchors.append(centroid)
+    if not anchors:
+        return float("inf")
+    return min(cosine_distance(embedding, a) for a in anchors)
+
+
+def _apply_voiceprint_matches(
+    speaker_embeddings: dict[str, list],
+    cluster_labels: dict[str, str],
+    legacy_label: str,
+    allow_self_match: bool,
+) -> dict[str, str]:
+    """Override cluster_labels with a self-voiceprint match where found.
+
+    `speaker_embeddings` comes straight from the steno-diarize sidecar's
+    JSON output (FluidAudio WeSpeaker centroids, overlap-excluded and
+    averaged across the whole channel — see diarize-sidecar/Sources/main.swift)
+    — no separate Python-side embedding extraction.
+
+    allow_self_match=True (the mic channel, when genuinely multiple
+    speakers were detected) re-anchors the legacy label onto whichever
+    cluster's voice actually matches the enrolled self voiceprint, rather
+    than trusting the dominant-by-duration guess — an in-person recording
+    where a guest talks more than the device owner would otherwise
+    mislabel the guest as "You".
+
+    NAMED (non-self) cross-recording matching used to happen here too, but
+    was removed: validating it against real ground truth (the AMI Meeting
+    Corpus, individual headset mics) found that people sharing a room/mic
+    score artificially similar to each other regardless of true identity —
+    a channel/session bias no amount of threshold/margin tuning fixed (see
+    the plan doc history for the full investigation). Silent, fully
+    automatic named matching isn't safe; named identification is now a
+    human-confirmed suggestion via `src.speaker_suggestions`, not an
+    automatic relabel here.
+
+    ANY failure (no embeddings, no self voiceprint stored) leaves
+    cluster_labels unchanged — matching is a best-effort enhancement
+    layered on top of the existing placeholder/"Speaker N" scheme, never
+    something that can fail a meeting.
+    """
+    if not speaker_embeddings or not allow_self_match:
+        return cluster_labels
+    try:
+        from src.config import get_config
+        voiceprints = get_config().get_voiceprints()
+    except Exception as e:
+        logger.warning("Could not load stored voiceprints: %s", e)
+        return cluster_labels
+
+    self_vp = next((v for v in voiceprints if v.get("is_self")), None)
+    if self_vp is None:
+        return cluster_labels
+
+    updated = dict(cluster_labels)
+
+    best_sid, best_dist = None, VOICEPRINT_DISTANCE_THRESHOLD
+    for sid, emb in speaker_embeddings.items():
+        dist = _voiceprint_distance(emb, self_vp)
+        if dist < best_dist:
+            best_sid, best_dist = sid, dist
+    you_cluster = best_sid
+
+    if you_cluster is not None:
+        for sid in updated:
+            if sid == you_cluster:
+                updated[sid] = legacy_label
+            elif updated[sid] == legacy_label:
+                updated[sid] = f"__diar__{legacy_label}__{sid}"
+
+    return updated
+
+
+def _identity_matching_enabled() -> bool:
+    """Whether cross-recording speaker identification is enabled (default
+    on, user-configurable). Independent of diarization itself: disabling
+    this stops self-voiceprint matching (_apply_voiceprint_matches) and
+    per-meeting speaker-embedding persistence (clusters_out), but "Speaker
+    N" splitting within a meeting is unaffected, since that only depends on
+    diarizer segments, not embeddings. Defaults to enabled on any
+    config-read failure, matching this file's "never fail a meeting"
+    pattern elsewhere.
+    """
+    try:
+        from src.config import get_config
+        return get_config().get_identity_matching_enabled()
+    except Exception:
+        return True
+
+
 def _tag_channel_segments(
     asr_segments: list[dict],
     channel_path: Optional[Path],
     duration_seconds: Optional[float],
     legacy_label: str,
-) -> list[tuple[float, str, str]]:
-    """Build (start, label, text) tuples for one channel's ASR segments.
+    allow_self_match: bool = False,
+    clusters_out: Optional[dict] = None,
+) -> list[tuple[float, str, str, Optional[str]]]:
+    """Build (start, label, text, raw_diarization_speaker_id) tuples for
+    one channel's ASR segments. raw_diarization_speaker_id is the EXACT
+    diarizer cluster id that produced this segment (e.g. "SPEAKER_2"), or
+    None when diarization wasn't available/used at all (the legacy
+    single-speaker fallback). Carried through so callers can persist exact
+    per-line speaker provenance in the saved transcript's sidecar, instead
+    of a relabeling pass having to reconstruct "which cluster produced
+    this line" after the fact via fuzzy timestamp matching -- the fuzzy
+    approach is provably unsafe (see src.speaker_suggestions.relabel_transcript_exact
+    and the plan doc's Phase 8): a channel's cluster segments routinely
+    span nearly the whole recording, so timestamp-tolerance matching can
+    misattribute a line to the wrong cluster, or even the wrong channel.
 
     Tries acoustic diarization first: if the steno-diarize sidecar succeeds
     and finds more than one real speaker cluster, turns are built from the
@@ -816,50 +1013,133 @@ def _tag_channel_segments(
     them via _assign_asr_segments_to_diar_segments). The cluster with the
     most total speaking time keeps the channel's legacy label
     ("You"/"Others"); every other cluster gets a placeholder resolved to
-    "Speaker N" later. ANY failure — missing binary, timeout, bad JSON, or
-    a single-cluster result — falls back to the byte-identical legacy
-    behaviour of labeling every ASR segment with legacy_label.
+    "Speaker N" later — unless the self voiceprint matches a different
+    cluster, in which case the legacy label re-anchors onto that cluster
+    instead (see _apply_voiceprint_matches; mic channel only). NAMED
+    (non-self) speaker identification does not happen automatically here —
+    see src.speaker_suggestions for the human-confirmed suggestion flow.
+    ANY failure — missing binary, timeout, bad JSON, a single-cluster
+    result, or any voiceprint-matching failure — falls back to the
+    byte-identical legacy behaviour of labeling every ASR segment with
+    legacy_label.
+
+    If diarization succeeds and ``clusters_out`` is given (a mutable dict),
+    it's populated in place with this channel's raw cluster/embedding data
+    (build_clusters_from_diarization's shape) so the caller can assemble a
+    {stem}_speakers.json sidecar from data already computed here, without
+    a second diarization pass (previously only backfill-speaker-embeddings
+    -- a separate, manual CLI step re-diarizing from scratch -- ever wrote
+    that sidecar; a live recording never did).
     """
     if not asr_segments:
         return []
+
+    # Set below whenever diarization ran and produced real diar_segments
+    # but _cluster_channel_labels decided NOT to split the transcript
+    # (single real speaker, or multiple ids where one dominates >=
+    # CHANNEL_DOMINANCE_THRESHOLD -- a normal 1:1 call's remote side is
+    # very often exactly this shape). legacy_tagged below still looks up
+    # each ASR segment's OWN nearest diar segment for exact per-line
+    # provenance -- unlike single_raw_sid's earlier, cruder approach
+    # (claiming ONE id for the whole legacy-labeled span), this stays
+    # correct even when a minor-but-real second cluster is genuinely
+    # mixed in, since every segment gets its OWN real id, not a guess.
+    # Left None for a real diarization failure (nothing to look up).
+    diar_segments_for_provenance: Optional[list] = None
 
     if channel_path is not None:
         timeout = max(STENO_DIARIZE_TIMEOUT_FLOOR_S, int(duration_seconds or 0))
         logger.info(f"Diarizing {legacy_label} channel acoustically (up to {timeout}s)...")
         print(f"PROGRESS:diarize:{legacy_label}:start", flush=True)
         try:
+            def _progress_sink(i: int, n: int, _label=legacy_label) -> None:
+                print(f"PROGRESS:diarize:{_label}:embedding:{i}/{n}", flush=True)
+
             with _heartbeat_while_waiting(f"diarize:{legacy_label}"):
-                diar_segments = _run_steno_diarize(channel_path, timeout)
-            if diar_segments:
+                diarize_result = _run_steno_diarize(channel_path, timeout, progress_sink=_progress_sink)
+            if diarize_result:
+                diar_segments, speaker_embeddings = diarize_result
                 cluster_labels = _cluster_channel_labels(diar_segments, legacy_label)
                 if cluster_labels:
+                    cluster_labels = _apply_voiceprint_matches(
+                        speaker_embeddings, cluster_labels, legacy_label, allow_self_match,
+                    )
                     _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
                     diar_tagged = []
                     for segment in diar_segments:
                         text = (segment.get("text") or "").strip()
                         if text:
-                            diar_tagged.append((segment["start"], cluster_labels[segment["speaker"]], text))
+                            diar_tagged.append((
+                                segment["start"], cluster_labels[segment["speaker"]], text,
+                                segment["speaker"],
+                            ))
                     if diar_tagged:
                         logger.info(
                             f"Diarizing {legacy_label} channel found "
                             f"{len(set(cluster_labels.values()))} speaker cluster(s)"
                         )
+                        if clusters_out is not None:
+                            clusters_out.update(
+                                build_clusters_from_diarization(diar_segments, speaker_embeddings)
+                            )
                         return diar_tagged
+                else:
+                    # _cluster_channel_labels returned None: either a
+                    # genuinely single distinct diarizer id, or multiple
+                    # ids where one dominates >= CHANNEL_DOMINANCE_THRESHOLD
+                    # (a barely-there second cluster, treated as noise) --
+                    # not a diarization failure either way. The TRANSCRIPT
+                    # correctly falls back to plain legacy_label (no
+                    # "Speaker N" split needed for one continuous voice) --
+                    # but real diar_segments exist, so legacy_tagged below
+                    # can still look up each ASR segment's OWN nearest diar
+                    # segment for exact per-line provenance. This is by far
+                    # the most common real-world shape (confirmed against
+                    # two different real recordings this session: a normal
+                    # 1:1 call's channels routinely land >99% dominant) --
+                    # without this, exact-match provenance would silently
+                    # never apply to the majority of real meetings.
+                    diar_segments_for_provenance = diar_segments
+                    if clusters_out is not None and speaker_embeddings:
+                        # Still the CLEANEST case for a voiceprint even when
+                        # dominance-collapsed rather than genuinely single:
+                        # one real person's speech is still isolable here.
+                        # A normal 1:1 call's remote side is very often
+                        # exactly this shape -- without this, it could NEVER
+                        # contribute a named-speaker candidate, since it
+                        # never reaches the multi-cluster branch above.
+                        clusters_out.update(build_clusters_from_diarization(diar_segments, speaker_embeddings))
             logger.info(f"Diarizing {legacy_label} channel: falling back to legacy single-speaker labeling")
         finally:
             print(f"PROGRESS:diarize:{legacy_label}:done", flush=True)
 
-    legacy_tagged: list[tuple[float, str, str]] = []
+    legacy_tagged: list[tuple[float, str, str, Optional[str]]] = []
     for s in asr_segments:
         text = (s.get("text") or "").strip()
-        if text:
-            legacy_tagged.append((float(s.get("start") or 0.0), legacy_label, text))
+        if not text:
+            continue
+        start = float(s.get("start") or 0.0)
+        raw_sid = None
+        if diar_segments_for_provenance:
+            # Looked up per-ASR-segment (not one id claimed for the whole
+            # span) -- reuses the same containing/nearest-midpoint logic
+            # _assign_asr_segments_to_diar_segments already relies on, but
+            # WITHOUT calling that function itself: it mutates diar_segments
+            # and can reflow/resplit text across segment boundaries (long-
+            # sentence word-level splitting), which would risk changing
+            # this path's visible output -- still required to be
+            # byte-identical to the pre-Phase-8 legacy behaviour. This is
+            # purely a read-only side lookup for exact-match provenance.
+            idx = _find_nearest_diar_segment(start, float(s.get("end") or start), diar_segments_for_provenance)
+            if idx is not None:
+                raw_sid = diar_segments_for_provenance[idx]["speaker"]
+        legacy_tagged.append((start, legacy_label, text, raw_sid))
     return legacy_tagged
 
 
 def _resolve_speaker_placeholders(
-    tagged: list[tuple[float, str, str]],
-) -> list[tuple[float, str, str]]:
+    tagged: list[tuple[float, str, str, str, Optional[str]]],
+) -> list[tuple[float, str, str, str, Optional[str]]]:
     """Replace placeholder cluster labels (see _cluster_channel_labels) with
     "Speaker N", numbered by first chronological appearance across BOTH
     channels merged and time-sorted — so a reader sees new speakers
@@ -868,17 +1148,20 @@ def _resolve_speaker_placeholders(
     No cross-channel identity matching: a mic placeholder and a system
     placeholder are always treated as different people — telling them
     apart would need voiceprint embeddings, out of scope here.
+
+    `channel` and `raw_diarization_speaker_id` pass through untouched —
+    only `label` is ever rewritten here.
     """
     numbering: dict[str, str] = {}
     next_n = 2
-    resolved: list[tuple[float, str, str]] = []
-    for start, label, text in tagged:
+    resolved: list[tuple[float, str, str, str, Optional[str]]] = []
+    for start, label, text, channel, raw_sid in tagged:
         if label.startswith("__diar__"):
             if label not in numbering:
                 numbering[label] = f"Speaker {next_n}"
                 next_n += 1
             label = numbering[label]
-        resolved.append((start, label, text))
+        resolved.append((start, label, text, channel, raw_sid))
     return resolved
 
 
@@ -1735,11 +2018,47 @@ class WhisperTranscriber:
             # multiple speakers sharing one side of the call; any failure
             # or a single-cluster result falls back to the legacy
             # "You"/"Others" channel-only labeling.
-            tagged: list[tuple[float, str, str]] = []
-            tagged.extend(_tag_channel_segments(mic_segments, mic_path, duration, "You"))
-            tagged.extend(_tag_channel_segments(system_segments, system_path, duration, "Others"))
+            identity_enabled = _identity_matching_enabled()
+            mic_clusters: dict = {}
+            system_clusters: dict = {}
+            tagged: list[tuple[float, str, str, str, Optional[str]]] = []
+            tagged.extend(
+                (start, label, text, "mic", raw_sid)
+                for start, label, text, raw_sid in _tag_channel_segments(
+                    mic_segments, mic_path, duration, "You",
+                    allow_self_match=identity_enabled,
+                    clusters_out=mic_clusters if identity_enabled else None,
+                )
+            )
+            tagged.extend(
+                (start, label, text, "system", raw_sid)
+                for start, label, text, raw_sid in _tag_channel_segments(
+                    system_segments, system_path, duration, "Others",
+                    clusters_out=system_clusters if identity_enabled else None,
+                )
+            )
             tagged.sort(key=lambda t: t[0])
             tagged = _resolve_speaker_placeholders(tagged)
+
+            # Same {"mic"|"system": {"recording_type", "clusters"}} shape
+            # write_speakers_sidecar expects -- lets the caller
+            # (simple_recorder.process_recording_streaming) write the
+            # {stem}_speakers.json sidecar straight from this recording's
+            # own diarization pass, with zero extra diarization cost. Only
+            # a channel that actually diarized (mic_clusters/system_clusters
+            # non-empty) is included -- a channel that fell back to legacy
+            # labeling has no cluster/embedding data to persist.
+            speaker_clusters: dict = {}
+            if mic_clusters:
+                speaker_clusters["mic"] = {
+                    "recording_type": determine_recording_type("mic", has_audio=True),
+                    "clusters": mic_clusters,
+                }
+            if system_clusters:
+                speaker_clusters["system"] = {
+                    "recording_type": determine_recording_type("system", has_audio=True),
+                    "clusters": system_clusters,
+                }
 
             # Each turn carries the start offset of its FIRST segment so the
             # diarised transcript can be timestamped. Only diarised_text is
@@ -1749,14 +2068,14 @@ class WhisperTranscriber:
             # or transcript_text), so the summariser strips these [MM:SS] markers
             # back out on the way in (summarizer._strip_leading_timestamps) —
             # summarisation is unaffected by this display feature.
-            turns: list[tuple[float, str, list[str]]] = []
-            for start, speaker, text in tagged:
+            turns: list[tuple[float, str, list[str], str, Optional[str]]] = []
+            for start, speaker, text, channel, raw_sid in tagged:
                 if turns and turns[-1][1] == speaker:
                     turns[-1][2].append(text)
                 else:
-                    turns.append((start, speaker, [text]))
+                    turns.append((start, speaker, [text], channel, raw_sid))
 
-            plain_parts = [' '.join(parts) for _start, _speaker, parts in turns]
+            plain_parts = [' '.join(parts) for _start, _speaker, parts, _channel, _raw_sid in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else SILENCE_SENTINEL
 
             # Diarised means "more than one voice is distinguishable in this
@@ -1770,16 +2089,37 @@ class WhisperTranscriber:
             # labels covers both the classic two-channel case (You + Others)
             # and the new single-channel multi-speaker case correctly, and
             # still suppresses labelling a genuine one-voice monologue.
-            distinct_labels = {speaker for _start, speaker, _parts in turns}
+            distinct_labels = {speaker for _start, speaker, _parts, _channel, _raw_sid in turns}
             is_diarised = len(distinct_labels) > 1
             if is_diarised:
                 labelled_parts = [
                     f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
-                    for start, speaker, parts in turns
+                    for start, speaker, parts, _channel, _raw_sid in turns
                 ]
                 diarised_text = "\n\n".join(labelled_parts)
+                # EXACT per-line speaker provenance, for
+                # src.speaker_suggestions.relabel_transcript_exact -- ONE
+                # ENTRY PER TURN, IN THE SAME ORDER AS labelled_parts, with
+                # NO FILTERING (a raw_sid of None is a real, meaningful
+                # "unknown" entry, not an omission) -- relabel_transcript_exact
+                # pairs diarised transcript lines to this list purely BY
+                # POSITION, so count and order must stay 1:1 with the
+                # transcript's own diarised lines, always. See the plan
+                # doc's Phase 8: this replaces having to reconstruct "which
+                # cluster produced this line" via fuzzy timestamp matching
+                # after the fact, which is what caused real cross-channel
+                # and same-channel mislabeling found this session -- and
+                # was ALSO why an earlier version of this exact-match
+                # design (matching by timestamp lookup instead of position)
+                # turned out to still be vulnerable to the same class of
+                # bug, just at finer granularity.
+                turn_manifest = [
+                    {"start": start, "channel": channel, "diarization_speaker_id": raw_sid}
+                    for start, _speaker, _parts, channel, raw_sid in turns
+                ]
             else:
                 diarised_text = None
+                turn_manifest = []
 
             return {
                 "text": plain_text,
@@ -1789,6 +2129,14 @@ class WhisperTranscriber:
                 "detected_language": detected_language,
                 "detected_language_probability": detected_language_probability,
                 "engine": engine or self.backend,
+                # {"mic"|"system": {"recording_type", "clusters"}} for
+                # src.speaker_suggestions.write_speakers_sidecar, or {} if
+                # neither channel diarized. See _tag_channel_segments'
+                # clusters_out param.
+                "speaker_clusters": speaker_clusters,
+                # list[{"start", "channel", "diarization_speaker_id"}], one
+                # per turn -- see comment above turn_manifest's construction.
+                "turn_manifest": turn_manifest,
             }
         finally:
             # Clean up temp channel files
@@ -1823,25 +2171,52 @@ class WhisperTranscriber:
 
         asr_segments = result.get("segments") or []
         duration = result.get("duration_seconds")
-        tagged = _tag_channel_segments(asr_segments, audio_filepath, duration, "You")
+        identity_enabled = _identity_matching_enabled()
+        mono_clusters: dict = {}
+        tagged = [
+            (start, label, text, "mic", raw_sid)
+            for start, label, text, raw_sid in _tag_channel_segments(
+                asr_segments, audio_filepath, duration, "You",
+                allow_self_match=identity_enabled,
+                clusters_out=mono_clusters if identity_enabled else None,
+            )
+        ]
         tagged.sort(key=lambda t: t[0])
         tagged = _resolve_speaker_placeholders(tagged)
 
-        turns: list[tuple[float, str, list[str]]] = []
-        for start, speaker, text in tagged:
+        turns: list[tuple[float, str, list[str], str, Optional[str]]] = []
+        for start, speaker, text, channel, raw_sid in tagged:
             if turns and turns[-1][1] == speaker:
                 turns[-1][2].append(text)
             else:
-                turns.append((start, speaker, [text]))
+                turns.append((start, speaker, [text], channel, raw_sid))
 
-        distinct_labels = {speaker for _start, speaker, _parts in turns}
+        distinct_labels = {speaker for _start, speaker, _parts, _channel, _raw_sid in turns}
+        result['speaker_clusters'] = {}
+        result['turn_manifest'] = []
         if len(distinct_labels) > 1:
             labelled_parts = [
                 f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
-                for start, speaker, parts in turns
+                for start, speaker, parts, _channel, _raw_sid in turns
             ]
             result['diarised_text'] = "\n\n".join(labelled_parts)
             result['is_diarised'] = True
+            # No filtering -- one entry per turn, same order as
+            # labelled_parts, paired by POSITION in relabel_transcript_exact
+            # (see the stereo path's comment above turn_manifest for why).
+            result['turn_manifest'] = [
+                {"start": start, "channel": channel, "diarization_speaker_id": raw_sid}
+                for start, _speaker, _parts, channel, raw_sid in turns
+            ]
+            if mono_clusters:
+                # Same "mic" convention _transcribe_diarised_mono's own
+                # docstring documents: an unlabelled mono recording is
+                # attributed to the device owner, matching the stereo
+                # path's mic channel.
+                result['speaker_clusters']['mic'] = {
+                    "recording_type": determine_recording_type("mic", has_audio=True),
+                    "clusters": mono_clusters,
+                }
 
         return result
 
