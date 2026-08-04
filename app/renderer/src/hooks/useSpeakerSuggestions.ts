@@ -124,9 +124,72 @@ export function useDeletePersonProfile() {
  * background for an audio clip a human triggers explicitly. */
 export function useGetSpeakerSampleAudio() {
   return useMutation({
-    mutationFn: async (args: { meetingStem: string; channel: string; diarizationSpeakerId: string }) =>
+    mutationFn: async (args: {
+      meetingStem: string;
+      channel: string;
+      diarizationSpeakerId: string;
+      /** Index into the row's `samples`. Omitted plays the longest turn
+       * (the collapsed row's single button); a number plays exactly that
+       * excerpt, so the audio matches the text it sits next to. */
+      segmentIndex?: number;
+    }) =>
       unwrap(
-        await ipc().speakers.getSampleAudio(args.meetingStem, args.channel, args.diarizationSpeakerId),
+        await ipc().speakers.getSampleAudio(
+          args.meetingStem, args.channel, args.diarizationSpeakerId, args.segmentIndex,
+        ),
       ),
+  });
+}
+
+/** Marking a cluster as holding more than one person. Invalidates the whole
+ * speakers tree rather than just this meeting's suggestions: the marking
+ * withdraws the cluster from meeting-wide person exclusivity, so ANOTHER
+ * row's suggestion can change as a direct result of marking this one. */
+export function useMarkSpeakerCluster() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      meetingStem: string;
+      channel: string;
+      diarizationSpeakerId: string;
+      containsMultipleSpeakers: boolean;
+      /** The meeting's summaryFile, carried for the same reason the confirm
+       * mutation carries it: marking a CONFIRMED cluster withdraws that
+       * person from the meeting's participants, and the open detail view
+       * reads those from its own cached query. Without invalidating it, the
+       * Participants line keeps showing the withdrawn name until an
+       * unrelated refetch or a navigation. */
+      summaryFile?: string | null;
+    }) => {
+      const { summaryFile: _ignored, ...call } = args;
+      return unwrap(await ipc().speakers.markCluster(call));
+    },
+    onSuccess: async (_data, args) => {
+      await qc.invalidateQueries({ queryKey: speakersKeys.all });
+      if (args.summaryFile) {
+        await qc.invalidateQueries({ queryKey: meetingsKeys.detail(args.summaryFile) });
+      }
+    },
+  });
+}
+
+/** How many speaker clusters of a meeting are still unnamed -- read once,
+ * right before a delete confirmation, to decide whether to add a sentence
+ * saying the unnamed ones are about to become unnameable forever.
+ *
+ * Failures resolve to null rather than throwing: this decides whether ONE
+ * extra sentence appears, and must never stand between someone and
+ * deleting their own recording. `enabled` keeps it from firing at all
+ * until a delete is actually being confirmed. */
+export function useSpeakerNamingStatus(meetingStem: string | null | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: [...speakersKeys.all, 'naming-status', meetingStem ?? null] as const,
+    queryFn: async () => {
+      const res = await ipc().speakers.namingStatus(meetingStem as string);
+      return res.success ? res : null;
+    },
+    enabled: enabled && Boolean(meetingStem),
+    retry: false,
+    staleTime: 0,
   });
 }

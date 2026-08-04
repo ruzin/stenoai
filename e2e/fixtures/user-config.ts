@@ -191,19 +191,31 @@ export interface FixtureSpeakerCluster {
  * known-good sidecar so suggest-speakers/confirm-speaker have real data to
  * read. Returns the absolute path of the written sidecar.
  */
+export interface FixtureTurnManifestEntry {
+  start: number;
+  channel: string;
+  diarization_speaker_id: string;
+}
+
 export function writeSpeakersSidecar(
   userDataDir: string,
   stem: string,
   channels: Record<string, { recording_type: string; clusters: Record<string, FixtureSpeakerCluster> }>,
+  turnManifest?: FixtureTurnManifestEntry[],
 ): string {
   const outputDir = path.join(userDataDir, 'output');
   mkdirSync(outputDir, { recursive: true });
   const sidecarFile = path.join(outputDir, `${stem}_speakers.json`);
-  const data = {
+  const data: Record<string, unknown> = {
     meeting_id: stem,
     created_at: Date.now() / 1000,
     channels,
   };
+  // Omitted (not written empty) when absent, exactly like the real writer --
+  // and the distinction MATTERS: without a manifest the backend attributes
+  // no excerpt text at all, because a backfilled sidecar's segments come
+  // from a different diarization run than the transcript's timestamps.
+  if (turnManifest && turnManifest.length > 0) data.transcript_lines = turnManifest;
   writeFileSync(sidecarFile, JSON.stringify(data, null, 2));
   return sidecarFile;
 }

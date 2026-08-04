@@ -516,10 +516,44 @@ def _merge_close_diar_segments(segments: list[dict], max_gap: float) -> list[dic
     for segment in segments[1:]:
         last = merged[-1]
         if segment["speaker"] == last["speaker"] and segment["start"] - last["end"] <= max_gap:
-            last["end"] = segment["end"]
+            # max(), not assignment: sorted-by-start does not mean the next
+            # segment ends later. A same-speaker segment nested inside the
+            # one before it (Sortformer emits these, and clamping can leave
+            # one behind) would otherwise pull the merged end BACKWARDS and
+            # delete speaking time that was really there.
+            last["end"] = max(last["end"], segment["end"])
         else:
             merged.append(dict(segment))
     return merged
+
+
+def _clamp_overlapping_diar_segments(segments: list[dict]) -> list[dict]:
+    """Give each moment of audio to one speaker only, by pulling a segment's
+    start up to where the previous speaker actually stopped. Segments must
+    already be sorted by start time; the result is re-sorted by the caller.
+
+    Sortformer really does emit overlapping segments -- observed on
+    single-mic audio, see the note above LONG_SENTENCE_SPLIT_THRESHOLD_S.
+    Left as-is, the overlapped span is counted twice: once for each cluster.
+    That inflated total is what _cluster_channel_labels weighs against
+    CHANNEL_DOMINANCE_THRESHOLD to decide whether a channel is one voice or
+    gets split into "Speaker N" at all, so a run of overlap can decide the
+    speaker count on double-counted time.
+
+    A segment lying ENTIRELY inside an earlier one is left untouched:
+    clamping it would leave nothing of it, and a cluster that only ever
+    speaks inside someone else's turn would vanish from the channel
+    completely -- deleting a speaker to fix an arithmetic error is the
+    worse trade. Its span stays double-counted, which is the rarer case."""
+    clamped: list[dict] = []
+    running_end: Optional[float] = None
+    for segment in segments:
+        current = dict(segment)
+        if running_end is not None and current["start"] < running_end < current["end"]:
+            current["start"] = running_end
+        clamped.append(current)
+        running_end = current["end"] if running_end is None else max(running_end, current["end"])
+    return clamped
 
 
 # A single mic capturing two people is a much harder acoustic problem than a
@@ -535,11 +569,37 @@ def _merge_close_diar_segments(segments: list[dict], max_gap: float) -> list[dic
 # whenever it actually overlaps more than one distinct diarizer speaker.
 LONG_SENTENCE_SPLIT_THRESHOLD_S = 5.0
 
+# How far outside every diarizer segment an ASR timestamp may sit and still
+# be attributed to the nearest speaker. Without a bound, "nearest" is
+# unconditional: text at 0-1s with the channel's only diarizer segment at
+# 2-3s was attributed in full to a speaker who, by the diarizer's own
+# output, was not speaking anywhere near it -- and that attribution also
+# reached the raw cluster id used for voiceprints, so one unplaceable line
+# could feed a profile. Normal ASR-vs-diarizer boundary disagreement is
+# well under a second (a clipped onset, a trailing word, breath before a
+# turn); a whole second of diarizer-side silence around a sentence means
+# the diarizer heard nobody there, not that it heard someone nearby.
+#
+# Judgment value, not a measured optimum: chosen to sit clearly above
+# observed boundary slop and well above STENO_DIARIZE_MERGE_GAP_S, so only
+# genuinely unplaceable text is affected. Raising it moves behaviour back
+# toward the old unconditional nearest.
+DIAR_LABEL_FALLBACK_TOLERANCE_S = 1.0
 
-def _find_nearest_diar_segment(start: float, end: float, diar_segments: list[dict]) -> Optional[int]:
+
+def _find_nearest_diar_segment(
+    start: float,
+    end: float,
+    diar_segments: list[dict],
+    max_gap: Optional[float] = None,
+) -> Optional[int]:
     """Index of the diar segment containing [start, end]'s midpoint, or the
     nearest one by boundary distance if the midpoint falls in an uncovered
-    gap. Returns None only when diar_segments is empty."""
+    gap.
+
+    With ``max_gap`` set, a midpoint further than that from every segment is
+    reported as unplaceable (None) instead of borrowing the nearest speaker.
+    Returns None when diar_segments is empty."""
     midpoint = (start + end) / 2
     best_i, best_dist = None, float("inf")
     for i, segment in enumerate(diar_segments):
@@ -552,10 +612,14 @@ def _find_nearest_diar_segment(start: float, end: float, diar_segments: list[dic
         )
         if dist < best_dist:
             best_i, best_dist = i, dist
+    if max_gap is not None and best_dist > max_gap:
+        return None
     return best_i
 
 
-def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segments: list[dict]) -> None:
+def _assign_asr_segments_to_diar_segments(
+    asr_segments: list[dict], diar_segments: list[dict]
+) -> list[dict]:
     """Assign each ASR (Parakeet) sentence to the diarizer segment(s) it
     belongs to.
 
@@ -577,12 +641,21 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
     whisper.cpp backend, or an older cached result), the sentence falls back
     to whole-block assignment like the normal case.
 
-    Mutates diar_segments in place, attaching joined text as segment["text"]."""
+    Unplaceable case: a sentence whose midpoint sits further than
+    DIAR_LABEL_FALLBACK_TOLERANCE_S outside every diarizer segment is not
+    attributed to anyone. It is returned to the caller instead, which keeps
+    the text in the transcript under the channel's own label rather than
+    naming a speaker the diarizer never heard there. Text is never dropped.
+
+    Mutates diar_segments in place, attaching joined text as
+    segment["text"]. Returns the ASR segments that could not be placed, in
+    input order (empty list in the normal case)."""
     for segment in diar_segments:
         segment["text"] = ""
     if not diar_segments:
-        return
+        return list(asr_segments)
 
+    unplaceable: list[dict] = []
     texts_by_segment: dict[int, list[str]] = {i: [] for i in range(len(diar_segments))}
     for asr_segment in asr_segments:
         text = (asr_segment.get("text") or "").strip()
@@ -610,8 +683,17 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
                     continue
                 t_start = float(token.get("start") or 0.0)
                 t_end = float(token.get("end") or t_start)
-                idx = _find_nearest_diar_segment(t_start, t_end, diar_segments)
+                idx = _find_nearest_diar_segment(
+                    t_start, t_end, diar_segments, DIAR_LABEL_FALLBACK_TOLERANCE_S
+                )
                 if idx is None:
+                    # This word carries no usable speaker evidence. Keep it
+                    # with the turn it is already inside instead of opening
+                    # one for a speaker the diarizer didn't hear here --
+                    # words before the first placeable one simply stay
+                    # buffered in run_words and lead that first run, so the
+                    # sentence's word order survives either way.
+                    run_words.append(token_text)
                     continue
                 if run_index is not None and idx != run_index:
                     texts_by_segment[run_index].append("".join(run_words))
@@ -620,13 +702,23 @@ def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segment
                 run_words.append(token_text)
             if run_index is not None and run_words:
                 texts_by_segment[run_index].append("".join(run_words))
+            elif run_index is None:
+                # Not one word in the sentence could be placed -- including
+                # the case where the token list carries no usable text at
+                # all, which used to drop the sentence silently.
+                unplaceable.append(asr_segment)
         else:
-            idx = _find_nearest_diar_segment(start, end, diar_segments)
+            idx = _find_nearest_diar_segment(
+                start, end, diar_segments, DIAR_LABEL_FALLBACK_TOLERANCE_S
+            )
             if idx is not None:
                 texts_by_segment[idx].append(text)
+            else:
+                unplaceable.append(asr_segment)
 
     for i, segment in enumerate(diar_segments):
         segment["text"] = " ".join(t.strip() for t in texts_by_segment[i] if t.strip()).strip()
+    return unplaceable
 
 
 # How often to print a HEARTBEAT: line while blocked waiting on
@@ -839,7 +931,16 @@ def _run_steno_diarize(
         ),
         key=lambda s: s["start"],
     )
+    # Merge first so a same-speaker overlap (the flicker case) collapses into
+    # one turn instead of being clamped into two touching ones; then clamp
+    # what is left, which is overlap between DIFFERENT speakers; then merge
+    # again, since clamping can leave two same-speaker segments flush.
+    # Clamping only ever moves a start forward, so re-sort before the second
+    # merge -- a segment nested inside a longer one keeps its original start
+    # and can end up out of order.
     merged = _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
+    clamped = sorted(_clamp_overlapping_diar_segments(merged), key=lambda s: s["start"])
+    merged = _merge_close_diar_segments(clamped, STENO_DIARIZE_MERGE_GAP_S)
     embeddings = {str(k): [float(x) for x in v] for k, v in raw_embeddings.items()}
     return merged, embeddings
 
@@ -1064,7 +1165,7 @@ def _tag_channel_segments(
                     cluster_labels = _apply_voiceprint_matches(
                         speaker_embeddings, cluster_labels, legacy_label, allow_self_match,
                     )
-                    _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
+                    unplaceable = _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
                     diar_tagged = []
                     for segment in diar_segments:
                         text = (segment.get("text") or "").strip()
@@ -1073,6 +1174,18 @@ def _tag_channel_segments(
                                 segment["start"], cluster_labels[segment["speaker"]], text,
                                 segment["speaker"],
                             ))
+                    # Text the diarizer left unplaceable still belongs in the
+                    # transcript -- under this channel's own label, with no
+                    # raw cluster id, so it reads as "someone on this side"
+                    # and can never feed a voiceprint. Dropping it would lose
+                    # real speech; naming a speaker for it would invent one.
+                    for asr_segment in unplaceable:
+                        text = (asr_segment.get("text") or "").strip()
+                        if text:
+                            diar_tagged.append((
+                                float(asr_segment.get("start") or 0.0), legacy_label, text, None,
+                            ))
+                    diar_tagged.sort(key=lambda turn: turn[0])
                     if diar_tagged:
                         logger.info(
                             f"Diarizing {legacy_label} channel found "
@@ -1130,7 +1243,21 @@ def _tag_channel_segments(
             # this path's visible output -- still required to be
             # byte-identical to the pre-Phase-8 legacy behaviour. This is
             # purely a read-only side lookup for exact-match provenance.
-            idx = _find_nearest_diar_segment(start, float(s.get("end") or start), diar_segments_for_provenance)
+            #
+            # Bounded like the labeling path, and for the same reason even
+            # when the channel holds a single cluster: raw_sid claims THIS
+            # cluster produced THIS line, and a line sitting far outside
+            # every segment the diarizer emitted has no evidence behind
+            # that claim -- it may well be someone the diarizer never
+            # segmented at all. A later rename would then put a name on a
+            # line that was never that person's. None is the honest answer;
+            # the text still reaches the transcript under legacy_label.
+            idx = _find_nearest_diar_segment(
+                start,
+                float(s.get("end") or start),
+                diar_segments_for_provenance,
+                DIAR_LABEL_FALLBACK_TOLERANCE_S,
+            )
             if idx is not None:
                 raw_sid = diar_segments_for_provenance[idx]["speaker"]
         legacy_tagged.append((start, legacy_label, text, raw_sid))
@@ -2068,9 +2195,18 @@ class WhisperTranscriber:
             # or transcript_text), so the summariser strips these [MM:SS] markers
             # back out on the way in (summarizer._strip_leading_timestamps) —
             # summarisation is unaffected by this display feature.
+            # A turn is one span of ONE provenance, so the run breaks on the
+            # raw cluster id as well as the label. Merging on the label alone
+            # was reachable and wrong: text the diarizer could not place is
+            # appended under the CHANNEL's own label (raw_sid None), and
+            # _cluster_channel_labels hands that same label to the channel's
+            # dominant cluster -- so an unplaceable sentence next to that
+            # cluster's turn was folded in and recorded as its speech, which
+            # is exactly the attribution the unplaceable path withholds it
+            # from. Same reasoning in the mono path's copy of this loop.
             turns: list[tuple[float, str, list[str], str, Optional[str]]] = []
             for start, speaker, text, channel, raw_sid in tagged:
-                if turns and turns[-1][1] == speaker:
+                if turns and turns[-1][1] == speaker and turns[-1][4] == raw_sid:
                     turns[-1][2].append(text)
                 else:
                     turns.append((start, speaker, [text], channel, raw_sid))
@@ -2184,9 +2320,11 @@ class WhisperTranscriber:
         tagged.sort(key=lambda t: t[0])
         tagged = _resolve_speaker_placeholders(tagged)
 
+        # Breaks on the raw cluster id too -- see the stereo path's comment
+        # above its copy of this loop for the attribution that depends on it.
         turns: list[tuple[float, str, list[str], str, Optional[str]]] = []
         for start, speaker, text, channel, raw_sid in tagged:
-            if turns and turns[-1][1] == speaker:
+            if turns and turns[-1][1] == speaker and turns[-1][4] == raw_sid:
                 turns[-1][2].append(text)
             else:
                 turns.append((start, speaker, [text], channel, raw_sid))

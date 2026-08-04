@@ -25,6 +25,7 @@ from unittest.mock import Mock, patch
 from src.transcriber import (
     BLEED_JACCARD_THRESHOLD,
     CHANNEL_DOMINANCE_THRESHOLD,
+    DIAR_LABEL_FALLBACK_TOLERANCE_S,
     DIARISED_SPLIT_TIMEOUT_S,
     MIN_RMS_THRESHOLD,
     STENO_DIARIZE_MERGE_GAP_S,
@@ -33,6 +34,7 @@ from src.transcriber import (
     WhisperTranscriber,
     _apply_voiceprint_matches,
     _assign_asr_segments_to_diar_segments,
+    _clamp_overlapping_diar_segments,
     _cluster_channel_labels,
     _diarised_split_timeout,
     _format_timestamp,
@@ -325,6 +327,53 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         self.assertEqual(manifest[0]["start"], 0.0)
         self.assertEqual(manifest[3]["start"], 9.2)
 
+    def test_unplaceable_text_never_inherits_a_neighbouring_clusters_provenance(self):
+        # Found by review. Text the diarizer could not place is appended
+        # under the CHANNEL's own label -- and _cluster_channel_labels gives
+        # the channel's dominant cluster that exact same label. The turn
+        # loop coalesced on the label alone and kept the FIRST entry's
+        # raw_sid, so an unplaceable sentence landing after a dominant-
+        # cluster turn was silently recorded as that cluster's own speech.
+        #
+        # It would then reach a human twice: quoted under that speaker in
+        # the review panel, and rewritten to that person's name by
+        # confirm-speaker's relabel. Keeping the text while withholding the
+        # cluster id is the entire point of that fallback, and merging by
+        # label alone handed the id back.
+        mic_diar = [
+            {"start": 0.0, "end": 8.0, "speaker": "SPEAKER_1"},
+            {"start": 10.0, "end": 20.0, "speaker": "SPEAKER_0"},  # dominant -> labelled "You"
+        ]
+        # The system channel speaks EARLY, so nothing sits between the mic's
+        # dominant-cluster turn and the unplaceable sentence -- otherwise
+        # the other channel's turn breaks the run and hides the defect.
+        system_diar = [{"start": 5.0, "end": 5.5, "speaker": "SPEAKER_0"}]
+        with patch("src.transcriber._run_steno_diarize", side_effect=[(mic_diar, {}), (system_diar, {})]):
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Someone else. The owner. A stray sentence.", "segments": [
+                    {"text": "Someone else.", "start": 1.0, "end": 2.0},
+                    {"text": "The owner.", "start": 11.0, "end": 12.0},
+                    # Forty seconds from any mic segment: unplaceable, and it
+                    # sorts directly after the dominant cluster's turn.
+                    {"text": "A stray sentence.", "start": 60.0, "end": 61.0},
+                ]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 5.2, "end": 5.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        mic_entries = [m for m in result["turn_manifest"] if m["channel"] == "mic"]
+        self.assertEqual(
+            [m["diarization_speaker_id"] for m in mic_entries],
+            ["SPEAKER_1", "SPEAKER_0", None],
+            "the unplaceable sentence must stay its own turn, with no cluster id",
+        )
+        # And it must not have been folded into the owner's line, which is
+        # what would put it under the owner's name on a relabel.
+        owner_line = [
+            line for line in result["diarised_text"].split("\n\n") if "The owner." in line
+        ][0]
+        self.assertNotIn("A stray sentence.", owner_line)
+
     def test_turn_manifest_has_none_raw_sid_entries_when_diarization_totally_fails(self):
         # is_diarised is about cross-channel label distinctness (You vs
         # Others), not per-channel diarization success -- a total
@@ -488,6 +537,37 @@ class TranscribeDiarisedMonoTests(unittest.TestCase):
         self.assertIn("[You] Great.", result["diarised_text"])
         # The plain text field is untouched by diarisation.
         self.assertEqual(result["text"], "Hi there. Not bad. Great.")
+
+    def test_unplaceable_text_never_inherits_a_neighbouring_clusters_provenance(self):
+        # The mono path builds its turns with its own copy of the same loop,
+        # so it needs its own assertion -- this file's history is that a fix
+        # applied to one path and not the other is how the defect comes back.
+        # See the stereo test of the same name for what is at stake.
+        diar_segments = [
+            {"start": 0.0, "end": 8.0, "speaker": "SPEAKER_1"},
+            {"start": 10.0, "end": 20.0, "speaker": "SPEAKER_0"},  # dominant -> labelled "You"
+        ]
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": "Someone else. The owner. A stray sentence.",
+                "segments": [
+                    {"text": "Someone else.", "start": 1.0, "end": 2.0},
+                    {"text": "The owner.", "start": 11.0, "end": 12.0},
+                    {"text": "A stray sentence.", "start": 60.0, "end": 61.0},
+                ],
+                "duration_seconds": 61.0,
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        self.assertEqual(
+            [m["diarization_speaker_id"] for m in result["turn_manifest"]],
+            ["SPEAKER_1", "SPEAKER_0", None],
+            "the unplaceable sentence must stay its own turn, with no cluster id",
+        )
+        owner_line = [
+            line for line in result["diarised_text"].split("\n\n") if "The owner." in line
+        ][0]
+        self.assertNotIn("A stray sentence.", owner_line)
 
     def test_single_speaker_mono_is_not_diarised(self):
         # Byte-identical-to-legacy fast path: one real cluster means nothing
@@ -800,10 +880,94 @@ class MergeCloseDiarSegmentsTests(unittest.TestCase):
         merged = _merge_close_diar_segments(segments, 0.3)
         self.assertEqual(len(merged), 2)
 
+    def test_nested_same_speaker_segment_does_not_shorten_the_turn(self):
+        # Sorted by start does not mean each segment ends later than the
+        # one before. A nested same-speaker segment used to pull the merged
+        # end backwards, deleting speaking time that was really there --
+        # and that time feeds the dominance share deciding the speaker count.
+        segments = [
+            {"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"},
+            {"start": 2.0, "end": 3.0, "speaker": "SPEAKER_0"},
+        ]
+        merged = _merge_close_diar_segments(segments, 0.3)
+        self.assertEqual(merged, [{"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"}])
+
     def test_does_not_mutate_input(self):
         segments = [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0"}]
         _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
         self.assertEqual(segments, [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0"}])
+
+
+class ClampOverlappingDiarSegmentsTests(unittest.TestCase):
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(_clamp_overlapping_diar_segments([]), [])
+
+    def test_partial_overlap_is_given_to_the_earlier_speaker(self):
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments), [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ])
+
+    def test_untouched_when_nothing_overlaps(self):
+        segments = [
+            {"start": 0.0, "end": 2.0, "speaker": "SPEAKER_0"},
+            {"start": 2.5, "end": 4.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments), segments)
+
+    def test_fully_contained_segment_survives_instead_of_being_clamped_away(self):
+        # Clamping this one leaves nothing of it, and a cluster that only
+        # ever speaks inside someone else's turn would disappear from the
+        # channel entirely. Double-counted time is the cheaper mistake.
+        segments = [
+            {"start": 0.0, "end": 10.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 4.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments), segments)
+
+    def test_clamps_against_the_furthest_end_seen_not_just_the_previous(self):
+        # A long segment followed by a short nested one must not let the
+        # next real turn start back inside the long one.
+        segments = [
+            {"start": 0.0, "end": 10.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 4.0, "speaker": "SPEAKER_1"},
+            {"start": 8.0, "end": 12.0, "speaker": "SPEAKER_1"},
+        ]
+        self.assertEqual(_clamp_overlapping_diar_segments(segments)[2], {
+            "start": 10.0, "end": 12.0, "speaker": "SPEAKER_1",
+        })
+
+    def test_does_not_mutate_input(self):
+        segments = [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ]
+        _clamp_overlapping_diar_segments(segments)
+        self.assertEqual(segments[1]["start"], 3.0)
+
+    def test_a_nested_same_speaker_segment_survives_the_whole_pipeline(self):
+        # A[0,4] B[1,5] A[2,3]: clamping moves B behind A, which leaves the
+        # nested A next to the outer one and used to truncate the outer A
+        # from 4 to 3 in the second merge. A must keep every second it held.
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 4.0},
+                {"speakerId": "SPEAKER_1", "start": 1.0, "end": 5.0},
+                {"speakerId": "SPEAKER_0", "start": 2.0, "end": 3.0},
+            ],
+            "speakers": {},
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, _ = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [
+            {"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"},
+            {"start": 4.0, "end": 5.0, "speaker": "SPEAKER_1"},
+        ])
 
 
 class AssignAsrSegmentsToDiarSegmentsTests(unittest.TestCase):
@@ -924,6 +1088,135 @@ class AssignAsrSegmentsToDiarSegmentsTests(unittest.TestCase):
         texts = [d["text"] for d in diar_segments]
         self.assertEqual(texts.count("one two three four"), 1)
 
+    def test_sentence_far_from_every_segment_is_returned_not_attributed(self):
+        # Regression for an unconditional "nearest" fallback: with the
+        # channel's only diarizer segment at 2-3s, text at 0-1s was
+        # attributed in full to a speaker the diarizer never heard there.
+        # It must come back unplaceable instead -- and the text must
+        # survive, so the caller can keep it under the channel's own label.
+        diar_segments = [{"start": 2.0, "end": 3.0, "speaker": "SPEAKER_0"}]
+        asr_segment = {"text": "Nobody was speaking here.", "start": 0.0, "end": 1.0}
+        unplaceable = _assign_asr_segments_to_diar_segments([asr_segment], diar_segments)
+        self.assertEqual(diar_segments[0]["text"], "")
+        self.assertEqual(unplaceable, [asr_segment])
+
+    def test_sentence_just_inside_the_tolerance_still_attaches(self):
+        # The bound only rejects text with no plausible turn nearby --
+        # ordinary boundary slop (a clipped onset, breath before a turn)
+        # must still land on the adjacent speaker, as it always has.
+        gap = DIAR_LABEL_FALLBACK_TOLERANCE_S / 2
+        diar_segments = [{"start": 2.0, "end": 3.0, "speaker": "SPEAKER_0"}]
+        unplaceable = _assign_asr_segments_to_diar_segments(
+            [{"text": "Just before the turn.", "start": 2.0 - gap - 0.2, "end": 2.0 - gap + 0.2}],
+            diar_segments,
+        )
+        self.assertEqual(diar_segments[0]["text"], "Just before the turn.")
+        self.assertEqual(unplaceable, [])
+
+    def test_unplaceable_word_stays_with_the_current_turn(self):
+        # Word-level splitting must not invent a turn for a word that
+        # carries no speaker evidence, and must not drop it either -- it
+        # belongs to whichever turn it is already inside.
+        diar_segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0"},
+            {"start": 20.0, "end": 23.0, "speaker": "SPEAKER_1"},
+        ]
+        tokens = [
+            {"text": " one", "start": 0.5, "end": 1.0},
+            # Sits in the long uncovered gap, far from both speakers.
+            {"text": " two", "start": 10.0, "end": 10.5},
+            {"text": " three", "start": 21.0, "end": 21.5},
+        ]
+        unplaceable = _assign_asr_segments_to_diar_segments(
+            [{"text": "one two three", "start": 0.5, "end": 21.5, "tokens": tokens}],
+            diar_segments,
+        )
+        self.assertEqual(diar_segments[0]["text"], "one two")
+        self.assertEqual(diar_segments[1]["text"], "three")
+        self.assertEqual(unplaceable, [])
+
+    def test_unplaceable_word_stays_put_even_when_the_next_turn_is_nearer(self):
+        # Deliberate behaviour change, not a side effect: this word used to
+        # go to whichever segment was nearest, so being closer to the NEXT
+        # speaker moved it there. Out of tolerance, "nearest" is not
+        # evidence -- continuing the turn the word is already in beats
+        # opening one for a speaker who starts five seconds later.
+        diar_segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0"},
+            {"start": 20.0, "end": 23.0, "speaker": "SPEAKER_1"},
+        ]
+        tokens = [
+            {"text": " one", "start": 1.0, "end": 1.5},
+            # Nearer to SPEAKER_1 (5s) than to SPEAKER_0 (12s), but far
+            # outside both.
+            {"text": " two", "start": 15.0, "end": 15.5},
+            {"text": " three", "start": 21.0, "end": 21.5},
+        ]
+        unplaceable = _assign_asr_segments_to_diar_segments(
+            [{"text": "one two three", "start": 1.0, "end": 21.5, "tokens": tokens}],
+            diar_segments,
+        )
+        self.assertEqual(diar_segments[0]["text"], "one two")
+        self.assertEqual(diar_segments[1]["text"], "three")
+        self.assertEqual(unplaceable, [])
+
+    def test_leading_unplaceable_words_lead_the_first_real_turn(self):
+        # Words before the first placeable one have no turn to stay with
+        # yet -- they must still keep their position in the sentence.
+        diar_segments = [
+            {"start": 12.0, "end": 14.0, "speaker": "SPEAKER_0"},
+            {"start": 20.0, "end": 23.0, "speaker": "SPEAKER_1"},
+        ]
+        tokens = [
+            # Ahead of every segment, so no turn is open yet.
+            {"text": " one", "start": 0.5, "end": 1.0},
+            {"text": " two", "start": 13.0, "end": 13.5},
+            {"text": " three", "start": 21.0, "end": 21.5},
+        ]
+        unplaceable = _assign_asr_segments_to_diar_segments(
+            [{"text": "one two three", "start": 0.5, "end": 21.5, "tokens": tokens}],
+            diar_segments,
+        )
+        self.assertEqual(diar_segments[0]["text"], "one two")
+        self.assertEqual(diar_segments[1]["text"], "three")
+        self.assertEqual(unplaceable, [])
+
+    def test_sentence_with_no_placeable_word_is_returned_whole(self):
+        diar_segments = [
+            {"start": 40.0, "end": 43.0, "speaker": "SPEAKER_0"},
+            {"start": 50.0, "end": 53.0, "speaker": "SPEAKER_1"},
+        ]
+        tokens = [
+            {"text": " one", "start": 0.5, "end": 1.0},
+            {"text": " two", "start": 5.0, "end": 5.5},
+        ]
+        asr_segment = {"text": "one two", "start": 0.5, "end": 5.5, "tokens": tokens}
+        unplaceable = _assign_asr_segments_to_diar_segments([asr_segment], diar_segments)
+        self.assertEqual([d["text"] for d in diar_segments], ["", ""])
+        self.assertEqual(unplaceable, [asr_segment])
+
+    def test_long_sentence_whose_tokens_carry_no_text_is_not_dropped(self):
+        # Word-level splitting reached on a token list with nothing usable
+        # in it used to leave the sentence in no segment at all -- the text
+        # simply disappeared from the transcript.
+        diar_segments = [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_0"},
+            {"start": 3.0, "end": 6.0, "speaker": "SPEAKER_1"},
+        ]
+        tokens = [{"text": "  ", "start": 0.5, "end": 1.0}, {"text": "", "start": 5.0, "end": 5.5}]
+        asr_segment = {"text": "one two", "start": 0.5, "end": 5.5, "tokens": tokens}
+        unplaceable = _assign_asr_segments_to_diar_segments([asr_segment], diar_segments)
+        self.assertEqual([d["text"] for d in diar_segments], ["", ""])
+        self.assertEqual(unplaceable, [asr_segment])
+
+    def test_empty_diar_segments_reports_everything_unplaceable(self):
+        # Nothing to place text against -- the caller must hear about it
+        # rather than the text quietly disappearing.
+        asr_segment = {"text": "Hello", "start": 0.0, "end": 1.0}
+        self.assertEqual(
+            _assign_asr_segments_to_diar_segments([asr_segment], []), [asr_segment]
+        )
+
 
 class ClusterChannelLabelsTests(unittest.TestCase):
     def test_single_speaker_returns_none(self):
@@ -1040,6 +1333,61 @@ class TagChannelSegmentsTests(unittest.TestCase):
         self.assertEqual(set(clusters_out.keys()), {"SPEAKER_0"})
         self.assertEqual(clusters_out["SPEAKER_0"]["embedding"], [0.7, 0.1])
 
+    def test_unplaceable_text_keeps_the_channel_label_and_no_raw_sid(self):
+        # A sentence the diarizer left no segment anywhere near must stay in
+        # the transcript, but under the channel's own label and with no raw
+        # cluster id -- so it reads as "someone on this side", can never feed
+        # a voiceprint, and still sorts into place chronologically.
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "system.wav"
+        channel_path.write_bytes(b"stub")
+
+        diar_segments = [
+            {"start": 10.0, "end": 14.0, "speaker": "SPEAKER_0"},
+            {"start": 14.5, "end": 18.0, "speaker": "SPEAKER_1"},
+        ]
+        embeddings = {"SPEAKER_0": [0.7, 0.1], "SPEAKER_1": [0.1, 0.7]}
+        asr_segments = [
+            # Sits in a stretch the diarizer reported nobody speaking in.
+            {"text": "Orphan line.", "start": 0.5, "end": 1.5},
+            {"text": "Hello there.", "start": 11.0, "end": 12.0},
+            {"text": "Sounds good.", "start": 15.0, "end": 16.0},
+        ]
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, embeddings)):
+            result = _tag_channel_segments(asr_segments, channel_path, 20.0, "Others")
+
+        self.assertEqual(result[0], (0.5, "Others", "Orphan line.", None))
+        self.assertEqual([turn[0] for turn in result], sorted(turn[0] for turn in result))
+        # The two placeable lines still get their exact cluster provenance.
+        self.assertEqual([turn[3] for turn in result[1:]], ["SPEAKER_0", "SPEAKER_1"])
+
+    def test_single_cluster_does_not_claim_provenance_for_a_far_away_line(self):
+        # A single distinct cluster leaves no OTHER speaker to borrow, but
+        # raw_sid still claims this cluster produced this line. A line far
+        # outside every segment the diarizer emitted has nothing behind
+        # that claim -- it may be someone the diarizer never segmented --
+        # and a later rename would put a name on words that were never
+        # that person's. The text still ships under the channel label.
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "system.wav"
+        channel_path.write_bytes(b"stub")
+
+        diar_segments = [{"start": 100.0, "end": 101.0, "speaker": "SPEAKER_0"}]
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
+            result = _tag_channel_segments(
+                [
+                    {"text": "Miles away.", "start": 0.0, "end": 1.0},
+                    {"text": "Right here.", "start": 100.2, "end": 100.8},
+                ],
+                channel_path, 120.0, "Others",
+            )
+        self.assertEqual(result, [
+            (0.0, "Others", "Miles away.", None),
+            (100.2, "Others", "Right here.", "SPEAKER_0"),
+        ])
+
     def test_prints_progress_diarize_start_and_done_around_a_successful_run(self):
         # Processing.tsx (the renderer) drives its 'diarizing' stage/sub-label
         # entirely off these two lines -- they must bracket the call
@@ -1129,10 +1477,19 @@ class HeartbeatWhileWaitingTests(unittest.TestCase):
         import io
         from src.transcriber import _heartbeat_while_waiting
 
+        # Waits for the beats instead of sleeping a fixed 0.09s and hoping
+        # four 0.02s ticks fit inside it. On a loaded CI runner they did
+        # not, and the job failed on timing rather than on behaviour -- seen
+        # on this branch, green on the same commit locally. The wait exits
+        # as soon as the second beat lands, so the fast path stays fast.
         buf = io.StringIO()
+        deadline = time.monotonic() + 5.0
         with patch("sys.stdout", buf):
             with _heartbeat_while_waiting("diarize:You", interval_s=0.02):
-                time.sleep(0.09)
+                while time.monotonic() < deadline:
+                    if buf.getvalue().count("HEARTBEAT:diarize:You") >= 2:
+                        break
+                    time.sleep(0.01)
         lines = [l for l in buf.getvalue().splitlines() if l == "HEARTBEAT:diarize:You"]
         self.assertGreaterEqual(len(lines), 2)
 
@@ -1332,6 +1689,42 @@ class RunStenoDiarizeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(embeddings, {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]})
+
+    def test_cross_speaker_overlap_is_clamped_before_the_result_is_returned(self):
+        # Sortformer really does emit overlapping segments on single-mic
+        # audio. Returned as-is, the overlapped span counts toward BOTH
+        # clusters' speaking time, and that total is what decides whether
+        # a channel is treated as one voice or split into "Speaker N".
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 5.0},
+                {"speakerId": "SPEAKER_1", "start": 3.0, "end": 8.0},
+            ],
+            "speakers": {},
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, _ = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [
+            {"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"},
+            {"start": 5.0, "end": 8.0, "speaker": "SPEAKER_1"},
+        ])
+
+    def test_same_speaker_overlap_collapses_into_one_turn(self):
+        # Same-speaker overlap is diarizer flicker, not two voices -- it
+        # must merge into one turn rather than be clamped into two
+        # touching ones.
+        payload = json.dumps({
+            "segments": [
+                {"speakerId": "SPEAKER_0", "start": 0.0, "end": 5.0},
+                {"speakerId": "SPEAKER_0", "start": 3.0, "end": 8.0},
+            ],
+            "speakers": {},
+        }).encode()
+        with patch("src.transcriber._resolve_steno_diarize", return_value="/fake/steno-diarize"), \
+             _patch_popen(stdout=payload, stderr=b"", returncode=0):
+            segments, _ = _run_steno_diarize(Path("/fake/mic.wav"), 60)
+        self.assertEqual(segments, [{"start": 0.0, "end": 8.0, "speaker": "SPEAKER_0"}])
 
     def test_parses_json_with_trailing_warning_after_payload(self):
         # A real ~3.5h channel measured a late CoreML/Metal warning printed

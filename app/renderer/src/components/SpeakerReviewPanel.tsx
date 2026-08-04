@@ -1,5 +1,7 @@
 import * as React from 'react';
-import { Check, ChevronDown, Loader2, Play, Square, Trash2, UserPlus, X } from 'lucide-react';
+import {
+  Check, ChevronDown, ChevronRight, Loader2, Play, Square, Trash2, Undo2, Users, UserPlus, X,
+} from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -11,6 +13,7 @@ import {
   useConfirmSpeaker,
   useGetSpeakerSampleAudio,
   useDeletePersonProfile,
+  useMarkSpeakerCluster,
   meetingStemFromSummaryFile,
 } from '@/hooks/useSpeakerSuggestions';
 import type { PersonProfile, SpeakerSuggestion } from '@/lib/ipc';
@@ -37,6 +40,12 @@ function rowKey(row: Pick<Row, 'channel' | 'diarizationSpeakerId'>): string {
  * human already confirmed who this is; the ranking that produced the
  * original suggestion is no longer the interesting fact about this row. */
 function suggestionLabel(suggestion: SpeakerSuggestion): string {
+  // Ahead of confirmed_by_user, because a marked cluster cannot BE
+  // confirmed (confirm-speaker refuses it) -- if both were ever somehow
+  // set, the marking is the newer and more specific fact.
+  if (suggestion.contains_multiple_speakers) {
+    return 'More than one person';
+  }
   if (suggestion.confirmed_by_user) {
     return `✓ Confirmed as ${suggestion.confirmed_by_user}`;
   }
@@ -85,11 +94,26 @@ function base64ToBlobUrl(base64: string, mimeType = 'audio/wav'): string {
   return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
 }
 
+/** Seconds -> "MM:SS" / "H:MM:SS", matching the [MM:SS] markers in the
+ * saved transcript (src.transcriber._format_timestamp) so an excerpt's
+ * timestamp can be found by eye in the transcript above. */
+function formatOffset(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const s = String(total % 60).padStart(2, '0');
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${String(m).padStart(2, '0')}:${s}`;
+}
+
 interface PlaySampleButtonProps {
   meetingStem: string;
   channel: string;
   diarizationSpeakerId: string;
+  /** Which of the row's `samples` to play. Omitted plays the cluster's
+   * longest turn -- the collapsed row's single button. */
+  segmentIndex?: number;
   disabled?: boolean;
+  label?: string;
 }
 
 /** Play/stop toggle for a cluster's longest-segment audio sample -- mirrors
@@ -97,7 +121,9 @@ interface PlaySampleButtonProps {
  * (fetch-on-click, toggle icon, auto-reset when playback ends). Fetched via
  * a mutation (not cached) since nothing needs to stay fresh in the
  * background for a clip a human explicitly triggers. */
-function PlaySampleButton({ meetingStem, channel, diarizationSpeakerId, disabled }: PlaySampleButtonProps) {
+function PlaySampleButton({
+  meetingStem, channel, diarizationSpeakerId, segmentIndex, disabled, label,
+}: PlaySampleButtonProps) {
   const getSample = useGetSpeakerSampleAudio();
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = React.useState(false);
@@ -115,7 +141,9 @@ function PlaySampleButton({ meetingStem, channel, diarizationSpeakerId, disabled
       stop();
       return;
     }
-    const result = await getSample.mutateAsync({ meetingStem, channel, diarizationSpeakerId });
+    const result = await getSample.mutateAsync({
+      meetingStem, channel, diarizationSpeakerId, segmentIndex,
+    });
     const url = base64ToBlobUrl(result.audio_base64);
     const audio = new Audio(url);
     audio.onended = () => {
@@ -127,15 +155,23 @@ function PlaySampleButton({ meetingStem, channel, diarizationSpeakerId, disabled
     void audio.play();
   };
 
+  const title = label ?? (playing ? 'Stop sample' : 'Play sample');
+  // Distinct testid per excerpt: the whole point of the expanded list is
+  // that each row plays a DIFFERENT moment, so a spec has to be able to
+  // address them individually.
+  const testId = segmentIndex === undefined
+    ? `speaker-play-${channel}:${diarizationSpeakerId}`
+    : `speaker-play-${channel}:${diarizationSpeakerId}-${segmentIndex}`;
+
   return (
     <Button
       size="sm"
       variant="ghost"
-      aria-label={playing ? 'Stop sample' : 'Play sample'}
-      title={playing ? 'Stop sample' : 'Play sample'}
+      aria-label={playing ? 'Stop sample' : title}
+      title={playing ? 'Stop sample' : title}
       disabled={disabled || getSample.isPending}
       onClick={() => void toggle()}
-      data-testid={`speaker-play-${channel}:${diarizationSpeakerId}`}
+      data-testid={testId}
     >
       {getSample.isPending ? (
         <Loader2 className="size-[13px] animate-spin" />
@@ -163,7 +199,11 @@ function PlaySampleButton({ meetingStem, channel, diarizationSpeakerId, disabled
  * dropped, since a human might legitimately want to review one (e.g. a
  * real quiet third participant).
  */
-type ConfirmFeedback = { message: string };
+/** `action` names what the person actually clicked. Without it every
+ * failure on this row read "Couldn't confirm", including a failed
+ * more-than-one-person marking, which describes an operation the user did
+ * not attempt. */
+type ConfirmFeedback = { message: string; action?: 'confirm' | 'mark' | 'unmark' };
 
 export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPanelProps) {
   const meetingStem = meetingStemFromSummaryFile(summaryFile);
@@ -171,8 +211,10 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   const profilesQuery = usePersonProfiles();
   const confirmSpeaker = useConfirmSpeaker();
   const deleteProfile = useDeletePersonProfile();
+  const markCluster = useMarkSpeakerCluster();
 
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [changeOpenFor, setChangeOpenFor] = React.useState<string | null>(null);
   const [newPersonRow, setNewPersonRow] = React.useState<Row | null>(null);
   const [newPersonName, setNewPersonName] = React.useState('');
@@ -202,7 +244,15 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   for (const channel of Object.keys(channels)) {
     for (const [diarizationSpeakerId, suggestion] of Object.entries(channels[channel])) {
       const key = rowKey({ channel, diarizationSpeakerId });
-      const nothingActionable = suggestion.status === 'none' && suggestion.candidates.length === 0;
+      // A MARKED cluster is deliberately status "none" with zero
+      // candidates, which is exactly the "nothing actionable" shape hidden
+      // below -- so without this it would disappear the moment it was
+      // marked, taking the only way to undo a misclick with it. Marking is
+      // a statement about the recording, not a dismissal.
+      const nothingActionable =
+        suggestion.status === 'none'
+        && suggestion.candidates.length === 0
+        && !suggestion.contains_multiple_speakers;
       if (nothingActionable && !keepVisible.has(key)) continue;
       rows.push({ channel, diarizationSpeakerId, suggestion });
     }
@@ -211,8 +261,14 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
     (a, b) => a.channel.localeCompare(b.channel) || a.diarizationSpeakerId.localeCompare(b.diarizationSpeakerId),
   );
   const notDismissed = rows.filter((row) => !dismissed.has(rowKey(row)));
-  const artifactRows = notDismissed.filter((row) => row.suggestion.is_likely_artifact);
-  const primaryRows = notDismissed.filter((row) => !row.suggestion.is_likely_artifact);
+  // A row a human has explicitly marked stays in the main list even if its
+  // turn shape also matches the artifact heuristic -- hiding it behind
+  // "Show N filtered rows" would bury the undo for a deliberate action
+  // behind a toggle the user has no reason to open.
+  const isFiltered = (row: Row) =>
+    row.suggestion.is_likely_artifact && !row.suggestion.contains_multiple_speakers;
+  const artifactRows = notDismissed.filter(isFiltered);
+  const primaryRows = notDismissed.filter((row) => !isFiltered(row));
   const visibleRows = showFiltered ? notDismissed : primaryRows;
   const recordingAvailable = suggestionsQuery.data?.recording_available ?? false;
 
@@ -246,6 +302,37 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
     );
   };
 
+  const setMultiSpeaker = (row: Row, containsMultipleSpeakers: boolean) => {
+    const key = rowKey(row);
+    setFeedback((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    markCluster.mutate(
+      {
+        meetingStem,
+        channel: row.channel,
+        diarizationSpeakerId: row.diarizationSpeakerId,
+        containsMultipleSpeakers,
+        summaryFile,
+      },
+      {
+        onError: (error) => {
+          setFeedback((prev) => new Map(prev).set(key, {
+            message: error.message,
+            action: containsMultipleSpeakers ? 'mark' : 'unmark',
+          }));
+        },
+      },
+    );
+  };
+
+  const totalClusters = Object.values(channels).reduce(
+    (sum, clusters) => sum + Object.keys(clusters).length, 0,
+  );
+  const minimumSpeakers = suggestionsQuery.data?.minimum_speaker_count ?? 0;
+
   return (
     <section className="flex flex-col gap-3" data-testid="speaker-review-panel">
       <h2
@@ -254,6 +341,16 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
       >
         Speakers
       </h2>
+      {minimumSpeakers > totalClusters && (
+        <p
+          className="text-[11.5px]"
+          style={{ color: 'var(--fg-2)', margin: 0 }}
+          data-testid="speaker-minimum-count"
+        >
+          {`At least ${minimumSpeakers} people spoke, but only ${totalClusters} could be told apart. `}
+          {'Speech from a group marked as more than one person is left unassigned.'}
+        </p>
+      )}
       <div className="flex flex-col gap-1.5">
         {/* Every action below spawns a confirm-speaker subprocess that
             reads-then-atomically-rewrites this meeting's saved transcript.
@@ -266,32 +363,69 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
             clickable while a confirm was still in progress. */}
         {visibleRows.map((row) => {
           const key = rowKey(row);
-          const anyConfirmPending = confirmSpeaker.isPending;
+          const anyConfirmPending = confirmSpeaker.isPending || markCluster.isPending;
+          const isMarked = row.suggestion.contains_multiple_speakers;
+          const samples = row.suggestion.samples ?? [];
+          const isExpanded = expanded.has(key);
+          // Expanding is only worth offering when there is more than the
+          // one excerpt the collapsed row already shows.
+          const canExpand = samples.length > 1;
           return (
             <div
               key={key}
               data-testid={`speaker-row-${key}`}
-              className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+              className="flex flex-col gap-1.5 rounded-md px-2 py-1.5"
               style={{ background: 'var(--surface-raised)', border: '1px solid var(--border-subtle)' }}
             >
+              <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span
-                  className={`text-[13.5px] ${row.suggestion.confirmed_by_user ? 'font-medium' : ''}`}
-                  style={{ color: 'var(--fg-1)' }}
+                  className={`text-[13.5px] ${row.suggestion.confirmed_by_user || isMarked ? 'font-medium' : ''}`}
+                  style={{ color: isMarked ? 'var(--fg-2)' : 'var(--fg-1)' }}
                 >
                   {suggestionLabel(row.suggestion)}
                 </span>
                 <span className="text-[11.5px]" style={{ color: 'var(--fg-2)' }}>
                   {identificationHint(row.channel, row.suggestion)}
                 </span>
-                {row.suggestion.sample_text && (
-                  <span
-                    className="truncate text-[11.5px] italic"
-                    style={{ color: 'var(--fg-2)' }}
-                    title={row.suggestion.sample_text}
-                  >
-                    “{row.suggestion.sample_text}”
+                {isMarked ? (
+                  <span className="text-[11.5px]" style={{ color: 'var(--fg-2)' }}>
+                    Left out of naming and voice recognition.
                   </span>
+                ) : (
+                  row.suggestion.sample_text && (
+                    <span
+                      className="truncate text-[11.5px] italic"
+                      style={{ color: 'var(--fg-2)' }}
+                      title={row.suggestion.sample_text}
+                    >
+                      “{row.suggestion.sample_text}”
+                    </span>
+                  )
+                )}
+                {canExpand && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpanded((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      })
+                    }
+                    className="flex items-center gap-0.5 self-start text-[11.5px] underline-offset-2 hover:underline"
+                    style={{ color: 'var(--fg-2)' }}
+                    data-testid={`speaker-expand-${key}`}
+                    aria-expanded={isExpanded}
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="size-[12px]" />
+                    ) : (
+                      <ChevronRight className="size-[12px]" />
+                    )}
+                    {isExpanded ? 'Fewer excerpts' : `${samples.length} excerpts`}
+                  </button>
                 )}
                 {feedback.get(key) && (
                   <span
@@ -299,7 +433,13 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     style={{ color: 'var(--danger)' }}
                     data-testid={`speaker-feedback-${key}`}
                   >
-                    {`Couldn't confirm: ${feedback.get(key)!.message}`}
+                    {`${
+                      feedback.get(key)!.action === 'mark'
+                        ? "Couldn't mark this as more than one person"
+                        : feedback.get(key)!.action === 'unmark'
+                          ? "Couldn't undo the marking"
+                          : "Couldn't confirm"
+                    }: ${feedback.get(key)!.message}`}
                   </span>
                 )}
               </div>
@@ -312,6 +452,14 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     disabled={anyConfirmPending}
                   />
                 )}
+                {/* Every naming action disappears for a marked cluster --
+                    not merely disabled. confirm-speaker refuses it outright,
+                    so a greyed-out Approve would be a control that can never
+                    become available, and a "Change" picker would be an
+                    invitation to do the one thing this marking exists to
+                    prevent. The undo below is what stays reachable. */}
+                {!isMarked && (
+                  <>
                 {/* Hidden once confirmed_by_user is set -- re-approving an
                     already-confirmed cluster is a no-op that changes
                     nothing visible, which reads as broken. Change/New
@@ -396,6 +544,39 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   <UserPlus className="size-[13px]" />
                   New person
                 </Button>
+                  </>
+                )}
+                {/* The one fact about a cluster that no measurement can
+                    supply. Sitting beside "New person" on purpose: both are
+                    answers to the same question a human is holding while
+                    listening, and this one has to be as easy to give as
+                    naming, or it will not be given at all. */}
+                <Button
+                  size="sm"
+                  variant={isMarked ? 'outline' : 'ghost'}
+                  aria-label={
+                    isMarked
+                      ? 'This is one person after all - reopens the row for naming, does not restore the earlier name'
+                      : 'This is more than one person'
+                  }
+                  title={
+                    isMarked
+                      ? 'This is one person after all - reopens the row for naming, does not restore the earlier name'
+                      : 'This is more than one person'
+                  }
+                  disabled={anyConfirmPending}
+                  onClick={() => setMultiSpeaker(row, !isMarked)}
+                  data-testid={`speaker-mark-multi-${key}`}
+                >
+                  {/* Not labelled "Undo": clearing the marking reopens the
+                      row for naming, it does not put back a name that was
+                      withdrawn when the cluster was marked. The prototype,
+                      the participants entry and the transcript labels are
+                      all gone by then, and calling that an undo would
+                      promise a recovery the backend cannot perform. */}
+                  {isMarked ? <Undo2 className="size-[13px]" /> : <Users className="size-[13px]" />}
+                  {isMarked ? 'One person' : null}
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -408,6 +589,93 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   <X className="size-[13px]" />
                 </Button>
               </div>
+              </div>
+
+              {/* Several moments from the recording, chronological, each
+                  played individually. One excerpt is a single roll of the
+                  dice on whether the longest turn happens to contain
+                  anything recognizable; several are what let someone place
+                  a voice -- and hearing two different voices in one list is
+                  how the "more than one person" case becomes visible at all. */}
+              {isExpanded && (
+                <div
+                  className="flex flex-col gap-0.5 border-t pt-1.5"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                  data-testid={`speaker-samples-${key}`}
+                >
+                  {/* Said once, not repeated per row. A meeting whose
+                      speakers sidecar was produced by the backfill has no
+                      turn manifest, and its transcript timestamps come from
+                      a different diarization run -- so no line can be
+                      attributed to a cluster with confidence, and none is
+                      shown. Listening still works, and is the reliable half
+                      anyway: the clip is cut at this cluster's own segments. */}
+                  {samples.length > 0 && !samples.some((s) => s.text) && (
+                    <span
+                      className="text-[11.5px]"
+                      style={{ color: 'var(--fg-2)' }}
+                      data-testid={`speaker-samples-textless-${key}`}
+                    >
+                      Transcript text can’t be matched to a speaker in this recording. Play to listen.
+                    </span>
+                  )}
+                  {samples.map((sample, index) => (
+                    <div
+                      key={`${sample.start}-${index}`}
+                      className="flex items-center gap-1.5"
+                      data-testid={`speaker-sample-${key}-${index}`}
+                    >
+                      {/* A collapsed range is the backend saying it could
+                          not place this turn in the audio, and
+                          extract_speaker_sample_audio refuses to cut one --
+                          padding it into a clip would play whoever WAS
+                          speaking at that second under this name. The row
+                          keeps its place (its text is still this speaker's,
+                          and every later play button is addressed by index),
+                          the button is shown inert rather than firing a
+                          request that can only fail. */}
+                      {recordingAvailable && (
+                        <PlaySampleButton
+                          meetingStem={meetingStem}
+                          channel={row.channel}
+                          diarizationSpeakerId={row.diarizationSpeakerId}
+                          segmentIndex={index}
+                          disabled={anyConfirmPending || sample.end <= sample.start}
+                          label={
+                            sample.end <= sample.start
+                              ? 'No audio could be matched to this moment'
+                              : `Play excerpt at ${formatOffset(sample.start)}`
+                          }
+                        />
+                      )}
+                      <span
+                        className="shrink-0 text-[11px] tabular-nums"
+                        style={{ color: 'var(--fg-2)' }}
+                      >
+                        {formatOffset(sample.start)}
+                      </span>
+                      <span
+                        className="truncate text-[11.5px] italic"
+                        style={{ color: 'var(--fg-2)' }}
+                        title={sample.text ?? undefined}
+                      >
+                        {/* A moment with no attributable line still gets a
+                            row: the clip is playable, and dropping it would
+                            put every later excerpt's play button out of step
+                            with its index. Left blank when the whole cluster
+                            has no text -- the one explanation above already
+                            says why, and repeating it per row reads as five
+                            separate failures. */}
+                        {sample.text
+                          ? `“${sample.text}”`
+                          : samples.some((s) => s.text)
+                            ? 'No transcript for this moment'
+                            : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

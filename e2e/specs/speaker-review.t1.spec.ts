@@ -278,3 +278,121 @@ test('a likely-artifact row is hidden by default, reachable via the filtered-row
   await toggle.click();
   await expect(page.getByTestId('speaker-row-mic:SPEAKER_4')).toHaveCount(0);
 });
+
+test('marking a row as more than one person removes every naming action and can be undone', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  await expect(row).toContainText('Likely Julian');
+
+  await row.getByTestId('speaker-mark-multi-mic:SPEAKER_0').click();
+
+  await expect(row).toContainText('More than one person');
+  await expect(row).toContainText('Left out of naming and voice recognition.');
+  // Every naming control is GONE, not disabled: confirm-speaker refuses a
+  // marked cluster outright, so a greyed-out Approve would be a control
+  // that can never become available, and a "Change" picker would invite
+  // exactly the confirmation this marking exists to prevent.
+  await expect(row.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+  await expect(row.getByTestId('speaker-change-mic:SPEAKER_0')).toHaveCount(0);
+  await expect(row.getByTestId('speaker-new-person-mic:SPEAKER_0')).toHaveCount(0);
+
+  // The row itself must STAY -- a marked cluster is status "none" with zero
+  // candidates, which is the panel's "nothing actionable" hidden shape, so
+  // without an explicit carve-out it would vanish the moment it was marked,
+  // taking the only undo for a misclick with it.
+  await expect(row).toBeVisible();
+
+  // The button that clears the marking must not call itself "Undo": by
+  // then the prototype, the participants entry and the transcript labels
+  // of the withdrawn name are gone, and clearing the flag reopens the row
+  // for naming rather than restoring what was there.
+  const clearMark = row.getByTestId('speaker-mark-multi-mic:SPEAKER_0');
+  await expect(clearMark).toContainText('One person');
+  await expect(clearMark).toHaveAttribute(
+    'aria-label',
+    'This is one person after all - reopens the row for naming, does not restore the earlier name',
+  );
+
+  await clearMark.click();
+  await expect(row).toContainText('Likely Julian');
+  await expect(row.getByRole('button', { name: 'Approve' })).toHaveCount(1);
+});
+
+test('a row with several excerpts expands into one playable entry per moment', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  // Collapsed: one quote, no excerpt list.
+  await expect(page.getByTestId('speaker-samples-mic:SPEAKER_0')).toHaveCount(0);
+
+  await row.getByTestId('speaker-expand-mic:SPEAKER_0').click();
+
+  const samples = page.getByTestId('speaker-samples-mic:SPEAKER_0');
+  await expect(samples).toBeVisible();
+  // Each moment gets its OWN play button. One shared button replaying the
+  // same clip is the state this replaces -- several excerpts are what let
+  // someone actually place a voice, and hearing two different voices in one
+  // list is how a contaminated cluster becomes visible at all.
+  await expect(page.getByTestId('speaker-play-mic:SPEAKER_0-0')).toBeVisible();
+  await expect(page.getByTestId('speaker-play-mic:SPEAKER_0-1')).toBeVisible();
+  await expect(page.getByTestId('speaker-play-mic:SPEAKER_0-2')).toBeVisible();
+
+  await expect(samples).toContainText('02:10');
+  await expect(samples).toContainText('the migration is the risky part');
+  // A segment no transcript line covers keeps its row rather than being
+  // dropped -- the clip is still playable, and dropping it would put every
+  // later excerpt's play button out of step with its index.
+  await expect(samples).toContainText('No transcript for this moment');
+
+  // The fourth moment is one the backend could not place in the audio
+  // (start === end). Its text is still this speaker's, so the row stays --
+  // but its play button has to be inert: the backend refuses to cut a
+  // collapsed range, and padding one into a clip would play whoever else
+  // spoke at that second under this speaker's name.
+  const unplayable = page.getByTestId('speaker-play-mic:SPEAKER_0-3');
+  await expect(unplayable).toBeVisible();
+  await expect(unplayable).toBeDisabled();
+  await expect(unplayable).toHaveAttribute(
+    'aria-label', 'No audio could be matched to this moment',
+  );
+  await expect(samples).toContainText('a line with no audio to match it');
+
+  await row.getByTestId('speaker-expand-mic:SPEAKER_0').click();
+  await expect(page.getByTestId('speaker-samples-mic:SPEAKER_0')).toHaveCount(0);
+});
+
+test('the panel says how many people spoke when a cluster is known to hold more than one', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  // Nothing marked yet: clusters and people are the same number, so there
+  // is nothing to say and the line stays off.
+  await expect(page.getByTestId('speaker-minimum-count')).toHaveCount(0);
+
+  await page.getByTestId('speaker-mark-multi-mic:SPEAKER_0').click();
+
+  // Sortformer returns at most four clusters per channel and gives no
+  // indication when it ran out of slots, so this line is the only place a
+  // fifth person is ever mentioned.
+  const note = page.getByTestId('speaker-minimum-count');
+  await expect(note).toBeVisible();
+  await expect(note).toContainText('At least 6 people spoke, but only 5 could be told apart');
+});
