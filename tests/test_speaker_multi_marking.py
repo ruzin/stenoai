@@ -416,6 +416,38 @@ class SampleSegmentsTests(unittest.TestCase):
             self.assertEqual(samples[0]["text"], "said something")
             self.assertEqual(samples[0]["start"], samples[0]["end"])
 
+    def test_the_unplaceable_moment_is_refused_by_the_half_that_plays_it(self):
+        # The other half of the test above, and the pairing that has broken
+        # twice already: the list says "nothing placeable here" with a
+        # zero-length range, and the extractor is what has to honour it. It
+        # did not -- its duration check ran after the two 0.3s pads, so the
+        # unplaceable moment came back as a 0.6s clip of whoever was
+        # actually speaking at that timestamp. Asserting the two functions
+        # against each other, not each against its own idea of the contract.
+        from src.speaker_suggestions import extract_speaker_sample_audio
+
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text("[01:00] [Speaker 2] said something\n", encoding="utf-8")
+            segments = [{"start": 5.0, "end": 8.0}]
+            samples = extract_segment_samples(
+                transcript, segments,
+                turn_manifest=[
+                    {"start": 60.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            audio = Path(tmp) / "a.wav"
+            audio.write_bytes(b"stub")
+            with mock.patch("src.transcriber._resolve_ffmpeg", return_value="/bin/ffmpeg"), \
+                 mock.patch("src.speaker_suggestions.subprocess.run") as run_mock:
+                played = extract_speaker_sample_audio(
+                    audio, "system", segments, Path(tmp) / "out.wav",
+                    segment_index=samples[0],
+                )
+            self.assertFalse(played)
+            run_mock.assert_not_called()
+
     def test_a_clip_never_runs_into_the_next_speakers_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.txt"

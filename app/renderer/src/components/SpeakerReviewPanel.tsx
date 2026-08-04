@@ -605,14 +605,27 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                       className="flex items-center gap-1.5"
                       data-testid={`speaker-sample-${key}-${index}`}
                     >
+                      {/* A collapsed range is the backend saying it could
+                          not place this turn in the audio, and
+                          extract_speaker_sample_audio refuses to cut one --
+                          padding it into a clip would play whoever WAS
+                          speaking at that second under this name. The row
+                          keeps its place (its text is still this speaker's,
+                          and every later play button is addressed by index),
+                          the button is shown inert rather than firing a
+                          request that can only fail. */}
                       {recordingAvailable && (
                         <PlaySampleButton
                           meetingStem={meetingStem}
                           channel={row.channel}
                           diarizationSpeakerId={row.diarizationSpeakerId}
                           segmentIndex={index}
-                          disabled={anyConfirmPending}
-                          label={`Play excerpt at ${formatOffset(sample.start)}`}
+                          disabled={anyConfirmPending || sample.end <= sample.start}
+                          label={
+                            sample.end <= sample.start
+                              ? 'No audio could be matched to this moment'
+                              : `Play excerpt at ${formatOffset(sample.start)}`
+                          }
                         />
                       )}
                       <span

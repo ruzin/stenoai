@@ -272,10 +272,15 @@ function install({ ipcMain }) {
               // transcript text (a real, common case -- a diarized segment
               // no transcript line covers); it stays in the list because
               // dropping it would shift every later play button's index.
+              // The fourth is a turn the backend could not place in the
+              // audio: extract_segment_samples collapses those to
+              // start === end and extract_speaker_sample_audio refuses to
+              // cut them, so the row must not offer a play button for it.
               samples: [
                 { start: 130.0, end: 138.0, text: 'I think we should ship this on Friday' },
                 { start: 400.0, end: 406.0, text: 'the migration is the risky part' },
                 { start: 900.0, end: 904.0, text: null },
+                { start: 1200.0, end: 1200.0, text: 'a line with no audio to match it' },
               ],
               contains_multiple_speakers: false,
               is_likely_artifact: false,

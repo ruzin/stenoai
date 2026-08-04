@@ -346,6 +346,19 @@ test('a row with several excerpts expands into one playable entry per moment', a
   // later excerpt's play button out of step with its index.
   await expect(samples).toContainText('No transcript for this moment');
 
+  // The fourth moment is one the backend could not place in the audio
+  // (start === end). Its text is still this speaker's, so the row stays --
+  // but its play button has to be inert: the backend refuses to cut a
+  // collapsed range, and padding one into a clip would play whoever else
+  // spoke at that second under this speaker's name.
+  const unplayable = page.getByTestId('speaker-play-mic:SPEAKER_0-3');
+  await expect(unplayable).toBeVisible();
+  await expect(unplayable).toBeDisabled();
+  await expect(unplayable).toHaveAttribute(
+    'aria-label', 'No audio could be matched to this moment',
+  );
+  await expect(samples).toContainText('a line with no audio to match it');
+
   await row.getByTestId('speaker-expand-mic:SPEAKER_0').click();
   await expect(page.getByTestId('speaker-samples-mic:SPEAKER_0')).toHaveCount(0);
 });

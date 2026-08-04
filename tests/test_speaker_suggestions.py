@@ -1195,6 +1195,26 @@ class ExtractSpeakerSampleAudioTests(unittest.TestCase):
             cmd = run_mock.call_args[0][0]
             self.assertIn("pan=mono|c0=c0", cmd)
 
+    def test_padding_never_turns_a_zero_length_range_into_a_clip(self):
+        # _turn_audio_range returns (start, start) when this cluster has no
+        # segment of its own at or after the line, and its docstring says
+        # this function then refuses. It did not: the duration check ran
+        # AFTER the two 0.3s pads were added, so a range meaning "we cannot
+        # place this moment" still cut 0.6s of audio around the timestamp --
+        # i.e. potentially the voice of whoever WAS speaking there, played
+        # under this speaker's name.
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_path = Path(tmp) / "mtg001.wav"
+            audio_path.write_bytes(b"stub")
+            with mock.patch("src.transcriber._resolve_ffmpeg", return_value="/usr/bin/ffmpeg"), \
+                 mock.patch("src.speaker_suggestions.subprocess.run") as run_mock:
+                ok = extract_speaker_sample_audio(
+                    audio_path, "mic", [{"start": 4.0, "end": 6.0}], Path(tmp) / "out.wav",
+                    segment_index={"start": 60.0, "end": 60.0},
+                )
+            self.assertFalse(ok)
+            run_mock.assert_not_called()
+
     def test_returns_false_when_ffmpeg_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             audio_path = Path(tmp) / "mtg001.wav"

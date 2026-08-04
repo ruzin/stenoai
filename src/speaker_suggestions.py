@@ -1436,10 +1436,19 @@ def extract_speaker_sample_audio(
         return False
 
     ch_idx = 0 if channel == "mic" else 1
-    start = max(0.0, target.get("start", 0) - SAMPLE_AUDIO_PADDING_SECONDS)
-    duration = (target.get("end", 0) - target.get("start", 0)) + 2 * SAMPLE_AUDIO_PADDING_SECONDS
-    if duration <= 0:
+    # Decided on the UNPADDED range, and that ordering is the whole guard.
+    # _turn_audio_range collapses a moment it cannot place to (start, start)
+    # precisely so this function refuses it; checking after the two pads
+    # were added turned that refusal into a 0.6s clip AROUND the timestamp
+    # -- the audio of whoever actually was speaking there, played under this
+    # speaker's name. The pads may widen a real clip, never create one.
+    # Written as `not span > 0` so a NaN boundary (a backend emitting one,
+    # which _format_timestamp already guards against elsewhere) refuses too.
+    span = target.get("end", 0) - target.get("start", 0)
+    if not span > 0:
         return False
+    start = max(0.0, target.get("start", 0) - SAMPLE_AUDIO_PADDING_SECONDS)
+    duration = span + 2 * SAMPLE_AUDIO_PADDING_SECONDS
 
     try:
         result = subprocess.run(
