@@ -1056,6 +1056,111 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         alone because its cluster ids mean something else now."""
         return read_speakers_sidecar(Path(tmp) / "output", "mtg001")["diarization_run"]["run_id"]
 
+    def _rediarize(self, tmp):
+        """Rewrite the seeded sidecar with a fresh run whose cluster ids are
+        reused but whose voices are not, which is what a re-diarization
+        produces. Returns the new run id."""
+        self._seed(tmp, clusters={
+            "SPEAKER_0": {
+                "embedding": [0.0, 1.0], "speech_duration_seconds": 55.0,
+                "segment_count": 9, "segments": [{"start": 2.0, "end": 6.0}],
+            },
+            "SPEAKER_1": {
+                "embedding": [1.0, 0.0], "speech_duration_seconds": 35.0,
+                "segment_count": 7, "segments": [{"start": 21.0, "end": 25.0}],
+            },
+        })
+        return self._seeded_run_id(tmp)
+
+    def test_marking_a_reused_cluster_id_leaves_an_older_runs_confirmation_alone(self):
+        # The withdrawal loop's half of the run-scope defect. Marking THIS
+        # run's SPEAKER_0 as mixed says nothing about the person confirmed on
+        # a previous run's SPEAKER_0: the diarizer reuses the id for an
+        # unrelated voice, so unscoped this would withdraw a confirmation
+        # nobody questioned and delete the prototype behind it.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            pid = cfg.create_person_profile("Julian")["person_id"]
+            run1 = self._seeded_run_id(tmp)
+            cfg.add_speaker_prototype(
+                pid, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
+                segment_count=10, created_from="user_confirmed", channel="system",
+                diarization_run_id=run1,
+            )
+
+            run2 = self._rediarize(tmp)
+            self.assertNotEqual(run1, run2)
+
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(
+                data["cleared_confirmation_from"], [],
+                "the marking describes this run's cluster, not the one Julian was confirmed on",
+            )
+            profile = cfg.get_person_profile(pid)
+            self.assertEqual(
+                [p["diarization_run_id"] for p in profile["prototypes"]], [run1],
+            )
+
+    def test_marking_withdraws_this_runs_negatives_and_keeps_an_older_runs(self):
+        # The other two removals in the same loop, which the test above never
+        # reaches (it stops at a positive removal that matches nothing). A
+        # negative recorded against a previous run's SPEAKER_0 is evidence
+        # about a different voice, so the marking must leave it standing on
+        # both the withdrawn person's profile and everyone else's.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            julian = cfg.create_person_profile("Julian")["person_id"]
+            max_id = cfg.create_person_profile("Max")["person_id"]
+            run1 = self._seeded_run_id(tmp)
+            run2 = self._rediarize(tmp)
+
+            # Julian is the one confirmed on the CURRENT run's SPEAKER_0...
+            cfg.add_speaker_prototype(
+                julian, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=55.0,
+                segment_count=9, created_from="user_confirmed", channel="system",
+                diarization_run_id=run2,
+            )
+            # ...and Max was ruled out for it, in this run and in the last.
+            for run_id in (run1, run2):
+                cfg.add_speaker_prototype(
+                    max_id, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
+                    diarization_speaker_id="SPEAKER_0", speech_duration_seconds=55.0,
+                    segment_count=9, created_from="user_confirmed", channel="system",
+                    negative=True, diarization_run_id=run_id,
+                )
+            # Julian carries a stale one of his own from before the re-run.
+            cfg.add_speaker_prototype(
+                julian, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
+                segment_count=10, created_from="user_confirmed", channel="system",
+                negative=True, diarization_run_id=run1,
+            )
+
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(cfg.get_person_profile(julian)["prototypes"], [])
+            self.assertEqual(
+                [n["diarization_run_id"] for n in cfg.get_person_profile(julian)["hard_negatives"]],
+                [run1],
+            )
+            self.assertEqual(
+                [n["diarization_run_id"] for n in cfg.get_person_profile(max_id)["hard_negatives"]],
+                [run1],
+            )
+
     def test_marks_and_reports_the_new_minimum_speaker_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)

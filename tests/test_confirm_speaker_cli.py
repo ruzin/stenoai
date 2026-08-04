@@ -235,6 +235,85 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(sarah_profile["prototypes"][0]["diarization_run_id"], run2)
             self.assertEqual(sarah_profile["prototypes"][0]["embedding_mean"], [0.0, 1.0])
 
+    def test_confirming_a_reused_cluster_id_keeps_an_older_runs_negatives(self):
+        # The idempotency-rebuild removals, which the test above never
+        # reaches: it stops at a positive removal that matches nothing. Those
+        # two clear the negatives THIS confirm is about to rewrite, so
+        # unscoped they take a previous run's negatives with them -- evidence
+        # about a different voice that nothing in this confirm questioned.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            r1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(r1.output)["person_id"]
+            r2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(r2.output)["person_id"]
+
+            run2 = self._rediarize(tmp)
+            # Sarah is confirmed on the new run's SPEAKER_00 -- the id her own
+            # run-1 hard negative is recorded against.
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--person-id", sarah_id], tmp, cfg=cfg)
+
+            sarah_profile = cfg.get_person_profile(sarah_id)
+            self.assertEqual(
+                [n["diarization_run_id"] for n in sarah_profile["hard_negatives"]], [run1],
+                "her run-1 negative is about the voice that held SPEAKER_00 back then",
+            )
+            self.assertEqual(
+                sorted(p["diarization_run_id"] for p in sarah_profile["prototypes"]),
+                sorted([run1, run2]),
+            )
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual([p["diarization_run_id"] for p in max_profile["prototypes"]], [run1])
+            self.assertEqual([n["diarization_run_id"] for n in max_profile["hard_negatives"]], [run1])
+
+    def test_reassigning_this_runs_cluster_leaves_the_previous_runs_negatives_standing(self):
+        # The reassignment loop's two negative cleanups, reached only when a
+        # confirm actually supersedes somebody. Both are about the cluster
+        # being taken away, so neither may reach into a previous run's
+        # evidence about a reused id.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            r2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(r2.output)["person_id"]
+            sarah_run1_negative = cfg.get_person_profile(sarah_id)["hard_negatives"][0]["prototype_id"]
+
+            self._rediarize(tmp)
+            r3, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Ida"], tmp, cfg=cfg)
+            ida_id = _last_json(r3.output)["person_id"]
+            # Hand-built rather than earned, because a run-1 confirmation
+            # would also leave Ida a run-1 prototype, and the cleanup under
+            # test only runs for someone who owns no cluster here any more.
+            ida_run1_negative = cfg.add_speaker_prototype(
+                ida_id, [0.5, 0.5], recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_01", speech_duration_seconds=20.0,
+                segment_count=4, created_from="user_confirmed", channel="mic",
+                negative=True, diarization_run_id=run1,
+            )["prototype_id"]
+
+            # Ida loses the cluster to Jon, so both cleanups fire.
+            r4, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Jon"], tmp, cfg=cfg)
+            self.assertEqual(_last_json(r4.output)["reassigned_from"], ["Ida"])
+
+            self.assertEqual(
+                [n["prototype_id"] for n in cfg.get_person_profile(ida_id)["hard_negatives"]],
+                [ida_run1_negative],
+                "her run-2 negative went with the cluster; the run-1 one is not this confirm's",
+            )
+            self.assertIn(
+                sarah_run1_negative,
+                [n["prototype_id"] for n in cfg.get_person_profile(sarah_id)["hard_negatives"]],
+                "a bystander's run-1 negative survives a reassignment in run 2",
+            )
+
     def test_reconfirming_a_cluster_on_a_legacy_sidecar_still_supersedes(self):
         # The correction path on a library that predates run stamping: with no
         # run id anywhere, re-confirming is still the "Change" flow and must

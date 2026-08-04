@@ -5018,9 +5018,18 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     # ids only identify a voice within one diarization run -- a re-diarization
     # renumbers from SPEAKER_0 with no memory of who held that id, so
     # unscoped these removals would treat a stranger's confirmation as this
-    # cluster's previous owner and delete it. The cost is that a
+    # cluster's previous owner and delete it.
+    #
+    # The cost is more than a stale positive prototype left standing: a
     # confirmation made against a superseded run can no longer be corrected
-    # by re-confirming; the repair CLI removes such entries by id.
+    # by re-confirming that id, which freezes the hard negatives it minted
+    # too. The mutual-negative loop further down records each confirmed
+    # cluster as negative evidence against the other people confirmed in this
+    # channel, so a confirm that got the owner wrong leaves somebody holding
+    # their OWN voice as a reason to refuse a future match -- and that entry
+    # now outlives every later confirm instead of being rebuilt away by the
+    # idempotency removals below. Clearing it takes `repair-speaker-profiles`,
+    # which drops entries by prototype_id and is not run-scoped.
     reassigned_from = []
     for existing_person in config.get_person_profiles():
         removed = config.remove_speaker_evidence(
@@ -5038,6 +5047,13 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         # used to strip the negatives the clusters they KEEP still justify,
         # and the rebuild below only restores negatives for the person being
         # confirmed now, so that evidence was simply lost.
+        #
+        # This read stays unscoped while the removal it guards is scoped, so
+        # a leftover prototype from a superseded run reads as "still owns a
+        # cluster here" and suppresses the cleanup. Left as is deliberately:
+        # the failure direction is keeping evidence rather than destroying
+        # it. Whether the two should agree is the read path's decision (the
+        # next task), not something to settle from one side here.
         still_present = any(
             p.get("meeting_id") == meeting_stem
             and prototype_channel_matches(p, channel, channel_recording_type)
@@ -5122,6 +5138,18 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         # them. Matching only the first prototype left the second cluster
         # with no negative evidence at all, so a later meeting could still
         # match this speaker to it.
+        #
+        # NOT run-scoped, and the run scoping added to the removals above
+        # made that worse rather than neutral. This selects a prototype by
+        # meeting+sid+channel and then mints a negative from the CURRENT
+        # run's embedding for that id -- so a prototype confirmed against a
+        # superseded run produces a negative about a voice that person was
+        # never confirmed next to. Before the scoping the damage window was
+        # bounded: the next confirm of that id deleted the stale prototype,
+        # because it matched unscoped. Now stale prototypes persist
+        # indefinitely, so this read can fire arbitrarily far in the future.
+        # Closing it is the read path's job (the next task) -- this selection
+        # has to run the same prototype_run_matches predicate.
         matches = [
             p for p in (other_person.get("prototypes") or [])
             if p.get("meeting_id") == meeting_stem

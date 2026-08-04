@@ -1342,17 +1342,28 @@ class Config:
         memory of who held that id before, so without this scope confirming
         the new run's first cluster deletes the prototype an earlier run's
         confirmation recorded against a genuinely different voice.
-        `ANY_DIARIZATION_RUN` (the default) removes regardless of run, which
-        is what every caller that has no sidecar in hand -- the repair CLI's
-        analysis, enrollment cleanup -- still needs; passing `None` is the
-        distinct "the sidecar reports no run" scope, not the absence of one.
+        `ANY_DIARIZATION_RUN` (the default) removes regardless of run. Every
+        in-repo caller works from a sidecar and passes a scope today, so the
+        default carries no traffic; it exists so that a future caller with no
+        sidecar in hand gets today's semantics by not knowing about runs,
+        rather than silently filtering. Passing `None` is the distinct "the
+        sidecar reports no run" scope, not the absence of one.
 
-        The trade this scope accepts: a confirmation made against a
-        superseded run can no longer be corrected by re-confirming the same
-        cluster id, since the two are no longer recognised as the same
-        cluster. That evidence has to be dropped through the repair CLI's
-        by-id removal instead. Silently destroying a genuine prototype is
-        the worse failure of the two, and it is the one happening today.
+        The trade this scope accepts, and it is heavier than one stale
+        positive prototype: a confirmation made against a superseded run can
+        no longer be corrected by re-confirming the same cluster id, since
+        the two are no longer recognised as the same cluster. That freezes
+        the hard negatives the wrong confirmation minted as well, and those
+        can include one built from a person's OWN voice -- confirm-speaker
+        records each confirmed cluster as negative evidence against the other
+        people confirmed in that channel, so a confirm that got the owner
+        wrong hands somebody their own embedding as a reason to refuse a
+        match. Re-confirming used to clear it; now it survives every later
+        confirm, and self-suppression does not expire on its own. The escape
+        hatch is `repair-speaker-profiles`, which drops entries by
+        `prototype_id` via `remove_speaker_evidence_by_ids` and is unaffected
+        by run scope. Silently destroying genuine evidence is still the worse
+        failure of the two, and it is the one happening today.
         """
         from src.speaker_suggestions import prototype_channel_matches, prototype_run_matches
 
