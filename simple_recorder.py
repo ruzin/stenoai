@@ -353,7 +353,27 @@ def _persist_speaker_sidecar(output_dir, meeting_stem: str, transcript_data: dic
     speaker_clusters = transcript_data.get("speaker_clusters") or {}
     if not speaker_clusters:
         return False
-    from src.speaker_suggestions import write_speakers_sidecar
+    from src.speaker_suggestions import (
+        count_review_markings, read_speakers_sidecar, write_speakers_sidecar,
+    )
+    # Read before overwriting, purely to report what this run discards. A
+    # fresh diarization numbers its clusters from SPEAKER_0 again, so every
+    # marking a human made against the old ids stops describing anything --
+    # carrying them forward would attach a person's statement to whichever
+    # voice inherited the id. Losing them is right; losing them silently is
+    # not, and they are the one thing in this file no re-run reproduces.
+    # `reprocess` streams lines rather than one JSON document, so the report
+    # is a warning plus one greppable stdout line, mirroring the backfill's
+    # wording.
+    lost = count_review_markings(read_speakers_sidecar(output_dir, meeting_stem))
+    if lost["multi_speaker"] or lost["review_state"]:
+        message = (
+            f"{meeting_stem}: re-diarization discards "
+            f"{lost['multi_speaker']} cluster(s) marked as containing multiple speakers "
+            f"and {lost['review_state']} kept generic."
+        )
+        logger.warning("Speaker markings lost: %s", message)
+        print(f"LOST_SPEAKER_MARKINGS: {message}", flush=True)
     write_speakers_sidecar(
         output_dir, meeting_stem, speaker_clusters,
         turn_manifest=transcript_data.get("turn_manifest"),
@@ -6182,7 +6202,7 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
     from src.config import get_config, get_data_dirs
     from src.transcriber import WhisperTranscriber, STENO_DIARIZE_TIMEOUT_FLOOR_S, _run_steno_diarize
     from src.speaker_suggestions import (
-        build_clusters_from_diarization, cluster_ids_marked_multi_speaker,
+        build_clusters_from_diarization, count_review_markings,
         determine_recording_type, read_speakers_sidecar,
         speakers_sidecar_path, write_speakers_sidecar,
     )
@@ -6226,6 +6246,7 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
     skipped_no_audio = []
     skipped_no_clusters = []
     lost_multi_speaker_markings = []
+    lost_review_state_markings = []
     errors = []
 
     for stem in stems:
@@ -6271,17 +6292,27 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
                 # marking is genuinely gone rather than transferable -- but
                 # it is the one thing in that file no re-run can reproduce,
                 # so losing it is reported instead of silent.
-                dropped = sum(
-                    len(cluster_ids_marked_multi_speaker(ch))
-                    for ch in ((previous_sidecar or {}).get("channels") or {}).values()
-                )
-                if dropped:
+                # Counted by the shared helper, so this report and
+                # _persist_speaker_sidecar's cannot drift apart on what
+                # counts as a marking (they are the only two places one is
+                # ever lost).
+                dropped = count_review_markings(previous_sidecar)
+                if dropped["multi_speaker"]:
                     logger.warning(
                         "backfill-speaker-embeddings: %s had %d cluster(s) marked as "
                         "containing multiple speakers; re-diarization discards those markings.",
-                        stem, dropped,
+                        stem, dropped["multi_speaker"],
                     )
-                    lost_multi_speaker_markings.append({"stem": stem, "clusters": dropped})
+                    lost_multi_speaker_markings.append(
+                        {"stem": stem, "clusters": dropped["multi_speaker"]})
+                if dropped["review_state"]:
+                    logger.warning(
+                        "backfill-speaker-embeddings: %s had %d cluster(s) kept generic; "
+                        "re-diarization discards those markings.",
+                        stem, dropped["review_state"],
+                    )
+                    lost_review_state_markings.append(
+                        {"stem": stem, "clusters": dropped["review_state"]})
                 write_speakers_sidecar(output_dir, stem, channels_out)
                 processed.append(stem)
             else:
@@ -6305,6 +6336,10 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
         "skipped_no_clusters": skipped_no_clusters,
         "skipped_already_processed": skipped_already_processed,
         "lost_multi_speaker_markings": lost_multi_speaker_markings,
+        # Same shape and the same reason: a marking is a human statement the
+        # re-diarization cannot carry over, and the only one in this file no
+        # re-run can reproduce.
+        "lost_review_state_markings": lost_review_state_markings,
         "errors": errors,
         "total_meetings": len(all_stems),
     }))

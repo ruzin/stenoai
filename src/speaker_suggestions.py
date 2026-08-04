@@ -709,6 +709,39 @@ def cluster_ids_marked_multi_speaker(channel_data: dict) -> set:
     }
 
 
+def count_review_markings(sidecar: Optional[dict]) -> dict:
+    """How many clusters in a whole sidecar carry each human marking:
+    `{"multi_speaker": n, "review_state": n}`.
+
+    Exists once so the two paths that overwrite a sidecar with a fresh
+    diarization -- `backfill-speaker-embeddings` and
+    `_persist_speaker_sidecar` (reprocess --retranscribe) -- report the same
+    thing. Those are the only places a marking is ever lost, and a second
+    copy of this counting is how one of them would quietly stop counting the
+    newer kind.
+
+    Tolerates any shape, including None: it is called only to build a
+    warning, and a warning must never be what fails a re-diarization.
+    """
+    counts = {"multi_speaker": 0, "review_state": 0}
+    if not isinstance(sidecar, dict):
+        return counts
+    channels = sidecar.get("channels")
+    if not isinstance(channels, dict):
+        return counts
+    for channel_data in channels.values():
+        if not isinstance(channel_data, dict):
+            continue
+        for cluster in _cluster_entries(channel_data).values():
+            if not isinstance(cluster, dict):
+                continue
+            if cluster.get(MULTI_SPEAKER_KEY):
+                counts["multi_speaker"] += 1
+            if cluster.get(REVIEW_STATE_KEY):
+                counts["review_state"] += 1
+    return counts
+
+
 def set_cluster_multi_speaker(
     output_dir: Path, meeting_stem: str, channel: str,
     diarization_speaker_id: str, marked: bool,

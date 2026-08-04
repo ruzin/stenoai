@@ -1909,3 +1909,75 @@ class SetClusterReviewStateCliTests(unittest.TestCase):
                     self.assertIn(result.exit_code, (0, 1))
                     if result.exit_code == 1:
                         self.assertFalse(_last_json(result.output)["success"])
+
+
+class PersistSidecarReportsLostMarkingsTests(unittest.TestCase):
+    """`reprocess --retranscribe` re-runs the whole transcription, including
+    diarization, and overwrites the sidecar through _persist_speaker_sidecar.
+    Every human marking on the old clusters goes with it -- correctly, since
+    the new run's ids describe different voices -- but this path said nothing
+    at all, unlike the backfill next door. A marking is the one thing in that
+    file no re-run can reproduce, so its loss has to be greppable afterwards.
+    """
+
+    def _seed(self, tmp, multi=False, generic=False):
+        from src.speaker_suggestions import (
+            REVIEW_STATE_GENERIC, set_cluster_multi_speaker, set_cluster_review_state,
+        )
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0,
+                                  "segment_count": 5},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 20.0,
+                                  "segment_count": 4},
+                },
+            },
+        })
+        if multi:
+            set_cluster_multi_speaker(output_dir, "mtg001", "mic", "SPEAKER_0", True)
+        if generic:
+            set_cluster_review_state(output_dir, "mtg001", "mic", "SPEAKER_1", REVIEW_STATE_GENERIC)
+        return output_dir
+
+    _FRESH_RUN = {
+        "speaker_clusters": {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_0": {"embedding": [0.0, 1.0], "speech_duration_seconds": 28.0,
+                                  "segment_count": 5},
+                },
+            },
+        },
+    }
+
+    def test_overwriting_a_marked_sidecar_reports_both_kinds_of_loss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, multi=True, generic=True)
+            with mock.patch("simple_recorder.logger") as log:
+                self.assertTrue(
+                    simple_recorder._persist_speaker_sidecar(output_dir, "mtg001", self._FRESH_RUN))
+            warned = " ".join(str(c) for c in log.warning.call_args_list)
+            self.assertIn("mtg001", warned)
+            self.assertIn("multiple speakers", warned)
+            self.assertIn("kept generic", warned)
+
+    def test_says_nothing_when_the_previous_sidecar_carried_no_markings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            with mock.patch("simple_recorder.logger") as log:
+                simple_recorder._persist_speaker_sidecar(output_dir, "mtg001", self._FRESH_RUN)
+            self.assertEqual(log.warning.call_args_list, [])
+
+    def test_a_first_run_with_no_previous_sidecar_reports_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            with mock.patch("simple_recorder.logger") as log:
+                self.assertTrue(
+                    simple_recorder._persist_speaker_sidecar(output_dir, "mtg001", self._FRESH_RUN))
+            self.assertEqual(log.warning.call_args_list, [])
