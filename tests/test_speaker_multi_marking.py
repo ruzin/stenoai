@@ -499,6 +499,32 @@ class SampleSegmentsTests(unittest.TestCase):
                 "a swapped manifest must not put bob's line under alice's cluster",
             )
 
+    def test_two_turns_swapped_inside_one_second_are_refused(self):
+        # The narrower version of the test above, from the bot review: two
+        # turns at 10.1 and 10.8 BOTH render as [00:10], so comparing each
+        # entry against its line's displayed second cannot separate them,
+        # however exactly it is done. What still separates them is order --
+        # the manifest is built from a list sorted by start, so its starts
+        # never decrease. A swap does.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Speaker 2] alice speaking\n[00:10] [Speaker 3] bob speaking\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript, [{"start": 10.1, "end": 10.5}],
+                turn_manifest=[
+                    {"start": 10.8, "channel": "system", "diarization_speaker_id": "SPEAKER_1"},
+                    {"start": 10.1, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(
+                [s["text"] for s in samples], [None],
+                "a manifest whose turns run backwards cannot describe this transcript",
+            )
+
     def test_a_manifest_entry_that_is_not_an_object_is_refused_not_raised(self):
         # Also from that review: the sidecar is JSON, so an entry can be
         # anything, while every caller reaches straight for entry.get(...) --

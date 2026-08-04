@@ -944,6 +944,13 @@ def _manifest_describes_lines(line_starts: list, turn_manifest: list) -> bool:
     It has to: a window merely a second wide accepts the NEIGHBOURING turn,
     and two turns swapped is exactly what a reordered manifest looks like.
 
+    Also refused: a manifest whose turn starts run backwards. Two turns
+    inside ONE second render as the same `[MM:SS]`, so no per-line
+    comparison can tell them apart however exactly it is done -- but the
+    manifest is built from a list sorted by start, so its starts never
+    decrease, and a swap does. That closes the remaining reordering case
+    the per-line check cannot see.
+
     Refused outright: an entry that is not an object at all. The sidecar is
     JSON and every caller then reaches for `entry.get(...)`, so this is both
     the safe answer and the one that keeps their never-raises contract.
@@ -954,13 +961,17 @@ def _manifest_describes_lines(line_starts: list, turn_manifest: list) -> bool:
     and refusing on missing evidence would take excerpts away from meetings
     that are fine.
     """
+    previous = None
     for line_start, entry in zip(line_starts, turn_manifest):
         if not isinstance(entry, dict):
             return False
-        if line_start is None:
-            continue
         start = entry.get("start")
         if not isinstance(start, (int, float)) or not math.isfinite(start):
+            continue
+        if previous is not None and start < previous:
+            return False
+        previous = start
+        if line_start is None:
             continue
         if max(0, int(start)) != int(line_start):
             return False
