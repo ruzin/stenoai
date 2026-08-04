@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -923,6 +924,45 @@ def relabel_transcript_multi(transcript_path: Path, assignments: list) -> tuple:
     return changed, skipped_ambiguous
 
 
+def _manifest_describes_lines(line_starts: list, turn_manifest: list) -> bool:
+    """Whether this manifest still describes THIS transcript, so its entries
+    may be paired with the lines by position.
+
+    Positional pairing is exact only while both sequences come from the same
+    `turns` list of the same run -- and an equal length is weak evidence of
+    that. A manifest left behind by an earlier transcription of the same
+    meeting, or written in a different order, keeps its entry count and then
+    silently pairs every line with the wrong cluster: a quote, or a name,
+    from one person shown under another's, which is precisely the failure
+    the exact-provenance path exists to remove.
+
+    The evidence that the two belong together is already in both of them.
+    Each entry carries the turn's `start` in seconds; the line carries that
+    same number truncated to the second by src.transcriber._format_timestamp
+    (so `[00:20]` accepts 20.0 through 20.999...). Compared with the same
+    slop the rest of this module uses for float/boundary noise.
+
+    Skipped rather than failed: an entry with no usable `start` (or a
+    non-finite one, which _format_timestamp itself renders as 00:00) and a
+    line whose timestamp would not parse. Neither is evidence of a mismatch,
+    and refusing on missing evidence would take excerpts away from meetings
+    that are fine.
+    """
+    for line_start, entry in zip(line_starts, turn_manifest):
+        if line_start is None:
+            continue
+        start = entry.get("start") if isinstance(entry, dict) else None
+        if not isinstance(start, (int, float)) or not math.isfinite(start):
+            continue
+        if not (
+            line_start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+            <= start
+            < line_start + 1 + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+        ):
+            return False
+    return True
+
+
 def relabel_transcript_exact(transcript_path: Path, turn_manifest: list, target_ids: set, display_name: str) -> int:
     """Relabel a saved transcript using EXACT recorded speaker provenance,
     instead of relabel_transcript_speaker/relabel_transcript_multi's fuzzy
@@ -992,6 +1032,25 @@ def relabel_transcript_exact(transcript_path: Path, turn_manifest: list, target_
             "relabel_transcript_exact: %s has %d diarised lines but turn_manifest has %d entries -- "
             "refusing to guess a pairing, no-op.",
             transcript_path, len(diarised_line_indices), len(turn_manifest),
+        )
+        return 0
+    line_starts = []
+    for i in diarised_line_indices:
+        try:
+            line_starts.append(
+                _parse_transcript_timestamp(_TRANSCRIPT_LINE_RE.match(lines[i]).group(1))
+            )
+        except ValueError:
+            line_starts.append(None)
+    if not _manifest_describes_lines(line_starts, turn_manifest):
+        # An equal line count is not enough: a manifest from an earlier
+        # transcription of this meeting keeps it and would then rename lines
+        # by position that belong to somebody else. See
+        # _manifest_describes_lines.
+        logger.warning(
+            "relabel_transcript_exact: %s and its turn_manifest have %d entries each but their "
+            "turn times disagree -- the manifest no longer describes this transcript, no-op.",
+            transcript_path, len(turn_manifest),
         )
         return 0
 
@@ -1195,6 +1254,17 @@ def cluster_transcript_lines(
             "cluster_transcript_lines: %s has %d diarised lines but turn_manifest has "
             "%d entries -- refusing to guess a pairing, no excerpt text.",
             transcript_path, len(parsed), len(turn_manifest),
+        )
+        return []
+    if not _manifest_describes_lines([ts for ts, _text in parsed], turn_manifest):
+        # Same refusal one step further in: the count survives a manifest
+        # left over from an earlier transcription of this meeting, and
+        # pairing by position then quotes one person under another's name.
+        logger.warning(
+            "cluster_transcript_lines: %s and its turn_manifest have %d entries each but their "
+            "turn times disagree -- the manifest no longer describes this transcript, "
+            "no excerpt text.",
+            transcript_path, len(turn_manifest),
         )
         return []
     # (start, next_line_start, text) per owned line. The third element is

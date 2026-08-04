@@ -422,6 +422,56 @@ class SampleSegmentsTests(unittest.TestCase):
             )
             self.assertEqual((samples[0]["start"], samples[0]["end"]), (10.0, 24.0))
 
+    def test_a_stale_manifest_of_the_same_length_is_refused_rather_than_mispaired(self):
+        # The length check was the ONLY check, so a manifest that no longer
+        # describes this transcript -- written by an earlier transcription,
+        # or reordered -- passed it whenever the line count happened to
+        # survive, and every line was then attributed positionally to
+        # whatever cluster sat at that index. That is a quote from one
+        # person shown under another person's name, which is the single
+        # thing this panel must never do.
+        #
+        # Same three lines, same three entries, but the manifest's turns sit
+        # at 10/45/70 while the transcript's lines sit at 10/20/30.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [You] one\n[00:20] [Others] two\n[00:30] [You] three\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript, [{"start": 8.0, "end": 15.0}],
+                turn_manifest=[
+                    {"start": 10.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 45.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 70.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("mic", "SPEAKER_0")},
+            )
+            self.assertEqual(
+                [s["text"] for s in samples], [None],
+                "an unverifiable pairing yields the textless, audio-only fallback",
+            )
+
+    def test_a_manifest_that_still_describes_the_transcript_is_accepted(self):
+        # The guard above must not refuse the normal case: manifest starts
+        # are floats, the transcript's [MM:SS] is that float truncated to
+        # the second, so entry 20.9 legitimately pairs with the line [00:20].
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [You] one\n[00:20] [Others] two\n", encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript, [{"start": 10.0, "end": 15.0}],
+                turn_manifest=[
+                    {"start": 10.4, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 20.9, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("mic", "SPEAKER_0")},
+            )
+            self.assertEqual([s["text"] for s in samples], ["one"])
+
     def test_two_turns_in_the_same_displayed_second_never_widen_the_clip(self):
         # Found by review, and it is the same failure class as the one
         # reported from real use. Transcript timestamps render as [MM:SS],

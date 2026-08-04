@@ -960,6 +960,29 @@ class RelabelTranscriptExactTests(unittest.TestCase):
             self.assertIn("[00:05] [Speaker 2] first", text)  # untouched -- position 0, mic
             self.assertIn("[00:05] [Inga Hahn] second", text)  # relabeled -- position 1, system
 
+    def test_a_stale_manifest_of_the_same_length_refuses_and_returns_zero(self):
+        # The length check was the only check, so a manifest describing a
+        # DIFFERENT transcription of this meeting -- a re-transcription, or
+        # a reordered write -- passed whenever the line count survived, and
+        # positional pairing then wrote a name onto lines that belong to
+        # someone else. Positional pairing is only sound while the two
+        # sequences still come from the same run, and the manifest's own
+        # `start` is the evidence for that: the transcript's [MM:SS] is that
+        # float truncated to the second.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_transcript(
+                tmp, "[00:05] [Speaker 2] first\n\n[00:10] [Speaker 3] second",
+            )
+            manifest = [
+                {"start": 5.1, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 42.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_0")}, "Julian")
+            self.assertEqual(changed, 0)
+            text = path.read_text()
+            self.assertIn("[00:05] [Speaker 2] first", text)
+            self.assertIn("[00:10] [Speaker 3] second", text)
+
     def test_length_mismatch_refuses_to_guess_and_returns_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(
