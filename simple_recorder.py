@@ -6220,6 +6220,7 @@ def backfill_participants(relabel_transcripts):
         confirmed_participant_names,
         merge_same_channel_fragments,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
         relabel_transcript_exact,
         relabel_transcript_multi,
@@ -6262,6 +6263,12 @@ def backfill_participants(relabel_transcripts):
         # needs pooled_segments. Building both unconditionally is cheap
         # and keeps the branch below simple.
         turn_manifest = sidecar.get("transcript_lines")
+        # Which run these cluster ids belong to. Relabeling reads a
+        # prototype as "this person IS this cluster" and then writes their
+        # name into the transcript, so it is scoped like every other reader
+        # of a current assignment -- and unlike the participants line
+        # above, which is deliberately not (see confirmed_participant_names).
+        sidecar_run_id = (sidecar.get("diarization_run") or {}).get("run_id")
         assignments = []
         target_ids_by_name: dict = {}
         for channel_name, channel_data in (sidecar.get("channels") or {}).items():
@@ -6274,6 +6281,15 @@ def backfill_participants(relabel_transcripts):
                     if prototype.get("meeting_id") != meeting_id or not prototype_channel_matches(
                         prototype, channel_name, recording_type,
                     ):
+                        continue
+                    if not prototype_run_matches(prototype, sidecar_run_id):
+                        # Confirmed against a run this sidecar no longer
+                        # describes. The id survived the re-diarization, but
+                        # the voice behind it did not, so writing this name
+                        # onto its lines would put one participant's name on
+                        # another's words -- the failure this whole slice
+                        # exists to stop, and here it lands in the file the
+                        # user reads as the record of the meeting.
                         continue
                     sid = prototype.get("diarization_speaker_id")
                     if sid not in id_resolution:
