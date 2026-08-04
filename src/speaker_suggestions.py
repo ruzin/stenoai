@@ -161,6 +161,36 @@ def prototype_channel_matches(prototype: dict, channel_name: str, channel_record
     return prototype.get("recording_type") == channel_recording_type
 
 
+def prototype_run_matches(entry: dict, sidecar_run_id) -> bool:
+    """Is a stored prototype/hard-negative still evidence about the sidecar's
+    CURRENT diarization run's clusters?
+
+    Both the read path (which prototypes may populate `confirmed_by_user`)
+    and the write path (`remove_speaker_evidence`'s run-scoped removal) call
+    this one predicate so they can never drift apart on what "still current"
+    means (see docs/superpowers/specs/2026-08-04-speaker-review-run-provenance-design.md
+    section 4/5).
+
+    The two mixed absent/present cases are deliberately asymmetric, because
+    they arise from different histories rather than a coin flip:
+    - entry absent, sidecar present: only reachable if the meeting was
+      re-diarized (stamping the sidecar with a run id) AFTER the entry was
+      confirmed on a build that predates run stamping. The entry's clusters
+      are provably not this run's clusters, so it is stale -- this is the
+      exact hazard this slice exists to catch.
+    - entry present, sidecar absent: only reachable if a build WITHOUT run
+      stamping re-diarized a meeting whose entry was confirmed by a build
+      WITH it -- the reverse order from the case above, and not the one this
+      slice targets. Nothing proves the now-unstamped sidecar's clusters are
+      the confirmed run's clusters, so this is pinned stale defensively too.
+    Both absent stays current: pure legacy, nothing here was ever run-stamped.
+    """
+    entry_run_id = entry.get("diarization_run_id")
+    if entry_run_id is None and sidecar_run_id is None:
+        return True
+    return entry_run_id == sidecar_run_id
+
+
 def build_clusters_from_diarization(segments: list, embeddings: dict) -> dict:
     """Group one channel's raw diarizer segments + per-speaker embeddings
     into the `clusters` shape `write_speakers_sidecar` expects:

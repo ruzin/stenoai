@@ -22,6 +22,7 @@ from src.speaker_suggestions import (
     longest_segment,
     merge_same_channel_fragments,
     prototype_channel_matches,
+    prototype_run_matches,
     read_speakers_sidecar,
     relabel_transcript_exact,
     relabel_transcript_multi,
@@ -382,6 +383,23 @@ class PrototypeChannelMatchesTests(unittest.TestCase):
         legacy = {"recording_type": "in_person"}
         self.assertTrue(prototype_channel_matches(legacy, "mic", "in_person"))
         self.assertFalse(prototype_channel_matches(legacy, "system", "remote"))
+
+
+class PrototypeRunMatchesTests(unittest.TestCase):
+    def test_both_absent_is_current(self):
+        self.assertTrue(prototype_run_matches({}, None))
+
+    def test_both_present_and_equal_is_current(self):
+        self.assertTrue(prototype_run_matches({"diarization_run_id": "run-a"}, "run-a"))
+
+    def test_both_present_and_different_is_stale(self):
+        self.assertFalse(prototype_run_matches({"diarization_run_id": "run-a"}, "run-b"))
+
+    def test_entry_absent_sidecar_present_is_stale(self):
+        self.assertFalse(prototype_run_matches({}, "run-a"))
+
+    def test_entry_present_sidecar_absent_is_stale(self):
+        self.assertFalse(prototype_run_matches({"diarization_run_id": "run-a"}, None))
 
 
 class SuggestSpeakersForMeetingTests(unittest.TestCase):
