@@ -309,7 +309,18 @@ test('marking a row as more than one person removes every naming action and can 
   // taking the only undo for a misclick with it.
   await expect(row).toBeVisible();
 
-  await row.getByTestId('speaker-mark-multi-mic:SPEAKER_0').click();
+  // The button that clears the marking must not call itself "Undo": by
+  // then the prototype, the participants entry and the transcript labels
+  // of the withdrawn name are gone, and clearing the flag reopens the row
+  // for naming rather than restoring what was there.
+  const clearMark = row.getByTestId('speaker-mark-multi-mic:SPEAKER_0');
+  await expect(clearMark).toContainText('One person');
+  await expect(clearMark).toHaveAttribute(
+    'aria-label',
+    'This is one person after all - reopens the row for naming, does not restore the earlier name',
+  );
+
+  await clearMark.click();
   await expect(row).toContainText('Likely Julian');
   await expect(row.getByRole('button', { name: 'Approve' })).toHaveCount(1);
 });

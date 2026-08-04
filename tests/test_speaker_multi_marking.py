@@ -893,6 +893,132 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 "a negative earned by a DIFFERENT cluster is not this marking's to delete",
             )
 
+    def _seed_with_transcript(self, tmp, body, manifest):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_00": {
+                        "embedding": [1.0, 0.0], "speech_duration_seconds": 30.0,
+                        "segment_count": 5, "segments": [{"start": 4.0, "end": 6.0}],
+                    },
+                },
+            },
+        }, turn_manifest=manifest)
+        transcripts_dir = Path(tmp) / "transcripts"
+        transcripts_dir.mkdir(parents=True, exist_ok=True)
+        path = transcripts_dir / "mtg001_transcript.txt"
+        path.write_text(
+            "Session: mtg001\n\n" + "=" * 60 + "\n\n" + body, encoding="utf-8",
+        )
+        return path
+
+    def test_marking_a_confirmed_cluster_takes_the_name_out_of_the_transcript(self):
+        # The last of the three P1s from the bot review, and the one a user
+        # actually reads. confirm-speaker --relabel-transcript rewrites the
+        # cluster's lines to "Julian". Marking it as more than one person
+        # afterwards withdraws the profile, the prototype and the
+        # participants chip -- but left "Julian" standing in the saved
+        # transcript, which is what feeds the summary and every export. The
+        # app then knows the cluster holds several people while the
+        # artefact keeps naming one of them.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._seed_with_transcript(
+                tmp,
+                "[00:05] [Speaker 2] hello there\n\n[00:20] [You] hi back",
+                [
+                    {"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_00"},
+                    {"start": 20.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_01"},
+                ],
+            )
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            with mock.patch("src.config.get_config", return_value=cfg), \
+                 mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
+                confirmed = CliRunner().invoke(simple_recorder.confirm_speaker, [
+                    "mtg001", "mic", "SPEAKER_00", "--new-person", "Julian",
+                    "--relabel-transcript",
+                ])
+            self.assertTrue(_last_json(confirmed.output)["success"])
+            self.assertIn("[00:05] [Julian] hello there", transcript.read_text())
+
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "mic", "SPEAKER_00"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+
+            text = transcript.read_text()
+            self.assertNotIn("Julian", text, "the withdrawn name must leave the transcript too")
+            self.assertIn(
+                "[00:05] [Speaker 2] hello there", text,
+                "and the label the line carried before the confirmation comes back",
+            )
+            self.assertIn("[00:20] [You] hi back", text)  # never this cluster's line
+
+    def test_without_a_recorded_original_the_line_says_multiple_speakers(self):
+        # Every meeting confirmed before the original label was recorded has
+        # nothing to restore. Putting back "You" or "Speaker 3" would invent
+        # an attribution; leaving the person's name would keep the lie. The
+        # fallback states exactly what the user just decided.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._seed_with_transcript(
+                tmp, "[00:05] [Julian] hello there",
+                [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_00"}],
+            )
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = cfg.create_person_profile("Julian")
+            cfg.add_speaker_prototype(
+                person["person_id"], [1.0, 0.0], recording_type="in_person",
+                meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=30.0, segment_count=5,
+                created_from="user_confirmed", channel="mic",
+            )
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "mic", "SPEAKER_00"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(data["transcript_lines_restored"], 1)
+            self.assertIn("[00:05] [Multiple speakers] hello there", transcript.read_text())
+
+    def test_a_manifest_that_no_longer_fits_leaves_the_transcript_alone(self):
+        # The refusal branch. If the manifest cannot be paired with the
+        # transcript, the app does not know which lines belong to this
+        # cluster -- rewriting any of them would be guessing, and guessing
+        # here means putting a label on someone else's words. The file
+        # stays as it is, and the count says so instead of claiming a
+        # cleanup that never happened.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._seed_with_transcript(
+                tmp, "[00:05] [Julian] hello there\n\n[00:20] [You] hi back",
+                # One entry, two diarised lines: cannot be paired.
+                [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_00"}],
+            )
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = cfg.create_person_profile("Julian")
+            cfg.add_speaker_prototype(
+                person["person_id"], [1.0, 0.0], recording_type="in_person",
+                meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=30.0, segment_count=5,
+                created_from="user_confirmed", channel="mic",
+            )
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "mic", "SPEAKER_00"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(
+                data["transcript_lines_restored"], 0,
+                "a refusal must be reported as zero, not as a silent success",
+            )
+            self.assertIn("[00:05] [Julian] hello there", transcript.read_text())
+
     def test_unknown_cluster_fails_loudly_rather_than_marking_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)

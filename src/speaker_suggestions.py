@@ -674,16 +674,24 @@ def set_cluster_multi_speaker(
     else:
         cluster.pop(MULTI_SPEAKER_KEY, None)
 
+    write_sidecar_document(output_dir, meeting_stem, sidecar)
+    return sidecar
+
+
+def write_sidecar_document(output_dir: Path, meeting_stem: str, sidecar: dict) -> None:
+    """Replace a meeting's whole sidecar document atomically.
+
+    A UNIQUE temp name, unlike the fixed "<name>.tmp" the relabel helpers
+    in this module use. Those rewrite a transcript, which can be
+    regenerated; this rewrites the only copy of a meeting's voice
+    embeddings, which cannot be once the source audio is gone. With a
+    shared temp name, two concurrent writers race on ONE file: the second
+    truncates it while the first is replacing the sidecar with it, and a
+    crash or a full disk in that window leaves the real sidecar empty.
+    Same directory as the target so the replace stays a rename within one
+    filesystem, which is what makes it atomic.
+    """
     path = speakers_sidecar_path(output_dir, meeting_stem)
-    # A UNIQUE temp name, unlike the fixed "<name>.tmp" the relabel helpers
-    # in this module use. Those rewrite a transcript, which can be
-    # regenerated; this rewrites the only copy of a meeting's voice
-    # embeddings, which cannot be once the source audio is gone. With a
-    # shared temp name, two concurrent marks race on ONE file: the second
-    # truncates it while the first is replacing the sidecar with it, and a
-    # crash or a full disk in that window leaves the real sidecar empty.
-    # Same directory as the target so the replace stays a rename within one
-    # filesystem, which is what makes it atomic.
     fd, tmp_name = tempfile.mkstemp(
         dir=str(path.parent), prefix=path.name + ".", suffix=".tmp",
     )
@@ -697,7 +705,6 @@ def set_cluster_multi_speaker(
         # later and mistake for a real sidecar.
         tmp_path.unlink(missing_ok=True)
         raise
-    return sidecar
 
 
 def minimum_speaker_count(channels: dict) -> int:
@@ -797,6 +804,16 @@ _TRANSCRIPT_LINE_RE = re.compile(r"^\[(\d+(?::\d{2}){1,2})\] \[([^\]]*)\] (.*)$"
 # a transcript line's integer-second timestamp against a sidecar segment's
 # float [start, end] range.
 RELABEL_TIMESTAMP_TOLERANCE_SECONDS = 0.5
+
+
+def _safe_transcript_timestamp(timestamp: str) -> Optional[float]:
+    """`_parse_transcript_timestamp` for callers that must keep a line's
+    position even when its timestamp is malformed -- dropping it would
+    shift every later manifest pairing by one."""
+    try:
+        return _parse_transcript_timestamp(timestamp)
+    except ValueError:
+        return None
 
 
 def _parse_transcript_timestamp(timestamp: str) -> float:
@@ -1024,6 +1041,131 @@ def _manifest_describes_lines(line_starts: list, turn_manifest: list) -> bool:
         if max(0, int(start)) != int(line_start):
             return False
     return True
+
+
+MULTI_SPEAKER_TRANSCRIPT_LABEL = "Multiple speakers"
+ORIGINAL_LABEL_KEY = "original_label"
+
+
+def record_original_labels(
+    output_dir: Path, meeting_stem: str, transcript_path: Path, target_ids: set,
+) -> int:
+    """Remember, per manifest entry, what label a line carried BEFORE a
+    confirmation renames it. Returns how many entries were newly recorded.
+
+    Without this, naming a cluster is irreversible in the transcript: the
+    original label ("You", "Others", "Speaker 3") is overwritten, and it
+    was itself derived at transcription time, so nothing can reconstruct
+    it afterwards. Marking that cluster as more than one person later
+    withdraws the profile and the participants entry but would leave the
+    name standing in the artefact that feeds the summary and every export.
+
+    FIRST WRITE WINS. Confirming the same cluster twice -- the review UI's
+    "Change" flow does exactly that -- must not record "Julian" as the
+    original, or the restore would put a person's name back on lines the
+    app has just decided are not theirs.
+
+    Written into the sidecar's own `transcript_lines` entries, so it
+    travels with the manifest it is indexed by and needs no migration: an
+    entry without the key simply has nothing recorded, which is the state
+    of every meeting confirmed before this existed.
+    """
+    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    if sidecar is None:
+        return 0
+    manifest = sidecar.get("transcript_lines")
+    if not manifest or not target_ids or not transcript_path.exists():
+        return 0
+    try:
+        lines = transcript_path.read_text(encoding="utf-8").split("\n")
+    except OSError:
+        return 0
+
+    matches = [_TRANSCRIPT_LINE_RE.match(line) for line in lines]
+    diarised = [m for m in matches if m]
+    if len(diarised) != len(manifest):
+        return 0
+    if not _manifest_describes_lines(
+        [_safe_transcript_timestamp(m.group(1)) for m in diarised], manifest,
+    ):
+        return 0
+
+    recorded = 0
+    for match, entry in zip(diarised, manifest):
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("channel"), entry.get("diarization_speaker_id")) not in target_ids:
+            continue
+        if ORIGINAL_LABEL_KEY in entry:
+            continue  # first write wins
+        entry[ORIGINAL_LABEL_KEY] = match.group(2)
+        recorded += 1
+
+    if recorded:
+        write_sidecar_document(output_dir, meeting_stem, sidecar)
+    return recorded
+
+
+def restore_transcript_labels(
+    transcript_path: Path, turn_manifest: list, target_ids: set,
+) -> int:
+    """Undo a confirmation's rename on ONE cluster's lines, putting back the
+    label each line carried before it -- or `MULTI_SPEAKER_TRANSCRIPT_LABEL`
+    where nothing was recorded.
+
+    The fallback is not a guess: it is the statement the user just made by
+    marking the cluster, and it is the honest thing to show for a line the
+    app can no longer attribute to one person. Guessing "You" or "Speaker
+    3" instead would invent an attribution.
+
+    Same refusals as relabel_transcript_exact -- a manifest that does not
+    line up with the transcript, by count or by turn times, is not paired
+    at all. Returns the number of lines changed; never raises.
+    """
+    if not turn_manifest or not target_ids or not transcript_path.exists():
+        return 0
+    try:
+        lines = transcript_path.read_text(encoding="utf-8").split("\n")
+    except OSError as e:
+        logger.warning("Could not read transcript %s for label restore: %s", transcript_path, e)
+        return 0
+
+    indices = [i for i, line in enumerate(lines) if _TRANSCRIPT_LINE_RE.match(line)]
+    if len(indices) != len(turn_manifest):
+        logger.warning(
+            "restore_transcript_labels: %s has %d diarised lines but turn_manifest has %d -- "
+            "refusing to guess a pairing, no-op.",
+            transcript_path, len(indices), len(turn_manifest),
+        )
+        return 0
+    if not _manifest_describes_lines(
+        [_safe_transcript_timestamp(_TRANSCRIPT_LINE_RE.match(lines[i]).group(1)) for i in indices],
+        turn_manifest,
+    ):
+        logger.warning(
+            "restore_transcript_labels: %s and its turn_manifest disagree on turn times -- no-op.",
+            transcript_path,
+        )
+        return 0
+
+    changed = 0
+    for line_idx, entry in zip(indices, turn_manifest):
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("channel"), entry.get("diarization_speaker_id")) not in target_ids:
+            continue
+        timestamp_str, label, text = _TRANSCRIPT_LINE_RE.match(lines[line_idx]).groups()
+        restored = entry.get(ORIGINAL_LABEL_KEY) or MULTI_SPEAKER_TRANSCRIPT_LABEL
+        if label == restored:
+            continue
+        lines[line_idx] = f"[{timestamp_str}] [{restored}] {text}"
+        changed += 1
+
+    if changed:
+        tmp_path = transcript_path.with_name(transcript_path.name + ".tmp")
+        tmp_path.write_text("\n".join(lines), encoding="utf-8")
+        tmp_path.replace(transcript_path)
+    return changed
 
 
 def relabel_transcript_exact(transcript_path: Path, turn_manifest: list, target_ids: set, display_name: str) -> int:

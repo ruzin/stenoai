@@ -4834,6 +4834,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         merge_same_channel_fragments,
         prototype_channel_matches,
         read_speakers_sidecar,
+        record_original_labels,
         relabel_transcript_exact,
         relabel_transcript_speaker,
     )
@@ -5019,6 +5020,12 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             # Phase 8). Only meetings processed after this manifest
             # existed have one; everything else falls back.
             target_ids = {(channel, sid) for sid in [resolved_id, *context.merged_from]}
+            # BEFORE the rename, so the label each line carries today is
+            # still readable. Without it, naming a cluster is irreversible
+            # in the transcript and marking it as mixed later would leave
+            # the name standing. First write wins, so re-confirming (the
+            # "Change" flow) never records a person's name as the original.
+            record_original_labels(output_dir, meeting_stem, transcript_path, target_ids)
             relabeled_lines = relabel_transcript_exact(
                 transcript_path, turn_manifest, target_ids, person["display_name"],
             )
@@ -5125,6 +5132,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
         merge_same_channel_fragments,
         clusters_from_sidecar_channel,
         minimum_speaker_count,
+        restore_transcript_labels,
         set_cluster_multi_speaker,
     )
 
@@ -5171,6 +5179,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     # directions.
     config = get_config()
     cleared_from = []
+    restored_lines = 0
     if multiple and fragment_ids:
         for person in config.get_person_profiles():
             removed = config.remove_speaker_evidence(
@@ -5201,6 +5210,19 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
                     sids=fragment_ids, negative=True,
                 )
         if cleared_from:
+            # The transcript is the artefact a human reads, and the one the
+            # summary and every export are built from. Withdrawing the
+            # profile while leaving the name on the lines would mean the app
+            # knows this voice is several people and keeps naming one of
+            # them. Each line goes back to the label it carried before the
+            # confirmation; where none was recorded -- meetings confirmed
+            # before that existed -- it becomes "Multiple speakers", which
+            # is not a guess but the statement the user just made.
+            restored_lines = restore_transcript_labels(
+                get_data_dirs()["transcripts"] / f"{meeting_stem}_transcript.txt",
+                sidecar.get("transcript_lines") or [],
+                {(channel, fid) for fid in fragment_ids},
+            )
             # Same upkeep confirm-speaker does: the meeting's Participants
             # chip is derived from confirmed prototypes, so dropping one has
             # to update it or the note keeps listing someone who is no
@@ -5221,6 +5243,12 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
         # marking, so a caller can say so rather than letting a person
         # quietly disappear from the meeting.
         "cleared_confirmation_from": cleared_from,
+        # How many transcript lines stopped carrying the withdrawn name.
+        # Reported rather than assumed: a manifest that no longer describes
+        # the transcript is refused outright (see restore_transcript_labels),
+        # and then the name IS still in the file -- a caller that says
+        # "removed" regardless would be lying about the artefact.
+        "transcript_lines_restored": restored_lines,
         "minimum_speaker_count": minimum_speaker_count(sidecar.get("channels") or {}),
     }))
 

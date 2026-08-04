@@ -556,20 +556,26 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   variant={isMarked ? 'outline' : 'ghost'}
                   aria-label={
                     isMarked
-                      ? 'Undo: this is one person after all'
+                      ? 'This is one person after all - reopens the row for naming, does not restore the earlier name'
                       : 'This is more than one person'
                   }
                   title={
                     isMarked
-                      ? 'Undo: this is one person after all'
+                      ? 'This is one person after all - reopens the row for naming, does not restore the earlier name'
                       : 'This is more than one person'
                   }
                   disabled={anyConfirmPending}
                   onClick={() => setMultiSpeaker(row, !isMarked)}
                   data-testid={`speaker-mark-multi-${key}`}
                 >
+                  {/* Not labelled "Undo": clearing the marking reopens the
+                      row for naming, it does not put back a name that was
+                      withdrawn when the cluster was marked. The prototype,
+                      the participants entry and the transcript labels are
+                      all gone by then, and calling that an undo would
+                      promise a recovery the backend cannot perform. */}
                   {isMarked ? <Undo2 className="size-[13px]" /> : <Users className="size-[13px]" />}
-                  {isMarked ? 'Undo' : null}
+                  {isMarked ? 'One person' : null}
                 </Button>
                 <Button
                   size="sm"
