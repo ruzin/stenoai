@@ -1877,3 +1877,35 @@ class SetClusterReviewStateCliTests(unittest.TestCase):
             self._run(simple_recorder.mark_speaker_cluster,
                       ["mtg001", "system", "SPEAKER_0", "--single"], tmp)
             self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_0"))
+
+    def _write_raw(self, tmp, payload):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "mtg001_speakers.json").write_text(json.dumps(payload))
+        return output_dir
+
+    def test_a_structurally_wrong_sidecar_fails_as_json_not_as_a_traceback(self):
+        # The never-raises contract is not only about missing things. This
+        # file is JSON on a user's disk: a half-written copy, a botched
+        # restore or a hand-edit can leave any of these keys holding the
+        # wrong type, and Electron parses the last JSON line of stdout --
+        # a traceback reaches the UI as "something went wrong", with the
+        # actual state unreported.
+        broken = [
+            {"channels": ["not-a-dict"]},
+            {"channels": {"system": ["not-a-dict"]}},
+            {"channels": {"system": {"clusters": ["not-a-dict"]}}},
+            {"channels": {"system": {"clusters": {"SPEAKER_0": "not-a-dict"}}}},
+            # Reaches the merge, which needs an embedding per cluster.
+            {"channels": {"system": {"clusters": {"SPEAKER_0": {}}}}},
+        ]
+        for payload in broken:
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
+                self._write_raw(tmp, payload)
+                for command in (simple_recorder.set_cluster_review_state_command,
+                                simple_recorder.mark_speaker_cluster):
+                    result = self._run(command, ["mtg001", "system", "SPEAKER_0"], tmp)
+                    self.assertNotIn("Traceback", result.output)
+                    self.assertIn(result.exit_code, (0, 1))
+                    if result.exit_code == 1:
+                        self.assertFalse(_last_json(result.output)["success"])

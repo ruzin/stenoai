@@ -5334,8 +5334,12 @@ def set_cluster_review_state_command(meeting_stem, channel, diarization_speaker_
             clusters_from_sidecar_channel(meeting_stem, channel_data)
         )
     except (KeyError, TypeError, ValueError):
-        # A sidecar whose embeddings cannot be merged still took the mark;
-        # report the raw id rather than failing an action that succeeded.
+        # The mark is already on disk by now; only the merge that computes
+        # its reach can still fail, and it does whenever any OTHER cluster
+        # in this channel lacks a usable embedding. Report the raw id
+        # rather than failing an action that already succeeded.
+        # (A structurally wrong channels/clusters map cannot get this far --
+        # the write refuses it first; see _freshest_channel.)
         clusters, id_resolution = {}, {}
     resolved_id = id_resolution.get(diarization_speaker_id, diarization_speaker_id)
     if resolved_id in clusters:
@@ -5416,9 +5420,16 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     # carries the existing run forward -- marking a cluster is an annotation
     # of this diarization output, not a new one. `None` on a legacy sidecar.
     run_id = (sidecar.get("diarization_run") or {}).get("run_id")
-    clusters, id_resolution = merge_same_channel_fragments(
-        clusters_from_sidecar_channel(meeting_stem, channel_data)
-    )
+    try:
+        clusters, id_resolution = merge_same_channel_fragments(
+            clusters_from_sidecar_channel(meeting_stem, channel_data)
+        )
+    except (KeyError, TypeError, ValueError):
+        # Same as set-cluster-review-state: the marking already landed, and
+        # only the reach computation can still fail -- on any OTHER cluster
+        # in this channel with no usable embedding. A traceback here would
+        # claim a marking failed that did not.
+        clusters, id_resolution = {}, {}
     resolved_id = id_resolution.get(diarization_speaker_id, diarization_speaker_id)
     fragment_ids = set()
     if resolved_id in clusters:

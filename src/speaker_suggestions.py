@@ -722,34 +722,20 @@ def set_cluster_multi_speaker(
     doesn't exist -- callers report that as an error rather than silently
     marking nothing.
     """
-    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
     if sidecar is None:
         return None
-    channel_data = (sidecar.get("channels") or {}).get(channel)
-    if channel_data is None:
-        return None
-    cluster = (channel_data.get("clusters") or {}).get(diarization_speaker_id)
-    if cluster is None:
+    cluster = _cluster_entries(channel_data).get(diarization_speaker_id)
+    if not isinstance(cluster, dict):
         return None
 
-    # Re-read immediately before writing and apply this ONE change to the
-    # freshest copy, rather than writing back the whole document as it
-    # looked on entry. The write is atomic, the read-modify-write was not:
-    # two overlapping marks both started from the same sidecar, and whoever
-    # replaced the file second discarded the other's marking silently --
-    # along with any confirmation cleanup its caller had already performed
-    # against it. This narrows the window to re-read-until-rename instead of
-    # entry-until-rename; it does not make the sequence a transaction, and a
-    # mark landing inside that remaining window would still be lost. Closing
-    # it fully needs a lock that works on macOS and Windows alike, which is
-    # a bigger change than this defect warrants.
-    freshest = read_speakers_sidecar(output_dir, meeting_stem)
-    if freshest is not None:
-        fresh_cluster = (
-            ((freshest.get("channels") or {}).get(channel) or {}).get("clusters") or {}
-        ).get(diarization_speaker_id)
-        if fresh_cluster is not None:
-            sidecar = freshest
+    # The second read, as late as possible before the write -- see
+    # _freshest_channel on the window this closes and the one it leaves.
+    fresh_sidecar, fresh_channel = _freshest_channel(output_dir, meeting_stem, channel)
+    if fresh_sidecar is not None:
+        fresh_cluster = _cluster_entries(fresh_channel).get(diarization_speaker_id)
+        if isinstance(fresh_cluster, dict):
+            sidecar = fresh_sidecar
             cluster = fresh_cluster
 
     if marked:
@@ -765,17 +751,43 @@ def _freshest_channel(output_dir: Path, meeting_stem: str, channel: str) -> tupl
     """The sidecar as it is on disk RIGHT NOW plus its `channel` entry, for a
     read-modify-write that must not overwrite a concurrent one.
 
-    Same reasoning as in set_cluster_multi_speaker, and the same limit: it
-    narrows the race to re-read-until-rename rather than eliminating it.
+    Callers use it twice: once to validate, and once again immediately
+    before writing, applying their change to whatever that second read
+    returned. The write is atomic; the read-modify-write around it is not.
+    Two overlapping marks that both started from the same in-memory sidecar
+    ended with the second writer discarding the first's marking silently,
+    along with any confirmation cleanup its caller had already performed
+    against it. The second read narrows that window to read-until-rename
+    instead of entry-until-rename. It does not make the sequence a
+    transaction, and a write landing inside the remaining window is still
+    lost; closing it fully needs a lock that works on macOS and Windows
+    alike, which is a bigger change than this defect warrants.
+
     Returns `(None, None)` when the sidecar or the channel is gone.
+
+    Types are checked rather than assumed. This file is JSON on a user's
+    disk: a half-written copy, a restored backup or a hand-edit can leave
+    any of these keys holding the wrong type, and `.get` on a list raises.
+    Every caller owes its own caller a JSON error rather than a traceback,
+    so a structurally wrong document has to read the same as a missing one.
     """
     sidecar = read_speakers_sidecar(output_dir, meeting_stem)
-    if sidecar is None:
+    if not isinstance(sidecar, dict):
         return None, None
-    channel_data = (sidecar.get("channels") or {}).get(channel)
-    if channel_data is None:
+    channels = sidecar.get("channels")
+    if not isinstance(channels, dict):
+        return None, None
+    channel_data = channels.get(channel)
+    if not isinstance(channel_data, dict):
         return None, None
     return sidecar, channel_data
+
+
+def _cluster_entries(channel_data: dict) -> dict:
+    """One channel's `clusters` map, or an empty one when it is missing or
+    the wrong type (see _freshest_channel on why that is not assumed)."""
+    clusters = channel_data.get("clusters")
+    return clusters if isinstance(clusters, dict) else {}
 
 
 def set_cluster_review_state(
@@ -797,9 +809,19 @@ def set_cluster_review_state(
     sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
     if sidecar is None:
         return None
-    cluster = (channel_data.get("clusters") or {}).get(diarization_speaker_id)
-    if cluster is None:
+    cluster = _cluster_entries(channel_data).get(diarization_speaker_id)
+    if not isinstance(cluster, dict):
         return None
+
+    # The second read, same as set_cluster_multi_speaker: this key rides in
+    # the same document as the voice embeddings, so writing back a copy
+    # that went stale would take a concurrent marking with it.
+    fresh_sidecar, fresh_channel = _freshest_channel(output_dir, meeting_stem, channel)
+    if fresh_sidecar is not None:
+        fresh_cluster = _cluster_entries(fresh_channel).get(diarization_speaker_id)
+        if isinstance(fresh_cluster, dict):
+            sidecar = fresh_sidecar
+            cluster = fresh_cluster
 
     if state is None:
         cluster.pop(REVIEW_STATE_KEY, None)
@@ -828,7 +850,11 @@ def clear_cluster_review_state(
     sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
     if sidecar is None:
         return 0
-    clusters = channel_data.get("clusters") or {}
+    # The second read, same as the two setters above.
+    fresh_sidecar, fresh_channel = _freshest_channel(output_dir, meeting_stem, channel)
+    if fresh_sidecar is not None:
+        sidecar, channel_data = fresh_sidecar, fresh_channel
+    clusters = _cluster_entries(channel_data)
     cleared = 0
     for sid in diarization_speaker_ids:
         cluster = clusters.get(sid)
