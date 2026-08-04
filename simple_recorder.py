@@ -1828,6 +1828,46 @@ def set_auto_summarize_cmd(enabled: bool):
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
+@cli.command(name='get-obsidian-sync')
+def get_obsidian_sync_cmd():
+    """Get whether notes are mirrored to an Obsidian vault (#413)."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"obsidian_sync_enabled": config.get_obsidian_sync_enabled()}))
+
+
+@cli.command(name='set-obsidian-sync')
+@click.argument('enabled', type=bool)
+def set_obsidian_sync_cmd(enabled: bool):
+    """Enable/disable mirroring notes to an Obsidian vault."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_obsidian_sync_enabled(enabled):
+        print(json.dumps({"success": True, "obsidian_sync_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
+@cli.command(name='get-obsidian-vault-path')
+def get_obsidian_vault_path_cmd():
+    """Get the configured Obsidian vault folder (empty = not configured)."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"obsidian_vault_path": config.get_obsidian_vault_path()}))
+
+
+@cli.command(name='set-obsidian-vault-path')
+@click.argument('vault_path', default='')
+def set_obsidian_vault_path_cmd(vault_path):
+    """Set the Obsidian vault folder (empty to clear)."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_obsidian_vault_path(vault_path):
+        print(json.dumps({"success": True, "obsidian_vault_path": vault_path}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to set vault path"}))
+
+
 @cli.command(name='get-silence-auto-stop')
 def get_silence_auto_stop_cmd():
     """Get whether recordings auto-stop on a stretch of silence + the duration."""

@@ -291,6 +291,12 @@ const stenoai = {
     getStoragePath: () => invoke('get-storage-path'),
     setStoragePath: (p) => invoke('set-storage-path', p),
     pickStorageFolder: () => invoke('select-storage-folder'),
+    getObsidianSync: () => invoke('get-obsidian-sync'),
+    setObsidianSync: (v) => invoke('set-obsidian-sync', v),
+    getObsidianVaultPath: () => invoke('get-obsidian-vault-path'),
+    setObsidianVaultPath: (p) => invoke('set-obsidian-vault-path', p),
+    pickObsidianVaultFolder: () => invoke('select-obsidian-vault-folder'),
+    getObsidianConflicts: () => invoke('get-obsidian-conflicts'),
     getAiPrompts: () => invoke('get-ai-prompts'),
     saveDiagnostics: (defaultFilename, content) =>
       invoke('save-diagnostics', defaultFilename, content),
