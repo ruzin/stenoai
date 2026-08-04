@@ -7098,6 +7098,13 @@ function logPipelineStdoutLine(line, source) {
     processingLog.logLine(source, l);
     return;
   }
+  if (l.startsWith('PROGRESS:diarize:')) {
+    // Only :start/:done markers exist on this pipeline (rare, at most twice
+    // per channel) -- no per-chunk flood risk, so no throttle needed unlike
+    // HEARTBEAT above.
+    processingLog.logLine(source, l);
+    return;
+  }
   if (
     l.startsWith('TRANSCRIPTION_COMPLETE') ||
     l.startsWith('TRANSCRIPTION_FAILED') ||

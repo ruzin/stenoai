@@ -13,7 +13,7 @@ The app is a thin Electron shell over a PyInstaller-bundled Python CLI. There is
 - **Python CLI (`simple_recorder.py`, ~2.9k lines, ~60 click commands)** is the single entry point bundled by `stenoai.spec`. Sub-modules in `src/`: `audio_recorder` (sounddevice), `transcriber` (pywhispercpp), `summarizer` (Ollama HTTP client), `ollama_manager` (lifecycle of the bundled `ollama serve`), `config` (JSON-backed user settings + model registry), `folders`, `models`, `whisper_models`.
 - **State across CLI invocations** is persisted to `recorder_state.json` and similar small JSON files — there is no daemon. Long-running recordings are a `record` subprocess kept alive by the Electron main process.
 - **User data lives in `~/Library/Application Support/stenoai/`** (`recordings/`, `transcripts/`, `output/`), resolved via `src.config.get_data_dirs()`. Repo-root `recordings/`/`transcripts/`/`output/` dirs are dev-only scratch.
-- **Bundled binaries (`bin/`)**: Ollama + ffmpeg, downloaded by `scripts/download-ollama.sh`. PyInstaller copies them into `dist/stenoai/ollama/` and `dist/stenoai/ffmpeg`. Electron then re-bundles `dist/stenoai/` as an `extraResource`.
+- **Bundled binaries (`bin/`)**: Ollama + ffmpeg, downloaded by `scripts/download-ollama.sh`. PyInstaller copies them into `dist/stenoai/ollama/` and `dist/stenoai/ffmpeg`. Electron then re-bundles `dist/stenoai/` as an `extraResource`. `bin/steno-diarize` (macOS only) is a separate Swift/CoreML sidecar built by `scripts/build-diarize-sidecar.sh` — see "Speaker diarization" below.
 - **Deep links**: app registers the `stenoai://` URL scheme. Handler logic is in `app/main.js` near `SHORTCUT_PROTOCOL`. Used by macOS Shortcuts: `stenoai://record/start?name=...` and `stenoai://record/stop`.
 
 ## Development Commands
@@ -38,6 +38,28 @@ The app is a thin Electron shell over a PyInstaller-bundled Python CLI. There is
 The Electron build pulls the bundled backend from `../dist/stenoai` via `extraResources`, so the PyInstaller step (`pyinstaller stenoai.spec --noconfirm`) must succeed *before* `npm run build` — otherwise the packaged app will be missing `stenoai`, `ollama`, and `ffmpeg`. The same applies in dev: `getBackendPath()` falls back to `dist/stenoai/stenoai`, so a fresh checkout needs the backend built once before the app can record or transcribe.
 
 For setup from a clean checkout, see `CONTRIBUTING.md` and `README.md`.
+
+### Speaker diarization (macOS only)
+Per-channel acoustic speaker diarization (splitting multiple speakers sharing
+one side of a call — e.g. two people around one mic, or multiple remote
+participants on system audio) runs through `bin/steno-diarize`, a Swift/
+CoreML sidecar (`diarize-sidecar/`) wrapping FluidAudio's Sortformer
+diarizer, invoked from Python (`src.transcriber._run_steno_diarize`) — never
+from Electron, since the batch pipeline is entirely Python-orchestrated.
+Build it *before* `pyinstaller stenoai.spec`, same as `download-ollama.sh`:
+
+```
+scripts/build-diarize-sidecar.sh   # outputs bin/steno-diarize
+scripts/download-ollama.sh
+pyinstaller stenoai.spec --noconfirm
+```
+
+`stenoai.spec` bundles `bin/steno-diarize` only when it exists and only on
+macOS (`_IS_DARWIN`), so skipping the build step is safe — the app falls
+back to the legacy channel-only "You"/"Others" labeling whenever the binary
+or a diarization run is unavailable (missing binary, timeout, bad output);
+this never fails a meeting. Windows/Linux never get acoustic diarization —
+`_resolve_steno_diarize()` returns `None` immediately off-darwin.
 
 ### End-to-end tests (Playwright)
 The e2e suite drives the **real Electron app** (real window, real clicks) to catch
@@ -97,7 +119,14 @@ overrides an agent's own test-level defaults.
     `setup-check.t2` (the setup-wizard allGood + checks contract) (all model-free,
     run in `t2-macos` /
     `t2-windows`); `transcription-pipeline.t2` and `honest-failure.t2` (tagged
-    `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`). Engine selection
+    `@pipeline`, run in `t2-pipeline-macos` / `t2-pipeline-windows`), and
+    `speaker-diarization.t2` (also `@pipeline`, macOS-only — skips loudly off-darwin
+    and when macOS's `say` TTS is unavailable — synthesizes real speech via `say` so
+    Parakeet/whisper.cpp produce real ASR segments, points
+    `STENOAI_DIARIZE_SIDECAR_PATH` at a fixture script returning fixed 2-speaker JSON,
+    and asserts the saved transcript's per-channel "You"/"Speaker 2"/"Others" labeling
+    and cross-channel numbering; the real `steno-diarize`/Sortformer binary itself was
+    validated directly against real recordings rather than in CI). Engine selection
     for `@pipeline` specs is shared via `e2e/fixtures/engine.ts`; model-free T2 setup
     helpers (deterministic recording config + seeded meeting summaries) live in
     `e2e/fixtures/user-config.ts`. The core-loop specs drive the preload IPC bridge and

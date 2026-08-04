@@ -27,7 +27,9 @@ ASR engine would now strictly remove real speech without preventing
 anything; the model is the source of truth.
 """
 
+import contextlib
 import inspect
+import json
 import logging
 import math
 import os
@@ -96,6 +98,14 @@ AUDIO_PREPROCESS_TIMEOUT_S = 600
 # pre-process floor; the helper scales it up with duration for long meetings.
 DIARISED_SPLIT_TIMEOUT_S = 600
 
+# Timeout for the channel-COUNT probe in _split_stereo_to_channels (`-t 0`,
+# header-only -- runs BEFORE we know duration, so unlike the timeouts above
+# this can't scale with it). Should be near-instant, but a live-recorded
+# WebM (no seek index) measured >15s on a real ~3.5h recording -- same
+# silent-mono-fallback failure this whole file already guards against
+# elsewhere, just one step earlier in the pipeline.
+CHANNEL_DETECT_TIMEOUT_S = 60
+
 # RMS energy gate for "channel has speech". Intentionally low (-70 dB) so
 # headphones-mode mic recordings — captured at much lower amplitude than
 # speakers-mode — still pass. The model handles low-amplitude speech fine;
@@ -105,6 +115,28 @@ MIN_RMS_THRESHOLD = 0.0003
 # Cap how many 1-second windows we sample when scanning RMS so a 30-min
 # recording doesn't pull all 30 min of int16 samples into Python lists.
 RMS_MAX_WINDOWS = 60
+
+# Acoustic per-channel speaker diarization (steno-diarize sidecar, macOS
+# only). Merge gap for consecutive same-speaker diarizer segments — reduces
+# diarization flicker and shrinks the gaps that cause boundary sentence
+# misattribution in _assign_asr_segments_to_diar_segments. Matches the value
+# validated against real meeting audio in the research playground.
+STENO_DIARIZE_MERGE_GAP_S = 0.3
+
+# Floor for the steno-diarize subprocess timeout. Measured runtime against
+# real meeting-length audio is single-digit-to-tens-of-seconds; this leaves
+# generous headroom under Electron's 8-minute inactivity watchdog while
+# still bounding a runaway on pathological input. Scaled up by duration for
+# long recordings, same pattern as _diarised_split_timeout.
+STENO_DIARIZE_TIMEOUT_FLOOR_S = 120
+
+# If one diarizer cluster holds this share (or more) of a channel's total
+# speaking time, the channel is treated as single-speaker — any other
+# cluster is almost certainly a brief misdiarization blip (observed
+# empirically: short/overlapping noise segments from Sortformer on
+# single-mic audio), not a real second speaker. Gates the "Speaker N"
+# placeholder path (_cluster_channel_labels).
+CHANNEL_DOMINANCE_THRESHOLD = 0.92
 
 # Sentinel text substituted when transcription produces no usable output
 # (genuine silence or all-hallucination). Callers compare against this to
@@ -161,6 +193,51 @@ def _resolve_ffmpeg() -> Optional[str]:
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
         logger.warning("ffmpeg not found in any candidate location")
+        return None
+
+
+# Resolve the bundled steno-diarize binary (macOS-only Swift/CoreML speaker
+# diarization sidecar, built by scripts/build-diarize-sidecar.sh). Mirrors
+# _resolve_ffmpeg()'s bundle-then-fallback lookup, but checks executability
+# instead of running a cheap probe invocation — there's no equivalent to
+# `ffmpeg -version` for this binary, so a bad binary still fails safely at
+# actual call time via _run_steno_diarize's blanket failure handling.
+_STENO_DIARIZE_PATH_CACHE: Optional[str] = None
+_STENO_DIARIZE_PATH_LOCK = threading.Lock()
+
+
+def _resolve_steno_diarize() -> Optional[str]:
+    global _STENO_DIARIZE_PATH_CACHE
+    if sys.platform != "darwin":
+        return None
+    if _STENO_DIARIZE_PATH_CACHE is not None:
+        return _STENO_DIARIZE_PATH_CACHE
+    with _STENO_DIARIZE_PATH_LOCK:
+        if _STENO_DIARIZE_PATH_CACHE is not None:
+            return _STENO_DIARIZE_PATH_CACHE
+        candidates: list[str] = []
+        # Same spirit as the STENO_DIARIZE_* env knobs on the Swift side —
+        # lets a T2 e2e spec point at a fixture binary without touching the
+        # real bundle resolution.
+        override = os.environ.get("STENOAI_DIARIZE_SIDECAR_PATH")
+        if override:
+            candidates.append(override)
+        if getattr(sys, 'frozen', False):
+            exe_dir = Path(sys.executable).parent
+            candidates.extend([
+                str(exe_dir / 'steno-diarize'),
+                str(exe_dir / '_internal' / 'steno-diarize'),
+            ])
+        else:
+            # Dev: repo-root bin/, built by scripts/build-diarize-sidecar.sh
+            repo_root = Path(__file__).resolve().parent.parent
+            candidates.append(str(repo_root / 'bin' / 'steno-diarize'))
+        for cand in candidates:
+            if os.access(cand, os.X_OK):
+                _STENO_DIARIZE_PATH_CACHE = cand
+                logger.info(f"steno-diarize resolved at: {cand}")
+                return cand
+        logger.info("steno-diarize not found; per-channel speaker labeling falls back to legacy You/Others")
         return None
 
 
@@ -411,6 +488,400 @@ def _drop_per_segment_bleed(
     return kept_mic, kept_sys
 
 
+# ---------------------------------------------------------------------------
+# Per-channel acoustic speaker diarization (steno-diarize sidecar, macOS
+# only). Ported from the research playground (scripts/diarize_playground.py)
+# as dict-based helpers — that script's own docstring states it's a research
+# tool that doesn't touch src/, and its functions use attribute access on
+# AlignedSentence objects while our real ASR segments are dicts.
+# ---------------------------------------------------------------------------
+
+def _merge_close_diar_segments(segments: list[dict], max_gap: float) -> list[dict]:
+    """Merge consecutive same-speaker diarizer segments separated by a gap
+    smaller than max_gap. Segments must already be sorted by start time.
+    Reduces diarization flicker and shrinks the gaps that cause boundary
+    sentence misattribution in _assign_asr_segments_to_diar_segments."""
+    if not segments:
+        return []
+    merged = [dict(segments[0])]
+    for segment in segments[1:]:
+        last = merged[-1]
+        if segment["speaker"] == last["speaker"] and segment["start"] - last["end"] <= max_gap:
+            last["end"] = segment["end"]
+        else:
+            merged.append(dict(segment))
+    return merged
+
+
+# A single mic capturing two people is a much harder acoustic problem than a
+# clean mic-vs-system-audio split — the diarizer's own turn boundaries can be
+# genuinely noisy/overlapping there (observed empirically: alternating and
+# even overlapping SPEAKER_0/SPEAKER_1 segments across a real back-and-forth).
+# Parakeet sometimes fails to break a long run of natural speech (no strong
+# terminal punctuation) into separate sentences, producing a single sentence
+# that spans many real diarizer turns. Assigning that whole sentence to
+# whichever one diarizer segment its midpoint happens to land in then forces
+# an entire multi-turn exchange onto one speaker. A sentence at or above this
+# duration gets word-level splitting instead (see _find_nearest_diar_segment)
+# whenever it actually overlaps more than one distinct diarizer speaker.
+LONG_SENTENCE_SPLIT_THRESHOLD_S = 5.0
+
+
+def _find_nearest_diar_segment(start: float, end: float, diar_segments: list[dict]) -> Optional[int]:
+    """Index of the diar segment containing [start, end]'s midpoint, or the
+    nearest one by boundary distance if the midpoint falls in an uncovered
+    gap. Returns None only when diar_segments is empty."""
+    midpoint = (start + end) / 2
+    best_i, best_dist = None, float("inf")
+    for i, segment in enumerate(diar_segments):
+        if segment["start"] <= midpoint <= segment["end"]:
+            return i
+        dist = (
+            segment["start"] - midpoint
+            if midpoint < segment["start"]
+            else midpoint - segment["end"]
+        )
+        if dist < best_dist:
+            best_i, best_dist = i, dist
+    return best_i
+
+
+def _assign_asr_segments_to_diar_segments(asr_segments: list[dict], diar_segments: list[dict]) -> None:
+    """Assign each ASR (Parakeet) sentence to the diarizer segment(s) it
+    belongs to.
+
+    Normal case (sentence fits inside one real diarizer turn): assign the
+    whole sentence as one block to the nearest/containing diar segment.
+    Sentence granularity (not word/token) is deliberate here — Parakeet
+    already does its own sentence segmentation, so this never tears a word
+    or clause in half for the common case.
+
+    Long-sentence case: if a sentence runs at or above
+    LONG_SENTENCE_SPLIT_THRESHOLD_S AND genuinely overlaps more than one
+    distinct diarizer speaker, assigning it as one block would force an
+    entire multi-turn exchange onto whichever speaker the midpoint happened
+    to land on. Fall back to word-level assignment instead: each word goes
+    to its own nearest diar segment (using its own timing, from
+    segment["tokens"] — see src/_parakeet_mlx.py), and runs of consecutive
+    words landing in the same diar segment are joined back together. This
+    needs word timing to exist at all (`tokens`); if it doesn't (e.g. the
+    whisper.cpp backend, or an older cached result), the sentence falls back
+    to whole-block assignment like the normal case.
+
+    Mutates diar_segments in place, attaching joined text as segment["text"]."""
+    for segment in diar_segments:
+        segment["text"] = ""
+    if not diar_segments:
+        return
+
+    texts_by_segment: dict[int, list[str]] = {i: [] for i in range(len(diar_segments))}
+    for asr_segment in asr_segments:
+        text = (asr_segment.get("text") or "").strip()
+        if not text:
+            continue
+        start = float(asr_segment.get("start") or 0.0)
+        end = float(asr_segment.get("end") or start)
+        tokens = asr_segment.get("tokens") or []
+        duration = end - start
+
+        multi_speaker_span = False
+        if duration >= LONG_SENTENCE_SPLIT_THRESHOLD_S and tokens:
+            overlapping_speakers = {
+                seg["speaker"] for seg in diar_segments
+                if seg["start"] < end and seg["end"] > start
+            }
+            multi_speaker_span = len(overlapping_speakers) > 1
+
+        if multi_speaker_span:
+            run_index: Optional[int] = None
+            run_words: list[str] = []
+            for token in tokens:
+                token_text = token.get("text") or ""
+                if not token_text.strip():
+                    continue
+                t_start = float(token.get("start") or 0.0)
+                t_end = float(token.get("end") or t_start)
+                idx = _find_nearest_diar_segment(t_start, t_end, diar_segments)
+                if idx is None:
+                    continue
+                if run_index is not None and idx != run_index:
+                    texts_by_segment[run_index].append("".join(run_words))
+                    run_words = []
+                run_index = idx
+                run_words.append(token_text)
+            if run_index is not None and run_words:
+                texts_by_segment[run_index].append("".join(run_words))
+        else:
+            idx = _find_nearest_diar_segment(start, end, diar_segments)
+            if idx is not None:
+                texts_by_segment[idx].append(text)
+
+    for i, segment in enumerate(diar_segments):
+        segment["text"] = " ".join(t.strip() for t in texts_by_segment[i] if t.strip()).strip()
+
+
+# How often to print a HEARTBEAT: line while blocked waiting on
+# steno-diarize. Comfortably under Electron's TRANSCRIBE_INACTIVITY_MS
+# (8 minutes, app/main.js) -- see _heartbeat_while_waiting's docstring for
+# why this can't just reuse the existing chunk-progress heartbeat registry.
+STENO_DIARIZE_HEARTBEAT_INTERVAL_S = 60.0
+
+
+@contextlib.contextmanager
+def _heartbeat_while_waiting(label: str, interval_s: float = STENO_DIARIZE_HEARTBEAT_INTERVAL_S):
+    """Print a HEARTBEAT: line every ``interval_s`` seconds on a background
+    thread for the duration of the ``with`` block.
+
+    src._heartbeat's chunk-progress registry only works for backends that
+    call back into Python from INSIDE their own per-chunk loop (Parakeet,
+    Whisper.cpp) -- steno-diarize is an opaque external binary invoked via a
+    single blocking call, with no such checkpoint to hang a callback off of.
+    Without this, a diarization run on an hours-long channel prints nothing
+    for its entire duration, which Electron's inactivity watchdog
+    (app/main.js) can't tell apart from a hung process -- and kills,
+    discarding a real, working meeting.
+
+    Never affects the wrapped call's own return value or exceptions --
+    the background thread only ever writes heartbeat lines.
+    """
+    stop = threading.Event()
+
+    def _beat():
+        while not stop.wait(interval_s):
+            try:
+                sys.stdout.write(f"HEARTBEAT:{label}\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_beat, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+
+
+def _run_steno_diarize(channel_path: Path, timeout: int) -> Optional[list[dict]]:
+    """Run the steno-diarize sidecar on a single mono channel WAV.
+
+    Returns merged diarizer segments (each ``{"start", "end", "speaker"}``)
+    on success. Returns None on ANY failure — missing binary, timeout,
+    non-zero exit, or unparseable output — so callers always have a safe
+    fallback to legacy channel-only labeling and this can never fail a
+    meeting.
+
+    Uses Popen with two concurrent reader threads rather than
+    subprocess.run(capture_output=True) so stdout and stderr are both
+    drained WHILE the process is still running -- matching what
+    subprocess.run's own communicate() does internally to avoid the
+    classic pipe-deadlock (real stdout payloads have measured up to
+    ~211KB in production, well past an OS pipe buffer, so neither stream
+    can safely be read to completion only after the process exits).
+    """
+    binary = _resolve_steno_diarize()
+    if not binary:
+        return None
+    try:
+        proc = subprocess.Popen(
+            [binary, str(channel_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        def _read_stdout():
+            for chunk in iter(lambda: proc.stdout.read(65536), b""):
+                stdout_chunks.append(chunk)
+
+        def _read_stderr():
+            for chunk in iter(lambda: proc.stderr.read(4096), b""):
+                stderr_chunks.append(chunk)
+
+        t_out = threading.Thread(target=_read_stdout, daemon=True)
+        t_err = threading.Thread(target=_read_stderr, daemon=True)
+        t_out.start()
+        t_err.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            t_out.join(timeout=2.0)
+            t_err.join(timeout=2.0)
+            logger.warning("steno-diarize timed out after %ss", timeout)
+            return None
+        t_out.join(timeout=5.0)
+        t_err.join(timeout=5.0)
+
+        if proc.returncode != 0:
+            stderr_text = b"".join(stderr_chunks).decode(errors="replace")
+            logger.warning(
+                "steno-diarize exited %s: %s",
+                proc.returncode, stderr_text[:300],
+            )
+            return None
+        stdout = b"".join(stdout_chunks).decode(errors="replace")
+        # Known FluidAudio/CoreML warnings ("E5RT encountered an STL
+        # exception... key not found") can print directly to stdout
+        # BEFORE, BETWEEN, or AFTER the real JSON payload -- skipping to
+        # the first '[' assumes stdout is pure JSON, which breaks the
+        # moment any warning text (or an interstitial, incomplete blob)
+        # appears ahead of the real array. Scan every '[' in stdout with a
+        # real JSON decoder and keep the LAST array of segment-shaped
+        # dicts -- better than latching onto the first bracket found.
+        raw_segments = None
+        decoder = json.JSONDecoder()
+        search_from = 0
+        while True:
+            next_bracket = stdout.find("[", search_from)
+            if next_bracket < 0:
+                break
+            try:
+                candidate, end = decoder.raw_decode(stdout, next_bracket)
+            except json.JSONDecodeError:
+                search_from = next_bracket + 1
+                continue
+            if (
+                isinstance(candidate, list) and candidate
+                and all(isinstance(s, dict) and "speakerId" in s for s in candidate)
+            ):
+                raw_segments = candidate
+            search_from = max(end, next_bracket + 1)
+        if raw_segments is None:
+            logger.warning(
+                "steno-diarize produced no usable JSON output "
+                "(stdout length %d, last 500 chars: %r)",
+                len(stdout), stdout[-500:],
+            )
+            return None
+    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+        logger.warning("steno-diarize failed: %s", e)
+        return None
+
+    segments = sorted(
+        (
+            {
+                "start": float(s["start"]),
+                "end": float(s["end"]),
+                "speaker": str(s["speakerId"]),
+            }
+            for s in raw_segments
+        ),
+        key=lambda s: s["start"],
+    )
+    return _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
+
+
+def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Optional[dict[str, str]]:
+    """Map each diarizer speaker id in diar_segments to either the channel's
+    legacy label (the cluster with the most total speaking time) or a
+    placeholder key for every other cluster, later resolved to "Speaker N"
+    by _resolve_speaker_placeholders.
+
+    Returns None when diar_segments contains a single (or zero) distinct
+    speaker, OR when one cluster's share of total speaking time is at or
+    above CHANNEL_DOMINANCE_THRESHOLD — the byte-identical-to-legacy fast
+    path, since a barely-there second cluster is almost certainly
+    misdiarization noise rather than a real second speaker.
+    """
+    speaker_ids = {s["speaker"] for s in diar_segments}
+    if len(speaker_ids) <= 1:
+        return None
+    totals: dict[str, float] = {sid: 0.0 for sid in speaker_ids}
+    for s in diar_segments:
+        totals[s["speaker"]] += s["end"] - s["start"]
+    dominant = max(totals, key=totals.get)
+    total_time = sum(totals.values())
+    if total_time > 0 and totals[dominant] / total_time >= CHANNEL_DOMINANCE_THRESHOLD:
+        return None
+    return {
+        sid: (legacy_label if sid == dominant else f"__diar__{legacy_label}__{sid}")
+        for sid in speaker_ids
+    }
+
+
+def _tag_channel_segments(
+    asr_segments: list[dict],
+    channel_path: Optional[Path],
+    duration_seconds: Optional[float],
+    legacy_label: str,
+) -> list[tuple[float, str, str]]:
+    """Build (start, label, text) tuples for one channel's ASR segments.
+
+    Tries acoustic diarization first: if the steno-diarize sidecar succeeds
+    and finds more than one real speaker cluster, turns are built from the
+    diarizer's own segment boundaries (with ASR sentences reassigned into
+    them via _assign_asr_segments_to_diar_segments). The cluster with the
+    most total speaking time keeps the channel's legacy label
+    ("You"/"Others"); every other cluster gets a placeholder resolved to
+    "Speaker N" later. ANY failure — missing binary, timeout, bad JSON, or
+    a single-cluster result — falls back to the byte-identical legacy
+    behaviour of labeling every ASR segment with legacy_label.
+    """
+    if not asr_segments:
+        return []
+
+    if channel_path is not None:
+        timeout = max(STENO_DIARIZE_TIMEOUT_FLOOR_S, int(duration_seconds or 0))
+        logger.info(f"Diarizing {legacy_label} channel acoustically (up to {timeout}s)...")
+        print(f"PROGRESS:diarize:{legacy_label}:start", flush=True)
+        try:
+            with _heartbeat_while_waiting(f"diarize:{legacy_label}"):
+                diar_segments = _run_steno_diarize(channel_path, timeout)
+            if diar_segments:
+                cluster_labels = _cluster_channel_labels(diar_segments, legacy_label)
+                if cluster_labels:
+                    _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
+                    diar_tagged = []
+                    for segment in diar_segments:
+                        text = (segment.get("text") or "").strip()
+                        if text:
+                            diar_tagged.append((segment["start"], cluster_labels[segment["speaker"]], text))
+                    if diar_tagged:
+                        logger.info(
+                            f"Diarizing {legacy_label} channel found "
+                            f"{len(set(cluster_labels.values()))} speaker cluster(s)"
+                        )
+                        return diar_tagged
+            logger.info(f"Diarizing {legacy_label} channel: falling back to legacy single-speaker labeling")
+        finally:
+            print(f"PROGRESS:diarize:{legacy_label}:done", flush=True)
+
+    legacy_tagged: list[tuple[float, str, str]] = []
+    for s in asr_segments:
+        text = (s.get("text") or "").strip()
+        if text:
+            legacy_tagged.append((float(s.get("start") or 0.0), legacy_label, text))
+    return legacy_tagged
+
+
+def _resolve_speaker_placeholders(
+    tagged: list[tuple[float, str, str]],
+) -> list[tuple[float, str, str]]:
+    """Replace placeholder cluster labels (see _cluster_channel_labels) with
+    "Speaker N", numbered by first chronological appearance across BOTH
+    channels merged and time-sorted — so a reader sees new speakers
+    introduced as 2, 3, 4... regardless of which channel they came from.
+
+    No cross-channel identity matching: a mic placeholder and a system
+    placeholder are always treated as different people — telling them
+    apart would need voiceprint embeddings, out of scope here.
+    """
+    numbering: dict[str, str] = {}
+    next_n = 2
+    resolved: list[tuple[float, str, str]] = []
+    for start, label, text in tagged:
+        if label.startswith("__diar__"):
+            if label not in numbering:
+                numbering[label] = f"Speaker {next_n}"
+                next_n += 1
+            label = numbering[label]
+        resolved.append((start, label, text))
+    return resolved
+
+
 # Try Parakeet first (preferred — same engine as live, arm64 Macs only).
 try:
     from src.parakeet import transcribe_file as _parakeet_transcribe_file
@@ -633,6 +1104,11 @@ class WhisperTranscriber:
             return audio_filepath, False
         temp_path = Path(temp_name)
         try:
+            # loudnorm's two-pass loudness analysis can take real wall-clock
+            # time on a long recording, with zero other output in between --
+            # without this, the terminal goes silent for that whole stretch
+            # right after "Saved: ...", which reads as a hang.
+            logger.info(f"Pre-processing audio (highpass + loudnorm): {audio_filepath.name}...")
             result = subprocess.run(
                 [ffmpeg, '-y', '-i', str(audio_filepath),
                  '-af', _audio_filter_chain(),
@@ -982,12 +1458,21 @@ class WhisperTranscriber:
         # Detect channel count via ffmpeg. `-t 0` makes ffmpeg parse the
         # input header (where the channel layout lives) and exit immediately
         # without decoding any audio frames — without it, a 1-hour recording
-        # would actually decode in full just to read metadata.
+        # would actually decode in full just to read metadata. In practice
+        # this ISN'T always instant: a WebM written live by MediaRecorder
+        # (our sysaudio capture path) has no seek index, so on an unusually
+        # large file ffmpeg's demuxer can still need real time to find the
+        # first decodable packet. A real ~3.5h recording measured this at
+        # >15s. Same failure shape _diarised_split_timeout's docstring
+        # documents for the later full-channel-split step: a too-tight fixed
+        # timeout here silently drops the whole recording to mono (no
+        # [You]/[Others]) instead of failing loudly — so this budget needs
+        # real headroom, not just enough for the common case.
         try:
             probe = subprocess.run(
                 [ffmpeg, '-hide_banner', '-t', '0', '-i', str(audio_filepath),
                  '-f', 'null', '-'],
-                capture_output=True, timeout=15, text=True
+                capture_output=True, timeout=CHANNEL_DETECT_TIMEOUT_S, text=True
             )
             stderr = probe.stderr or ''
             channels = _parse_channels_from_ffmpeg_stderr(stderr)
@@ -1087,18 +1572,16 @@ class WhisperTranscriber:
         """Transcribe with stereo channel diarisation.
 
         If the audio is stereo (left=mic, right=system), each channel is
-        transcribed separately and labelled as [You] and [Others]. Falls
-        back to normal transcription for mono audio.
+        transcribed separately and labelled as [You] and [Others]. Mono
+        audio (e.g. many imported recordings) has no channel split to lean
+        on, but can still contain multiple speakers — acoustic diarization
+        runs directly against the whole file instead; see
+        _transcribe_diarised_mono.
         """
         mic_path, system_path, duration = self._split_stereo_to_channels(audio_filepath)
 
         if mic_path is None:
-            # Mono audio — use standard transcription
-            result = self.transcribe_audio(audio_filepath, language)
-            if result:
-                result['is_diarised'] = False
-                result['diarised_text'] = None
-            return result
+            return self._transcribe_diarised_mono(audio_filepath, language)
 
         try:
             mic_has_audio = self._check_rms_energy(mic_path)
@@ -1247,17 +1730,16 @@ class WhisperTranscriber:
 
             # Chronologically interleave segments from both channels and
             # collapse runs of consecutive same-speaker segments into a
-            # single labelled turn.
+            # single labelled turn. Each channel is first run through
+            # acoustic diarization (steno-diarize, macOS only) to split
+            # multiple speakers sharing one side of the call; any failure
+            # or a single-cluster result falls back to the legacy
+            # "You"/"Others" channel-only labeling.
             tagged: list[tuple[float, str, str]] = []
-            for s in mic_segments:
-                text = (s.get("text") or "").strip()
-                if text:
-                    tagged.append((float(s.get("start") or 0.0), "You", text))
-            for s in system_segments:
-                text = (s.get("text") or "").strip()
-                if text:
-                    tagged.append((float(s.get("start") or 0.0), "Others", text))
+            tagged.extend(_tag_channel_segments(mic_segments, mic_path, duration, "You"))
+            tagged.extend(_tag_channel_segments(system_segments, system_path, duration, "Others"))
             tagged.sort(key=lambda t: t[0])
+            tagged = _resolve_speaker_placeholders(tagged)
 
             # Each turn carries the start offset of its FIRST segment so the
             # diarised transcript can be timestamped. Only diarised_text is
@@ -1277,7 +1759,19 @@ class WhisperTranscriber:
             plain_parts = [' '.join(parts) for _start, _speaker, parts in turns]
             plain_text = "\n\n".join(plain_parts) if plain_parts else SILENCE_SENTINEL
 
-            is_diarised = bool(mic_segments) and bool(system_segments)
+            # Diarised means "more than one voice is distinguishable in this
+            # transcript" — NOT "both channels had content". The old
+            # bool(mic_segments) and bool(system_segments) check predates
+            # per-channel acoustic diarization and silently discarded the
+            # whole labelled transcript whenever one channel was empty (e.g.
+            # an in-person conversation with no system audio playing at
+            # all), even when _tag_channel_segments had already split the
+            # OTHER channel into "You" + "Speaker 2". Counting distinct
+            # labels covers both the classic two-channel case (You + Others)
+            # and the new single-channel multi-speaker case correctly, and
+            # still suppresses labelling a genuine one-voice monologue.
+            distinct_labels = {speaker for _start, speaker, _parts in turns}
+            is_diarised = len(distinct_labels) > 1
             if is_diarised:
                 labelled_parts = [
                     f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
@@ -1304,6 +1798,52 @@ class WhisperTranscriber:
                         p.unlink()
                     except Exception:
                         pass
+
+    def _transcribe_diarised_mono(self, audio_filepath: Path, language: str) -> Optional[dict]:
+        """Diarise a mono recording (no channel split to lean on).
+
+        Runs standard transcription, then acoustic diarization directly
+        against the whole file via the same _tag_channel_segments helper the
+        stereo path uses per-channel — steno-diarize decodes any input
+        format itself (via ffmpeg), so no split/preprocessing is needed
+        first. The single track is treated as the "You" channel, matching
+        the pre-diarization convention of attributing an unlabelled mono
+        recording to the user; a second acoustic cluster becomes "Speaker 2"
+        exactly as a second cluster on the mic channel would in the stereo
+        path. Any diarization failure or a single-cluster result leaves
+        is_diarised False, matching the historical mono behaviour exactly.
+        """
+        result = self.transcribe_audio(audio_filepath, language)
+        if not result:
+            return result
+        result['is_diarised'] = False
+        result['diarised_text'] = None
+        if result.get("transcription_failed") or result.get("transcription_empty"):
+            return result
+
+        asr_segments = result.get("segments") or []
+        duration = result.get("duration_seconds")
+        tagged = _tag_channel_segments(asr_segments, audio_filepath, duration, "You")
+        tagged.sort(key=lambda t: t[0])
+        tagged = _resolve_speaker_placeholders(tagged)
+
+        turns: list[tuple[float, str, list[str]]] = []
+        for start, speaker, text in tagged:
+            if turns and turns[-1][1] == speaker:
+                turns[-1][2].append(text)
+            else:
+                turns.append((start, speaker, [text]))
+
+        distinct_labels = {speaker for _start, speaker, _parts in turns}
+        if len(distinct_labels) > 1:
+            labelled_parts = [
+                f"[{_format_timestamp(start)}] [{speaker}] {' '.join(parts)}"
+                for start, speaker, parts in turns
+            ]
+            result['diarised_text'] = "\n\n".join(labelled_parts)
+            result['is_diarised'] = True
+
+        return result
 
     def transcribe_with_timestamps(self, audio_filepath: Path) -> Optional[dict]:
         """Batch transcribe and return segment-level timing.
