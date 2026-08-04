@@ -124,12 +124,12 @@
 - Consumes: Task 2's predicate.
 - Produces: `suggest-speakers` gains a top-level `stale_assignments` array of `{person_id, display_name}`. The renderer (Task 7) renders one meeting-level notice from it. Absent or empty means nothing to report.
 
-- [ ] **Step 1: Write the failing tests.** A prototype from run `r1` against a sidecar stamped `r2` must **not** produce `confirmed_by_user` or `confirmed_person_id` for that cluster, and must appear once in `stale_assignments`. A prototype from `r2` against `r2` behaves exactly as today. A legacy pair (no ids at all) behaves exactly as today. Add one test that `speaker-naming-status` does not count a stale prototype's cluster as named.
-- [ ] **Step 2: Run and watch them fail.**
-- [ ] **Step 3: Apply the predicate at every reader.** The `confirmed_by_user` / `confirmed_person_id` derivation; `still_present`; the mutual-negative `matches` selection - without scoping there, a stale old-run prototype whose sid collides with a new-run sid would be treated as owning the new cluster and would seed negatives built from the new run's embeddings. Then assemble `stale_assignments`, deduped per person.
-- [ ] **Step 4: Leave participants alone, and say why in the code.** `confirmed_participant_names` stays meeting-scoped. Add the comment: attendance is a property of the meeting, not of a run, and run-filtering the `full-reprocess` restore would empty the section on every reprocess. Without that comment a later reader will "fix" it.
-- [ ] **Step 5: Run green, then the whole suite.**
-- [ ] **Step 6: Commit.**
+- [x] **Step 1: Write the failing tests.** A prototype from run `r1` against a sidecar stamped `r2` must **not** produce `confirmed_by_user` or `confirmed_person_id` for that cluster, and must appear once in `stale_assignments`. A prototype from `r2` against `r2` behaves exactly as today. A legacy pair (no ids at all) behaves exactly as today. Add one test that `speaker-naming-status` does not count a stale prototype's cluster as named.
+- [x] **Step 2: Run and watch them fail.**
+- [x] **Step 3: Apply the predicate at every reader.** The `confirmed_by_user` / `confirmed_person_id` derivation; `still_present`; the mutual-negative `matches` selection - without scoping there, a stale old-run prototype whose sid collides with a new-run sid would be treated as owning the new cluster and would seed negatives built from the new run's embeddings. Then assemble `stale_assignments`, deduped per person.
+- [x] **Step 4: Leave participants alone, and say why in the code.** `confirmed_participant_names` stays meeting-scoped. Add the comment: attendance is a property of the meeting, not of a run, and run-filtering the `full-reprocess` restore would empty the section on every reprocess. Without that comment a later reader will "fix" it.
+- [x] **Step 5: Run green, then the whole suite.**
+- [x] **Step 6: Commit.**
 
 ---
 
