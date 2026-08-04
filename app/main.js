@@ -48,99 +48,6 @@ if (process.platform !== 'darwin') {
 }
 
 
-const { EventEmitter } = require('events');
-
-class Notification extends EventEmitter {
-  constructor(options) {
-    super();
-    this.options = options;
-    this.payload = {
-      id: Math.random().toString(36).substring(7),
-      title: options.title,
-      body: options.body || options.subtitle || '',
-      actions: (options.actions || []).map(a => ({
-        id: a.text,
-        text: a.text,
-        type: a.type
-      }))
-    };
-    if (options.iconType) this.payload.iconType = options.iconType;
-  }
-
-  show() {
-    if (notificationWindow && !notificationWindow.isDestroyed()) {
-      notificationWindow.close();
-    }
-    const { screen } = require('electron');
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width } = primaryDisplay.workAreaSize;
-    const { x, y } = primaryDisplay.workArea;
-
-    const win = new BrowserWindow({
-      width: 400,
-      height: 70,
-      x: x + width - 425,
-      y: y + 1,
-      frame: false,
-      transparent: true,
-      alwaysOnTop: true,
-      resizable: false,
-      skipTaskbar: true,
-      focusable: false,
-      hasShadow: false,
-      backgroundColor: '#00000000',
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        preload: path.join(__dirname, 'preload.js'),
-      },
-    });
-    notificationWindow = win;
-
-    const rendererDist = path.join(__dirname, 'renderer', 'dist', 'index.html');
-    win.loadFile(rendererDist, { hash: '/notification' });
-    
-    win._activeCustomNotification = this;
-    win._analyticsInteracted = false;
-    let autoCloseTimer;
-    
-    win.once('ready-to-show', () => {
-      win.showInactive();
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      win.setAlwaysOnTop(true, 'screen-saver', 1);
-
-      autoCloseTimer = setTimeout(() => {
-        if (!win.isDestroyed()) {
-          win.close();
-        }
-      }, 15000);
-
-      win.on('closed', () => {
-        if (autoCloseTimer) clearTimeout(autoCloseTimer);
-        this.emit('close');
-        if (notificationWindow === win) {
-          notificationWindow = null;
-        }
-      });
-
-      win.webContents.send('show-notification', this.payload);
-    });
-  }
-
-  close() {
-    if (notificationWindow && notificationWindow._activeCustomNotification === this) {
-      if (!notificationWindow.isDestroyed()) {
-        notificationWindow.close();
-      }
-    }
-  }
-
-  static isSupported() {
-    return true;
-  }
-}
-
 const path = require('path');
 // Backend CLI seam (spawn wrapper, process-tree kill, bundled-backend paths,
 // runPythonScript), the debug-log sink, and the quit teardown registry are
@@ -8402,19 +8309,7 @@ async function showNoteReadyNotification(payload) {
 
 ipcMain.handle('show-note-ready-notification', async (_event, payload) => {
   try {
-    return showNoteReadyNotification(payload);
-  } catch (e) {
-    sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
-    return { success: false, error: e.message };
-  }
-});
-    const outcome = hardFailure ? 'hard_failure' : failed ? 'failed' : 'success';
-    trackNotificationLifecycle(notif, 'note_ready', { outcome });
-    notif.show();
-    return { success: true, shown: true };
-=======
     return await showNoteReadyNotification(payload);
->>>>>>> upstream/main
   } catch (e) {
     sendDebugLog(`Failed to show note-ready notification: ${e.message}`);
     return { success: false, error: e.message };
