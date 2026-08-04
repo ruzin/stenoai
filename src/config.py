@@ -1265,12 +1265,14 @@ class Config:
         any compatible server: Groq, Azure OpenAI, local llama.cpp, etc.
         The transcriber appends ``/audio/transcriptions`` to this URL.
         """
-        return self._config.get("openai_asr_api_url", "https://api.openai.com/v1")
+        return self._config.get("openai_asr_api_url", "https://api.openai.com/v1") or "https://api.openai.com/v1"
 
     def set_openai_asr_api_url(self, url: str) -> bool:
         """Set the base URL for the OpenAI-compatible STT endpoint."""
         cleaned = (url or "").strip()
-        if cleaned:
+        if not cleaned:
+            cleaned = "https://api.openai.com/v1"
+        else:
             import urllib.parse
             parts = urllib.parse.urlsplit(cleaned)
             scheme = parts.scheme.lower()
@@ -1301,7 +1303,7 @@ class Config:
         os.environ["STENOAI_OAI_API_KEY"] = (key or "").strip()
         if "openai_asr_api_key" in self._config:
             del self._config["openai_asr_api_key"]
-            self._save()
+            return self._save()
         return True
 
     def get_openai_asr_model(self) -> str:

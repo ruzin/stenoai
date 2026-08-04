@@ -7949,7 +7949,8 @@ ipcMain.handle('get-openai-asr-config', async () => {
 ipcMain.handle('set-openai-asr-config', async (_event, cfg) => {
   try {
     if (cfg.api_key !== undefined) {
-      saveOpenAiAsrApiKey(cfg.api_key);
+      const saved = saveOpenAiAsrApiKey(cfg.api_key);
+      if (!saved) return { success: false, error: 'Failed to save OpenAI ASR API key' };
     }
     const args = ['set-openai-asr-config'];
     if (cfg.api_url !== undefined) { args.push('--api-url', cfg.api_url); }
@@ -8767,6 +8768,10 @@ function loadCloudApiKey() {
   }
 }
 
+function hasCloudApiKey() {
+  return fs.existsSync(getCloudKeyPath());
+}
+
 function getOpenAiAsrKeyPath() {
   return path.join(getUserDataDir(), '.openai-asr-api-key');
 }
@@ -8784,7 +8789,12 @@ function saveOpenAiAsrApiKey(key) {
     if (!fs.existsSync(keyDir)) {
       fs.mkdirSync(keyDir, { recursive: true });
     }
-    const encrypted = safeStorage.encryptString(key.trim());
+    const safe = getSafeStorage();
+    if (!safe || !safe.isEncryptionAvailable()) {
+      console.error('safeStorage is not available to encrypt OpenAI ASR key');
+      return false;
+    }
+    const encrypted = safe.encryptString(key.trim());
     fs.writeFileSync(keyPath, encrypted);
     return true;
   } catch (error) {
@@ -8797,8 +8807,10 @@ function loadOpenAiAsrApiKey() {
   try {
     const keyPath = getOpenAiAsrKeyPath();
     if (!fs.existsSync(keyPath)) return null;
+    const safe = getSafeStorage();
+    if (!safe || !safe.isEncryptionAvailable()) return null;
     const encrypted = fs.readFileSync(keyPath);
-    return safeStorage.decryptString(encrypted);
+    return safe.decryptString(encrypted);
   } catch (error) {
     console.error('Failed to load OpenAI ASR API key:', error.message);
     return null;

@@ -64,6 +64,9 @@ import { modelMayExceedMemory } from './model-memory';
 import { LANGUAGES_PARAKEET, LANGUAGES_WHISPER } from './languages';
 
 export function AiTab() {
+  const engineQuery = useTranscriptionEngine();
+  const isCloudASR = (engineQuery.data ?? 'parakeet') === 'openai-asr';
+
   return (
     <section data-settings-tab="ai">
       <SectionHeading>Transcription</SectionHeading>
@@ -71,8 +74,9 @@ export function AiTab() {
         className="text-[13px] leading-[1.5]"
         style={{ color: 'var(--fg-2)', marginBottom: 4 }}
       >
-        Speech-to-text always runs on your device — your audio never leaves
-        your computer.
+        {isCloudASR
+          ? 'Speech-to-text uses your configured OpenAI-compatible API endpoint — audio is sent over the network for processing.'
+          : 'Speech-to-text always runs on your device — your audio never leaves your computer.'}
       </p>
       <TranscriptionSection />
 
@@ -98,7 +102,7 @@ function TranscriptionSection() {
   const engineQuery = useTranscriptionEngine();
 
   const engine = engineQuery.data ?? 'parakeet';
-  const options = engine === 'whisper' ? LANGUAGES_WHISPER : LANGUAGES_PARAKEET;
+  const options = (engine === 'whisper' || engine === 'openai-asr') ? LANGUAGES_WHISPER : LANGUAGES_PARAKEET;
   // useSetActiveTranscription coerces language to 'auto' when switching
   // to an engine that doesn't support the current pick. So by the time
   // this renders, persisted is normally in `options`. Edge case (CLI
@@ -324,7 +328,10 @@ function TranscriptionModelList() {
         title="Cloud Transcription Privacy Notice"
         description="Selecting an OpenAI-compatible ASR engine sends your recording audio over the network to the configured API endpoint. On-device engines (Parakeet and Whisper) process all audio locally."
         confirmLabel="Enable Cloud ASR"
-        onConfirm={() => setActive.mutate({ engine: 'openai-asr' })}
+        onConfirm={() => {
+          setPrivacyConfirmOpen(false);
+          setActive.mutate({ engine: 'openai-asr' });
+        }}
       />
     </>
   );
@@ -358,7 +365,11 @@ function OpenAiAsrConfig() {
           id="openai-asr-api-url"
           value={apiUrl}
           onChange={(e) => setApiUrl(e.target.value)}
-          onBlur={() => setConfig.mutate({ api_url: apiUrl })}
+          onBlur={() => {
+            const clean = apiUrl.trim() || 'https://api.openai.com/v1';
+            setApiUrl(clean);
+            setConfig.mutate({ api_url: clean });
+          }}
           placeholder="https://api.openai.com/v1"
           className={COMPACT_INPUT}
         />

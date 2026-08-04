@@ -854,29 +854,31 @@ class WhisperTranscriber:
                         return resp.read()
                 except urllib.error.HTTPError as e:
                     err_body = e.read().decode(errors="replace")[:500]
+                    logger.debug("openai-asr HTTP %s response body: %s", e.code, err_body)
                     raise RuntimeError(
-                        f"openai-asr HTTP {e.code}: {err_body}"
+                        f"openai-asr HTTP {e.code}"
                     ) from e
 
             # Pass 1: verbose_json
             try:
                 raw = _do_request("verbose_json")
                 data = _json.loads(raw.decode())
-                raw_text = (data.get("text") or "").strip()
-                raw_segs = data.get("segments") or []
+                if not isinstance(data, dict) or ("text" not in data and "error" in data):
+                    raise ValueError("Invalid verbose_json response structure from endpoint")
+                raw_text = str(data.get("text") or "").strip()
+                raw_segs = data.get("segments") if isinstance(data.get("segments"), list) else []
                 detected_lang = data.get("language") or (None if language == "auto" else language)
-                dur = float(data.get("duration") or 0.0)
-                segments = [
-                    {
-                        "text": s.get("text", "").strip(),
-                        "start": float(s.get("start") or 0.0) + offset_sec,
-                        "end": float(s.get("end") or 0.0) + offset_sec,
-                    }
-                    for s in raw_segs
-                    if s.get("text", "").strip()
-                ]
+                dur = float(data.get("duration") or 0.0) or chunk_dur
+                segments = []
+                for s in raw_segs:
+                    if isinstance(s, dict):
+                        stext = str(s.get("text") or "").strip()
+                        if stext:
+                            s_start = float(s.get("start") or 0.0) + offset_sec
+                            s_end = float(s.get("end") or 0.0) + offset_sec
+                            segments.append({"text": stext, "start": s_start, "end": s_end})
                 if raw_text and not segments:
-                    segments = [{"text": raw_text, "start": offset_sec, "end": offset_sec + dur}]
+                    segments = [{"text": raw_text, "start": offset_sec, "end": offset_sec + (dur or 0.0)}]
                 return {
                     "text": raw_text or None,
                     "segments": segments,
@@ -885,7 +887,7 @@ class WhisperTranscriber:
                 }
             except Exception as primary_err:
                 fallback = False
-                if isinstance(primary_err, _json.JSONDecodeError):
+                if isinstance(primary_err, (_json.JSONDecodeError, ValueError, TypeError, AttributeError)):
                     fallback = True
                 elif isinstance(primary_err, RuntimeError) and getattr(primary_err.__cause__, "code", None) in (400, 406, 415, 422, 501):
                     fallback = True
@@ -902,10 +904,11 @@ class WhisperTranscriber:
             raw = _do_request("text")
             text = raw.decode(errors="replace").strip()
             detected_lang = None if language == "auto" else language
+            seg_end = offset_sec + chunk_dur if chunk_dur > 0 else offset_sec
             return {
                 "text": text or None,
-                "segments": [{"text": text, "start": offset_sec, "end": offset_sec}] if text else [],
-                "duration_seconds": None,
+                "segments": [{"text": text, "start": offset_sec, "end": seg_end}] if text else [],
+                "duration_seconds": chunk_dur if chunk_dur > 0 else None,
                 "detected_language": detected_lang,
             }
 

@@ -1557,7 +1557,8 @@ def set_openai_asr_config_cmd(api_url, model, prompt_api_key):
             api_key = env_api_key
 
     if api_url is not None:
-        if not config.set_openai_asr_api_url(api_url):
+        clean_url = api_url.strip() or "https://api.openai.com/v1"
+        if not config.set_openai_asr_api_url(clean_url):
             errors.append("Failed to save api_url")
     if api_key is not None:
         if not config.set_openai_asr_api_key(api_key):

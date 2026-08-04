@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {
-  ArrowLeft,
   ChevronDown,
   Globe,
   HelpCircle,
@@ -13,7 +12,7 @@ import {
   Search,
   Settings as SettingsIcon,
 } from 'lucide-react';
-import { navigate, rememberNonSettingsRoute, toggleSettings, getLastNonSettingsRoute } from '@/lib/router';
+import { navigate, rememberNonSettingsRoute, toggleSettings } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
 import { ipc } from '@/lib/ipc';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
@@ -169,7 +168,6 @@ export function Sidebar({
   const isDraggingRef = React.useRef(false);
   const [iconPicker, setIconPicker] = React.useState<{ id: string; anchorRect: DOMRect } | null>(null);
 
-  const isSettingsMode = currentRoute === '/settings' || currentRoute.startsWith('/settings?');
 
   const updateIcon = useUpdateFolderIcon();
 
@@ -305,9 +303,9 @@ export function Sidebar({
               onClick={() => palette.open()}
               className="flex h-[30px] w-full items-center rounded-md border-0 px-[10px] pl-[30px] text-left text-[13px] outline-none transition-colors hover:shadow-[inset_0_0_0_1px_hsl(var(--border))] focus-visible:shadow-[inset_0_0_0_1px_hsl(var(--border))]"
               style={{ background: 'rgba(27,27,25,0.04)', color: 'var(--fg-muted)', fontFamily: 'var(--font-sans)' }}
-              aria-label={isSettingsMode ? 'Search settings' : 'Search notes'}
+              aria-label="Search notes"
             >
-              {isSettingsMode ? 'Search settings...' : 'Search'}
+              Search…
             </button>
             <span
               className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded px-1.5 py-px text-[11px] tabular-nums tracking-[0.02em]"
@@ -322,19 +320,7 @@ export function Sidebar({
 
         {/* Nav */}
         <nav className="scrollbar-clean flex min-h-0 flex-1 flex-col gap-px overflow-auto px-2 pb-2 pt-2">
-          {isSettingsMode ? (
-            <div className="mb-5 mt-1 px-1">
-              <button
-                type="button"
-                className="group flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-3 py-[5px] text-left text-[13px] font-medium text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
-                onClick={() => navigate(getLastNonSettingsRoute() || '/')}
-              >
-                <ArrowLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
-                <span>Back to Home</span>
-              </button>
-            </div>
-          ) : (
-            <>
+          <>
               <button
                 type="button"
                 className={cn('sb-row', isHomeActive && 'active')}
@@ -481,7 +467,6 @@ export function Sidebar({
                   })}
               </div>
             </>
-          )}
         </nav>
 
         {/* Profile chip + Settings cog */}
