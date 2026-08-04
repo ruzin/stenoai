@@ -394,6 +394,78 @@ class SampleSegmentsTests(unittest.TestCase):
             )
             self.assertEqual([s["text"] for s in system], ["someone else speaking"])
 
+    def test_a_line_starting_inside_a_running_segment_plays_from_the_line(self):
+        # Measured on a real 37-minute call (system channel, 279 segments,
+        # 109 attributed lines): 64 of those lines start in the MIDDLE of one
+        # of the cluster's own segments rather than at its beginning, because
+        # a diarization segment routinely spans several transcript lines.
+        #
+        # Selecting only segments that START at or after the line skipped the
+        # very segment the line sits in, and the clip jumped to the next one.
+        # The two moments the panel actually showed:
+        #
+        #   line 28.0s  inside own segment 27.28-62.32  -> clip started 63.28 (+35.3s)
+        #   line 435.0s inside own segment 415.28-452.40 -> clip started 452.80 (+17.8s)
+        #
+        # The first misses the 0.5s tolerance by 0.22s. The quote and the
+        # audio then describe different moments, which is the one thing this
+        # pairing exists to prevent -- and it is worse than a missing clip,
+        # because the timestamp shown next to the quote is the CLIP's.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:28] [Others] the line that sits inside a running segment\n"
+                "[01:40] [Others] a later line of the same speaker\n",
+                encoding="utf-8",
+            )
+            manifest = [
+                {"start": 28.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 100.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            samples = extract_segment_samples(
+                transcript,
+                [
+                    {"start": 27.28, "end": 62.32},
+                    {"start": 63.28, "end": 83.0},
+                    {"start": 100.0, "end": 110.0},
+                ],
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+            first = next(s for s in samples if s["text"].startswith("the line that sits"))
+            self.assertAlmostEqual(
+                first["start"], 28.0, places=2,
+                msg="the clip must start at the quoted line, not at the next segment",
+            )
+            self.assertGreater(first["end"], first["start"])
+
+    def test_a_line_with_no_own_speech_anywhere_near_it_is_not_offered(self):
+        # The other half of the same defect. When the cluster genuinely has
+        # no segment covering or closely following the line, there is no
+        # moment to play: the old code walked forward to the cluster's next
+        # segment however far away that was (measured: up to 40s), producing
+        # this speaker's voice saying something entirely different from the
+        # quote. An unplayable entry is honest; a wrong one is not.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] a line this cluster has no audio for\n"
+                "[02:00] [Others] a line it does have audio for\n",
+                encoding="utf-8",
+            )
+            manifest = [
+                {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 120.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            samples = extract_segment_samples(
+                transcript, [{"start": 120.0, "end": 140.0}],
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+            orphan = next(s for s in samples if s["text"].startswith("a line this cluster has no"))
+            self.assertEqual(
+                orphan["start"], orphan["end"],
+                "a line 110s from this cluster's nearest speech is not playable",
+            )
+
     def test_a_manifest_that_does_not_line_up_is_refused_rather_than_mispaired(self):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "t.txt"

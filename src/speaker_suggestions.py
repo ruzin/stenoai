@@ -1501,6 +1501,19 @@ def _join_texts(texts: list, max_chars: int) -> Optional[str]:
 # an unbounded clip would also mean an unbounded ffmpeg extraction.
 SAMPLE_MAX_SECONDS = 20.0
 
+# How far a line's own speech may start AFTER the line before the moment
+# counts as unplaceable. Transcript markers render as [MM:SS], truncated to
+# whole seconds, so a small positive lead is normal and expected.
+#
+# Measured across three real meetings and thirteen clusters (37-minute call,
+# a 643-line meeting, a five-cluster call): of the lines that do not fall
+# inside one of their cluster's own segments, the nearest own segment is at
+# most 1.32 s away, with a p90 of ~1.1 s. Nothing legitimate sits further
+# out. The clips this guard rejects were 17.8 s and 35.3 s away -- this
+# speaker's voice, saying something else entirely, shown under the quoted
+# line.
+SAMPLE_TURN_MAX_LEAD_SECONDS = 2.0
+
 # How long a hole between two of one cluster's segments may be before the
 # clip stops there instead of playing across it. A speaker pausing mid-turn
 # leaves gaps of this order; a gap much longer than a second is where the
@@ -1531,9 +1544,17 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
     function exists to prevent. Audio we cannot place is not played.
     """
     upper = next_start if next_start is not None else float("inf")
+    # A segment that is ALREADY RUNNING when the line starts counts. One
+    # diarization segment routinely spans several transcript lines, so the
+    # segment a line belongs to usually began before it: measured on a real
+    # 37-minute call, 64 of one cluster's 109 lines start mid-segment.
+    # Requiring `seg.start >= line.start` skipped exactly the segment the
+    # line sits in and walked the clip forward to the next one -- 35.3 s
+    # away in the worst case, off by 0.22 s of tolerance in the mildest.
     own = [
         seg for seg in segments
-        if start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS <= seg.get("start", 0) < upper
+        if seg.get("end", 0) > start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
+        and seg.get("start", 0) < upper
     ]
     if not own:
         # Bounds hold none of this cluster's segments: same displayed
@@ -1547,6 +1568,15 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
         if not following:
             return start, start
         own = [min(following, key=lambda seg: seg.get("start", 0))]
+
+    # Same cluster is not the same moment. Once the nearest own speech is
+    # further out than the truncation of a [MM:SS] marker can explain, there
+    # is nothing here this line demonstrably said, and playing the next thing
+    # this voice happens to say is the failure this pairing exists to
+    # prevent -- made worse by the panel showing the CLIP's timestamp beside
+    # the quote, so the mismatch looks like a transcription error.
+    if min(seg.get("start", 0) for seg in own) - start > SAMPLE_TURN_MAX_LEAD_SECONDS:
+        return start, start
 
     # From the turn's first own segment onward, and only for as long as this
     # cluster keeps speaking. Taking min(start)/max(end) over the whole set
@@ -1562,7 +1592,10 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
     # breathing, and cutting at every one of those would leave clips too
     # short to recognise a voice from -- the one thing the panel is for.
     ordered = sorted(own, key=lambda seg: seg.get("start", 0))
-    begin = ordered[0].get("start", 0)
+    # Never earlier than the line itself: the segment it sits in may have
+    # begun long before, and that earlier speech belongs to the PREVIOUS
+    # line, which is quoted elsewhere in this same list.
+    begin = max(start, ordered[0].get("start", 0))
     end = ordered[0].get("end", 0)
     for seg in ordered[1:]:
         if seg.get("start", 0) - end > SAMPLE_TURN_GAP_TOLERANCE_SECONDS:
