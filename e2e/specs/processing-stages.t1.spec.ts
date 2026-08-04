@@ -46,7 +46,7 @@ function emit(app: ElectronApplication, channel: string, payload: unknown) {
 }
 
 test('walks transcribing -> diarizing -> summarizing -> finalizing without leaking a stale sub-label', async ({ launchApp }) => {
-  const { app, page } = await launchApp({ mockIpc: true });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true });
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
@@ -85,7 +85,7 @@ test('shows a ticking elapsed-time counter throughout diarization, since this br
   // the fix; this branch's sidecar has no per-chunk checkpoint at all, so
   // the ticker runs for the whole diarization call rather than yielding to
   // a percentage partway through.
-  const { app, page } = await launchApp({ mockIpc: true });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true });
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
@@ -98,7 +98,7 @@ test('shows a ticking elapsed-time counter throughout diarization, since this br
 });
 
 test('a processing failure swaps to the error panel, and retrying does not leak the stale sub-label back', async ({ launchApp }) => {
-  const { app, page } = await launchApp({ mockIpc: true });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true });
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
