@@ -2195,9 +2195,18 @@ class WhisperTranscriber:
             # or transcript_text), so the summariser strips these [MM:SS] markers
             # back out on the way in (summarizer._strip_leading_timestamps) —
             # summarisation is unaffected by this display feature.
+            # A turn is one span of ONE provenance, so the run breaks on the
+            # raw cluster id as well as the label. Merging on the label alone
+            # was reachable and wrong: text the diarizer could not place is
+            # appended under the CHANNEL's own label (raw_sid None), and
+            # _cluster_channel_labels hands that same label to the channel's
+            # dominant cluster -- so an unplaceable sentence next to that
+            # cluster's turn was folded in and recorded as its speech, which
+            # is exactly the attribution the unplaceable path withholds it
+            # from. Same reasoning in the mono path's copy of this loop.
             turns: list[tuple[float, str, list[str], str, Optional[str]]] = []
             for start, speaker, text, channel, raw_sid in tagged:
-                if turns and turns[-1][1] == speaker:
+                if turns and turns[-1][1] == speaker and turns[-1][4] == raw_sid:
                     turns[-1][2].append(text)
                 else:
                     turns.append((start, speaker, [text], channel, raw_sid))
@@ -2311,9 +2320,11 @@ class WhisperTranscriber:
         tagged.sort(key=lambda t: t[0])
         tagged = _resolve_speaker_placeholders(tagged)
 
+        # Breaks on the raw cluster id too -- see the stereo path's comment
+        # above its copy of this loop for the attribution that depends on it.
         turns: list[tuple[float, str, list[str], str, Optional[str]]] = []
         for start, speaker, text, channel, raw_sid in tagged:
-            if turns and turns[-1][1] == speaker:
+            if turns and turns[-1][1] == speaker and turns[-1][4] == raw_sid:
                 turns[-1][2].append(text)
             else:
                 turns.append((start, speaker, [text], channel, raw_sid))

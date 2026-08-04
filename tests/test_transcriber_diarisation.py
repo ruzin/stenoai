@@ -327,6 +327,53 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         self.assertEqual(manifest[0]["start"], 0.0)
         self.assertEqual(manifest[3]["start"], 9.2)
 
+    def test_unplaceable_text_never_inherits_a_neighbouring_clusters_provenance(self):
+        # Found by review. Text the diarizer could not place is appended
+        # under the CHANNEL's own label -- and _cluster_channel_labels gives
+        # the channel's dominant cluster that exact same label. The turn
+        # loop coalesced on the label alone and kept the FIRST entry's
+        # raw_sid, so an unplaceable sentence landing after a dominant-
+        # cluster turn was silently recorded as that cluster's own speech.
+        #
+        # It would then reach a human twice: quoted under that speaker in
+        # the review panel, and rewritten to that person's name by
+        # confirm-speaker's relabel. Keeping the text while withholding the
+        # cluster id is the entire point of that fallback, and merging by
+        # label alone handed the id back.
+        mic_diar = [
+            {"start": 0.0, "end": 8.0, "speaker": "SPEAKER_1"},
+            {"start": 10.0, "end": 20.0, "speaker": "SPEAKER_0"},  # dominant -> labelled "You"
+        ]
+        # The system channel speaks EARLY, so nothing sits between the mic's
+        # dominant-cluster turn and the unplaceable sentence -- otherwise
+        # the other channel's turn breaks the run and hides the defect.
+        system_diar = [{"start": 5.0, "end": 5.5, "speaker": "SPEAKER_0"}]
+        with patch("src.transcriber._run_steno_diarize", side_effect=[(mic_diar, {}), (system_diar, {})]):
+            self.transcriber.transcribe_audio = Mock(side_effect=[
+                {"text": "Someone else. The owner. A stray sentence.", "segments": [
+                    {"text": "Someone else.", "start": 1.0, "end": 2.0},
+                    {"text": "The owner.", "start": 11.0, "end": 12.0},
+                    # Forty seconds from any mic segment: unplaceable, and it
+                    # sorts directly after the dominant cluster's turn.
+                    {"text": "A stray sentence.", "start": 60.0, "end": 61.0},
+                ]},
+                {"text": "Ok.", "segments": [{"text": "Ok.", "start": 5.2, "end": 5.4}]},
+            ])
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        mic_entries = [m for m in result["turn_manifest"] if m["channel"] == "mic"]
+        self.assertEqual(
+            [m["diarization_speaker_id"] for m in mic_entries],
+            ["SPEAKER_1", "SPEAKER_0", None],
+            "the unplaceable sentence must stay its own turn, with no cluster id",
+        )
+        # And it must not have been folded into the owner's line, which is
+        # what would put it under the owner's name on a relabel.
+        owner_line = [
+            line for line in result["diarised_text"].split("\n\n") if "The owner." in line
+        ][0]
+        self.assertNotIn("A stray sentence.", owner_line)
+
     def test_turn_manifest_has_none_raw_sid_entries_when_diarization_totally_fails(self):
         # is_diarised is about cross-channel label distinctness (You vs
         # Others), not per-channel diarization success -- a total
@@ -490,6 +537,37 @@ class TranscribeDiarisedMonoTests(unittest.TestCase):
         self.assertIn("[You] Great.", result["diarised_text"])
         # The plain text field is untouched by diarisation.
         self.assertEqual(result["text"], "Hi there. Not bad. Great.")
+
+    def test_unplaceable_text_never_inherits_a_neighbouring_clusters_provenance(self):
+        # The mono path builds its turns with its own copy of the same loop,
+        # so it needs its own assertion -- this file's history is that a fix
+        # applied to one path and not the other is how the defect comes back.
+        # See the stereo test of the same name for what is at stake.
+        diar_segments = [
+            {"start": 0.0, "end": 8.0, "speaker": "SPEAKER_1"},
+            {"start": 10.0, "end": 20.0, "speaker": "SPEAKER_0"},  # dominant -> labelled "You"
+        ]
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
+            self.transcriber.transcribe_audio = Mock(return_value={
+                "text": "Someone else. The owner. A stray sentence.",
+                "segments": [
+                    {"text": "Someone else.", "start": 1.0, "end": 2.0},
+                    {"text": "The owner.", "start": 11.0, "end": 12.0},
+                    {"text": "A stray sentence.", "start": 60.0, "end": 61.0},
+                ],
+                "duration_seconds": 61.0,
+            })
+            result = self.transcriber.transcribe_diarised(self.audio_path)
+
+        self.assertEqual(
+            [m["diarization_speaker_id"] for m in result["turn_manifest"]],
+            ["SPEAKER_1", "SPEAKER_0", None],
+            "the unplaceable sentence must stay its own turn, with no cluster id",
+        )
+        owner_line = [
+            line for line in result["diarised_text"].split("\n\n") if "The owner." in line
+        ][0]
+        self.assertNotIn("A stray sentence.", owner_line)
 
     def test_single_speaker_mono_is_not_diarised(self):
         # Byte-identical-to-legacy fast path: one real cluster means nothing
