@@ -167,6 +167,25 @@ def is_apple_silicon() -> bool:
     return sys.platform == "darwin" and platform.machine() in ("arm64", "aarch64")
 
 
+class _AnyDiarizationRun:
+    """The "no run scope at all" default of `remove_speaker_evidence`.
+
+    A sentinel rather than `None`, because `None` is already a meaningful
+    scope on this axis: it is what a legacy sidecar with no `diarization_run`
+    block reports, and scoping to it must match only equally run-less
+    evidence. Sharing one value for "don't filter by run" and "filter by the
+    absence of a run" would either make every run-unaware caller start
+    filtering or make a legacy-sidecar caller delete run-stamped evidence it
+    cannot have produced.
+    """
+
+    def __repr__(self) -> str:
+        return "ANY_DIARIZATION_RUN"
+
+
+ANY_DIARIZATION_RUN = _AnyDiarizationRun()
+
+
 class Config:
     """Manages application configuration with file persistence."""
 
@@ -1171,6 +1190,13 @@ class Config:
         and reuses `remove_speaker_evidence` (the same removal primitive the
         correction path already relies on) to strip any hard-negative entry
         in another profile derived from that specific confirmation.
+
+        Each prototype's OWN `diarization_run_id` is the run scope for its
+        cleanup, not the meeting's current one: the negatives it produced
+        were written by the same confirm and therefore carry the same run
+        id, while a later re-diarization's negatives about the same cluster
+        id describe a different voice and belong to whoever is still
+        confirmed there.
         """
         profiles = self._config.get("person_profiles", [])
         target = next((p for p in profiles if p.get("person_id") == person_id), None)
@@ -1190,6 +1216,7 @@ class Config:
                     channel=proto.get("channel"),
                     channel_recording_type=proto.get("recording_type"),
                     sids={sid}, negative=True,
+                    diarization_run_id=proto.get("diarization_run_id"),
                 )
 
         remaining = [p for p in profiles if p.get("person_id") != person_id]
@@ -1289,6 +1316,7 @@ class Config:
         channel_recording_type: Optional[str],
         sids: Optional[set] = None,
         negative: bool = False,
+        diarization_run_id=ANY_DIARIZATION_RUN,
     ) -> int:
         """Remove a person's positive prototypes (or hard negatives, with
         `negative=True`) belonging to one meeting+channel, optionally
@@ -1305,8 +1333,28 @@ class Config:
         fallback rule as everything else
         (src.speaker_suggestions.prototype_channel_matches), so legacy
         entries without a channel field are covered too.
+
+        `diarization_run_id` narrows that correction to evidence from ONE
+        diarization run (src.speaker_suggestions.prototype_run_matches).
+        Callers working from a sidecar must pass its run id, because
+        `(meeting_id, channel, sid)` is not stable across runs: a
+        re-diarization numbers its clusters from SPEAKER_0 again with no
+        memory of who held that id before, so without this scope confirming
+        the new run's first cluster deletes the prototype an earlier run's
+        confirmation recorded against a genuinely different voice.
+        `ANY_DIARIZATION_RUN` (the default) removes regardless of run, which
+        is what every caller that has no sidecar in hand -- the repair CLI's
+        analysis, enrollment cleanup -- still needs; passing `None` is the
+        distinct "the sidecar reports no run" scope, not the absence of one.
+
+        The trade this scope accepts: a confirmation made against a
+        superseded run can no longer be corrected by re-confirming the same
+        cluster id, since the two are no longer recognised as the same
+        cluster. That evidence has to be dropped through the repair CLI's
+        by-id removal instead. Silently destroying a genuine prototype is
+        the worse failure of the two, and it is the one happening today.
         """
-        from src.speaker_suggestions import prototype_channel_matches
+        from src.speaker_suggestions import prototype_channel_matches, prototype_run_matches
 
         profile = self.get_person_profile(person_id)
         if profile is None:
@@ -1319,6 +1367,10 @@ class Config:
                 entry.get("meeting_id") == meeting_id
                 and prototype_channel_matches(entry, channel, channel_recording_type)
                 and (sids is None or entry.get("diarization_speaker_id") in sids)
+                and (
+                    diarization_run_id is ANY_DIARIZATION_RUN
+                    or prototype_run_matches(entry, diarization_run_id)
+                )
             )
         ]
         removed = len(entries) - len(kept)

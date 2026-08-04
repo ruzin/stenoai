@@ -1048,6 +1048,14 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
              mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
             return CliRunner().invoke(command, args)
 
+    def _seeded_run_id(self, tmp):
+        """The seeded sidecar's run id. Tests that hand-build a prototype
+        instead of going through `confirm-speaker` have to stamp it, or they
+        describe a state the app cannot reach: evidence about a run that is
+        not the one on disk, which the withdrawal path deliberately leaves
+        alone because its cluster ids mean something else now."""
+        return read_speakers_sidecar(Path(tmp) / "output", "mtg001")["diarization_run"]["run_id"]
+
     def test_marks_and_reports_the_new_minimum_speaker_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
@@ -1074,17 +1082,19 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             person = cfg.create_person_profile("Julian")
             pid = person["person_id"]
             # Confirmed on SPEAKER_0 (the cluster about to be marked)...
+            run_id = self._seeded_run_id(tmp)
             cfg.add_speaker_prototype(
                 pid, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
                 diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
                 segment_count=10, created_from="user_confirmed", channel="system",
+                diarization_run_id=run_id,
             )
             # ...and ruled OUT for SPEAKER_1 by a different confirmation.
             cfg.add_speaker_prototype(
                 pid, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
                 diarization_speaker_id="SPEAKER_1", speech_duration_seconds=40.0,
                 segment_count=8, created_from="user_confirmed", channel="system",
-                negative=True,
+                negative=True, diarization_run_id=run_id,
             )
 
             result = self._run(
@@ -1187,6 +1197,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
                 speech_duration_seconds=30.0, segment_count=5,
                 created_from="user_confirmed", channel="mic",
+                diarization_run_id=self._seeded_run_id(tmp),
             )
             result = self._run(
                 simple_recorder.mark_speaker_cluster,
@@ -1217,6 +1228,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
                 speech_duration_seconds=30.0, segment_count=5,
                 created_from="user_confirmed", channel="mic",
+                diarization_run_id=self._seeded_run_id(tmp),
             )
             result = self._run(
                 simple_recorder.mark_speaker_cluster,

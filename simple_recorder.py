@@ -5013,12 +5013,20 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     # rebuilds correct negatives against the people still confirmed in this
     # channel. A same-person re-confirm just replaces the prototype instead
     # of appending a duplicate.
+    #
+    # Every removal here is scoped to THIS sidecar's run, because the cluster
+    # ids only identify a voice within one diarization run -- a re-diarization
+    # renumbers from SPEAKER_0 with no memory of who held that id, so
+    # unscoped these removals would treat a stranger's confirmation as this
+    # cluster's previous owner and delete it. The cost is that a
+    # confirmation made against a superseded run can no longer be corrected
+    # by re-confirming; the repair CLI removes such entries by id.
     reassigned_from = []
     for existing_person in config.get_person_profiles():
         removed = config.remove_speaker_evidence(
             existing_person["person_id"], meeting_id=meeting_stem,
             channel=channel, channel_recording_type=channel_recording_type,
-            sids=fragment_ids,
+            sids=fragment_ids, diarization_run_id=run_id,
         )
         if not removed or existing_person["person_id"] == person["person_id"]:
             continue
@@ -5041,7 +5049,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             config.remove_speaker_evidence(
                 existing_person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                negative=True,
+                negative=True, diarization_run_id=run_id,
             )
         for other in config.get_person_profiles():
             if other["person_id"] == existing_person["person_id"]:
@@ -5049,7 +5057,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             config.remove_speaker_evidence(
                 other["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                sids=fragment_ids, negative=True,
+                sids=fragment_ids, negative=True, diarization_run_id=run_id,
             )
 
     prototype = config.add_speaker_prototype(
@@ -5096,12 +5104,12 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         config.remove_speaker_evidence(
             existing_person["person_id"], meeting_id=meeting_stem,
             channel=channel, channel_recording_type=channel_recording_type,
-            sids=fragment_ids, negative=True,
+            sids=fragment_ids, negative=True, diarization_run_id=run_id,
         )
     config.remove_speaker_evidence(
         person["person_id"], meeting_id=meeting_stem,
         channel=channel, channel_recording_type=channel_recording_type,
-        negative=True,
+        negative=True, diarization_run_id=run_id,
     )
 
     hard_negatives_added = []
@@ -5296,6 +5304,10 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     # the CLI honest about what just happened.
     channel_data = (sidecar.get("channels") or {}).get(channel) or {}
     channel_recording_type = channel_data.get("recording_type")
+    # From the rewritten document set_cluster_multi_speaker returned, which
+    # carries the existing run forward -- marking a cluster is an annotation
+    # of this diarization output, not a new one. `None` on a legacy sidecar.
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
     clusters, id_resolution = merge_same_channel_fragments(
         clusters_from_sidecar_channel(meeting_stem, channel_data)
     )
@@ -5323,11 +5335,14 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     cleared_from = []
     restored_lines = 0
     if multiple and fragment_ids:
+        # Run-scoped for the same reason the confirm path is: the cluster
+        # this marking describes exists only within this run, so an entry
+        # from a superseded run shares nothing with it but a reused id.
         for person in config.get_person_profiles():
             removed = config.remove_speaker_evidence(
                 person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                sids=fragment_ids,
+                sids=fragment_ids, diarization_run_id=run_id,
             )
             if not removed:
                 continue
@@ -5341,7 +5356,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
             config.remove_speaker_evidence(
                 person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                sids=fragment_ids, negative=True,
+                sids=fragment_ids, negative=True, diarization_run_id=run_id,
             )
             for other in config.get_person_profiles():
                 if other["person_id"] == person["person_id"]:
@@ -5349,7 +5364,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
                 config.remove_speaker_evidence(
                     other["person_id"], meeting_id=meeting_stem,
                     channel=channel, channel_recording_type=channel_recording_type,
-                    sids=fragment_ids, negative=True,
+                    sids=fragment_ids, negative=True, diarization_run_id=run_id,
                 )
         if cleared_from:
             # The transcript is the artefact a human reads, and the one the

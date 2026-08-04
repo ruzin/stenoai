@@ -187,6 +187,76 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertNotIn("diarization_run_id", sarah_profile["prototypes"][0])
             self.assertNotIn("diarization_run_id", sarah_profile["hard_negatives"][0])
 
+    def _rediarize(self, tmp, meeting_stem="mtg001"):
+        """Overwrite the sidecar with a run whose cluster ids are the same but
+        whose voices are not -- exactly what a re-diarization produces, since
+        the diarizer numbers from SPEAKER_00 every time with no memory of who
+        held that id before. Returns the new run id."""
+        output_dir = Path(tmp) / "output"
+        write_speakers_sidecar(output_dir, meeting_stem, {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_00": {"embedding": [0.0, 1.0], "speech_duration_seconds": 28.0, "segment_count": 5},
+                    "SPEAKER_01": {"embedding": [1.0, 0.0], "speech_duration_seconds": 22.0, "segment_count": 4},
+                },
+            },
+        })
+        return read_speakers_sidecar(output_dir, meeting_stem)["diarization_run"]["run_id"]
+
+    def test_confirming_a_reused_cluster_id_from_a_newer_run_spares_the_older_runs_person(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+
+            run2 = self._rediarize(tmp)
+            self.assertNotEqual(run1, run2)
+
+            # Same id, genuinely different voice. Nothing here supersedes
+            # Max's confirmation -- it was made about a cluster that no longer
+            # exists, not about this one.
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Sarah"], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertTrue(data2["success"])
+            self.assertEqual(data2["reassigned_from"], [])
+
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual(len(max_profile["prototypes"]), 1)
+            self.assertEqual(max_profile["prototypes"][0]["diarization_run_id"], run1)
+            self.assertEqual(max_profile["prototypes"][0]["embedding_mean"], [1.0, 0.0])
+
+            sarah_profile = cfg.get_person_profile(data2["person_id"])
+            self.assertEqual(len(sarah_profile["prototypes"]), 1)
+            self.assertEqual(sarah_profile["prototypes"][0]["diarization_run_id"], run2)
+            self.assertEqual(sarah_profile["prototypes"][0]["embedding_mean"], [0.0, 1.0])
+
+    def test_reconfirming_a_cluster_on_a_legacy_sidecar_still_supersedes(self):
+        # The correction path on a library that predates run stamping: with no
+        # run id anywhere, re-confirming is still the "Change" flow and must
+        # take the prototype off the person who no longer owns the cluster.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_legacy_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+
+            self._seed_legacy_sidecar(tmp)  # rewritten, still no run block
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Sarah"], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertTrue(data2["success"])
+            self.assertEqual(data2["reassigned_from"], ["Max"])
+
+            self.assertEqual(cfg.get_person_profile(max_id)["prototypes"], [])
+            sarah_profile = cfg.get_person_profile(data2["person_id"])
+            self.assertEqual(len(sarah_profile["prototypes"]), 1)
+            self.assertNotIn("diarization_run_id", sarah_profile["prototypes"][0])
+
     def _seed_legacy_sidecar(self, tmp, meeting_stem="mtg001"):
         # A sidecar written before diarization_run existed -- no top-level
         # "diarization_run" key at all, not one holding None. Written by
