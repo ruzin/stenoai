@@ -90,27 +90,48 @@ SelectContent.displayName = SelectPrimitive.Content.displayName;
 
 export const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & { description?: string }
->(({ className, children, description, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+    description?: string;
+    icon?: React.ReactNode;
+  }
+>(({ className, children, description, icon, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-default select-none items-center rounded py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      'flex w-full cursor-default select-none flex-col rounded py-1.5 pl-2 pr-2 text-sm outline-none focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}
     {...props}
   >
-    <span className="absolute left-2 flex size-3.5 items-center justify-center">
-      <SelectPrimitive.ItemIndicator>
-        <Check className="size-3.5" />
-      </SelectPrimitive.ItemIndicator>
-    </span>
-    <div className="flex flex-col">
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      {description && (
-        <span className="text-xs text-muted-foreground">{description}</span>
+    {/* Checkmark, icon, and title share one flex row so the browser's own
+        items-center centers them against each other pixel-for-pixel —
+        manually-tuned top offsets on separately-positioned elements drift
+        out of alignment whenever font metrics or spacing change. */}
+    <div className="flex items-center gap-2.5">
+      <span className="flex size-3.5 shrink-0 items-center justify-center">
+        <SelectPrimitive.ItemIndicator>
+          <Check className="size-3.5" />
+        </SelectPrimitive.ItemIndicator>
+      </span>
+      {icon && (
+        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+          {icon}
+        </span>
       )}
+      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
     </div>
+    {description && (
+      <span
+        className={cn(
+          'text-xs text-muted-foreground',
+          // Indent to align under the title text: checkmark column + gap,
+          // plus the icon column + gap when one is present.
+          icon ? 'pl-[50px]' : 'pl-6',
+        )}
+      >
+        {description}
+      </span>
+    )}
   </SelectPrimitive.Item>
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;

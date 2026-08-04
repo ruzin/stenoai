@@ -144,6 +144,32 @@ test('auto-pause rescue: Resume appears only when the system paused the recordin
   await expect(pill.getByRole('button', { name: 'Stop recording' })).toBeVisible();
 });
 
+test('resume: the live transcript panel shows the earlier bits carried over from before the stop', async ({
+  launchApp,
+}) => {
+  // Regression guard: resuming/continuing a recording used to drop the earlier
+  // transcript from the live bar (it reset to blank). main.js now carries the
+  // previous session's finalised segments across as display-only priorSegments;
+  // the bar renders them before the live tail. STENOAI_E2E_SEED_PRIOR_SEGMENTS
+  // seeds them through the mock get-live-transcript-state (the real buffer is
+  // model-populated — see live-transcript-fallback.t2).
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { ...PILL_ENV, STENOAI_E2E_SEED_PRIOR_SEGMENTS: '1' },
+  });
+  const pill = await startInBackground(page);
+
+  // Expand into the live transcript panel.
+  await pill.getByRole('button', { name: 'Show transcript' }).click();
+  const panel = page.getByTestId('live-transcript-panel');
+  await expect(panel).toBeVisible();
+
+  // The earlier speech renders instead of a blank "Listening…" — the user sees
+  // continuity across the resume, not a transcript that starts over.
+  await expect(panel.getByText('earlier bit one')).toBeVisible();
+  await expect(panel.getByText('earlier bit two')).toBeVisible();
+});
+
 test('whisper variant: compact pill has no expand and no pause', async ({ launchApp }) => {
   const { page } = await launchApp({
     mockIpc: true,

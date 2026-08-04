@@ -8,6 +8,11 @@ import { useLiveDraftStore } from './liveDraftStore';
 import { navigate, routeFromHash } from '@/lib/router';
 import { composeShareBody, pickTranscriptForShare } from '@/routes/MeetingDetail';
 import { streamCache } from '@/lib/meetingDetailState';
+import {
+  classifyCompletionNotification,
+  meetingAlreadyHasNotes,
+  completionActions,
+} from '@/lib/completionNotification';
 import type { Meeting, QueueStatus, RecordingTrigger } from '@/lib/ipc';
 
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'processing';
@@ -42,9 +47,7 @@ function subscribeVisibility(callback: () => void): () => void {
 }
 
 function getVisibilitySnapshot(): boolean {
-  return typeof document !== 'undefined'
-    ? document.visibilityState === 'visible'
-    : true;
+  return typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
 }
 
 // SSR fallback. Renderer-only today, but keeps useSyncExternalStore happy.
@@ -56,7 +59,7 @@ function useIsWindowVisible(): boolean {
   return React.useSyncExternalStore(
     subscribeVisibility,
     getVisibilitySnapshot,
-    getVisibilityServerSnapshot,
+    getVisibilityServerSnapshot
   );
 }
 
@@ -162,6 +165,10 @@ export function useRecording() {
         isPaused: false,
         elapsedSeconds: 0,
         sessionName: optimisticName,
+        // Reflect the resume/continue target immediately so a detail view's
+        // "recording this note" gate flips on click, not a poll later. The
+        // next queue poll reconciles it (null for a fresh new-note start).
+        recordingSummaryFile: appendTo ?? null,
       });
       // No navigation: recording coexists with the app. PrimaryDock keys off
       // the optimistic status flip above and docks the transcription pill on
@@ -185,15 +192,15 @@ export function useRecording() {
         // flashes out with no explanation. Route it through the same native
         // notification the renderer-capture failure path uses.
         ipc().recording.reportCaptureError(
-          err instanceof Error ? err.message : 'Recording could not start',
+          err instanceof Error ? err.message : 'Recording could not start'
         );
         throw err;
       }
     },
-    [qc],
+    [qc]
   );
 
-  const stopRecording = React.useCallback(async () => {
+  const stopRecording = React.useCallback(async ({ navigateToNote = true }: { navigateToNote?: boolean } = {}) => {
     // Optimistic: flip the queue cache to processing so the UI can swap the
     // pill for the processing dock instantly, before the backend SIGTERM
     // round-trip.
@@ -213,17 +220,26 @@ export function useRecording() {
       // continued note) and returns its path — land the user ON it, with the
       // batch transcribe/summarise upgrading it in the background. Whisper/
       // import return no summaryFile → the processing dock as before.
-      if (data.summaryFile) {
-        navigate(`/meetings/${encodeURIComponent(data.summaryFile)}`);
-      } else {
-        navigate('/meetings/processing');
+      //
+      // navigateToNote=false is used by the auto-stop path (meeting ended): the
+      // user isn't engaged, so we must NOT move them onto the note's route —
+      // otherwise, once macOS brings Steno forward as the meeting app closes,
+      // the completion handler sees "focused + on this note" and suppresses the
+      // "Transcript ready — Summarise?" notification. Leaving the route where it
+      // is keeps that notification firing.
+      if (navigateToNote) {
+        if (data.summaryFile) {
+          navigate(`/meetings/${encodeURIComponent(data.summaryFile)}`);
+        } else {
+          navigate('/meetings/processing');
+        }
       }
       qc.invalidateQueries({ queryKey: queueKey });
       return data;
     } catch (err) {
       // Stop failed before we learned the note path — fall back to the dock so
       // the user isn't stranded on the recording view.
-      navigate('/meetings/processing');
+      if (navigateToNote) navigate('/meetings/processing');
       qc.invalidateQueries({ queryKey: queueKey });
       throw err;
     }
@@ -244,6 +260,12 @@ export function useRecording() {
   return {
     status,
     elapsed: queue.data?.elapsedSeconds ?? 0,
+    /** Number of jobs waiting in the processing queue. Combined with `status`
+     *  it tells the processing screen whether a job actually exists — a
+     *  post-stop screen with `status==='idle' && queueSize===0` means the stop
+     *  produced no job (nothing was captured), which the watchdog uses to
+     *  break out of an otherwise-forever spinner (issue #343). */
+    queueSize: queue.data?.queueSize ?? 0,
     // Fall back to currentJob (the in-flight processing session) when no
     // recording is active. Keeps `sessionName` populated through the full
     // recording → processing → done lifecycle so the synthetic in-progress
@@ -251,6 +273,15 @@ export function useRecording() {
     // otherwise Home goes blank between "stopped" and "processed" and the
     // user can't see anything is happening in the background.
     sessionName: queue.data?.sessionName ?? queue.data?.currentJob ?? null,
+    /** The note (summary-file realpath) an active continue/resume is recording
+     *  INTO — lets a detail view match by identity rather than the collidable
+     *  display name. Null for a fresh new-note recording or when idle. */
+    recordingSummaryFile: queue.data?.recordingSummaryFile ?? null,
+    /** The real note file the live recording/processing session produces.
+     *  useMeetings dedupes the synthetic live row against it so one recording
+     *  never shows as two entries (#bug4). Only Parakeet writes the placeholder
+     *  it points at, so dedup only bites there; null when idle. */
+    liveSummaryFile: queue.data?.liveSummaryFile ?? null,
     /** Set of summary files whose `reprocess-meeting` IPC is currently
      *  in flight. Used by useMeetings to flip the matching existing
      *  meeting rows' `is_processing` flag so Home shows the badge even
@@ -258,6 +289,12 @@ export function useRecording() {
      *  Set rather than array so consumers can do O(1) membership checks
      *  inside the meetings list map. */
     reprocessingSummaryFiles: reprocessingSummaryFiles,
+    /** True once the queue poll has resolved successfully at least once. The
+     *  processing-screen watchdog must not count "idle+empty" ticks before real
+     *  data has arrived — absent query data defaults to status:'idle' /
+     *  queueSize:0, so a slow first IPC would otherwise look like a no-job
+     *  dead-end (issue #343). */
+    isQueueSuccess: queue.isSuccess,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -309,6 +346,10 @@ export function useRecordingEvents() {
         // user already manually started or is mid-meeting.
         if (status === 'recording' || status === 'paused') return;
         void startRecording(sessionName ?? undefined, 'notification_click');
+        // "Take Notes" is an explicit intent to write notes, so open the
+        // live-note editor (main already brought the window forward). Mirrors
+        // the toolbar New-note button.
+        navigate('/recording');
       }),
       bridge.on.autoPauseRequested(() => {
         // Mic stopped on the meeting app — pause so we don't keep recording
@@ -328,8 +369,42 @@ export function useRecordingEvents() {
         void resumeRecording();
       }),
       bridge.on.autoSummariseRequested(() => {
-        // User clicked "Summarise" on the Meeting ended notification.
-        if (status === 'recording' || status === 'paused') void stopRecording();
+        // Auto-stop of an ended auto-detected meeting — stop the (auto-paused)
+        // recording so the shared post-stop pipeline runs, exactly like a manual
+        // stop. Do NOT navigate to the note: the user isn't engaged (they're
+        // leaving the meeting), and navigating there would let the completion
+        // handler suppress the completion notification once macOS surfaces Steno
+        // as the meeting closes. The summarise decision then happens after
+        // transcription via the transcript-ready → "Summarise?" → note-ready
+        // notifications — no separate meeting-end prompt.
+        if (status === 'recording' || status === 'paused') {
+          // Surface a failed auto-stop: unlike startRecording, stopRecording
+          // re-throws without notifying, and this path deliberately doesn't
+          // navigate — so without this the meeting would silently fail to
+          // finalize with no user-visible signal. Route it through the same
+          // capture-error notification the start path uses.
+          void stopRecording({ navigateToNote: false }).catch((err) => {
+            ipc().recording.reportCaptureError(
+              err instanceof Error ? err.message : 'Recording could not stop'
+            );
+          });
+        }
+      }),
+      bridge.on.generateNotesRequested(({ summaryFile, name }) => {
+        // User tapped "Summarise" on the transcript-ready notification. Run the
+        // same reprocess path as GenerateNotesBar in the BACKGROUND (no
+        // navigate/focus) — main tracks it in activeReprocessJobs so the badge
+        // shows, and its completion fires processing-complete with
+        // notesGenerated:true → the "Note ready" notification, whose click opens
+        // the note. That's where the user is brought in. (#bug2/#bug3)
+        if (summaryFile) {
+          // `name` here is only the processing-badge label (reprocess never
+          // passes it to the CLI, so it can't blank the note's title).
+          void ipc().meetings.reprocess(summaryFile, false, name ?? '').catch(() => {
+            // Reprocess failure surfaces via its own STREAM_ERROR/processing
+            // path; nothing to recover here.
+          });
+        }
       }),
     ];
     bridge.shortcuts.rendererReady();
@@ -352,9 +427,7 @@ export function useRecordingProcessingEffects() {
         const newSummaryFile = newMeeting.session_info.summary_file;
         qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) => {
           if (!prev) return [newMeeting];
-          const filtered = prev.filter(
-            (m) => m.session_info.summary_file !== newSummaryFile,
-          );
+          const filtered = prev.filter((m) => m.session_info.summary_file !== newSummaryFile);
           return [newMeeting, ...filtered];
         });
 
@@ -451,48 +524,91 @@ export function useRecordingProcessingEffects() {
       if (data.success && finishedSummaryFile) {
         const currentRoute = routeFromHash(window.location.hash);
         const finishedMeetingRoute = `/meetings/${encodeURIComponent(finishedSummaryFile)}`;
-        if (currentRoute === '/meetings/processing') {
-          // Watching it finish on the processing page → take them straight
-          // into the now-ready note.
+        // #bug1 lets an auto-detected recording run with the window HIDDEN
+        // (tray-only) or backgrounded behind the meeting app, so "the route is
+        // this note" no longer implies the user is looking at it. Gate the
+        // suppress-when-already-here logic on FOCUS, not route alone and not
+        // visibilityState: after an auto-stop, stopRecording navigates to the
+        // note's own route, but Steno is usually behind the meeting window —
+        // where visibilityState is still 'visible' (the window is shown, just
+        // not frontmost), which wrongly suppressed the notification. hasFocus()
+        // is false whenever Steno isn't the active window (hidden, minimised, OR
+        // backgrounded), so we correctly notify unless the user is truly looking
+        // at this note.
+        const windowFocused =
+          typeof document !== 'undefined' && document.hasFocus();
+        const { navigate: shouldNavigate, notify: shouldNotify } = completionActions({
+          currentRoute,
+          finishedMeetingRoute,
+          processingRoute: '/meetings/processing',
+          windowFocused,
+        });
+        if (shouldNavigate) {
+          // On the transient /processing screen → always advance to the note so
+          // the user is never stranded on a stuck spinner (regression fix),
+          // whether or not Steno is focused.
           navigate(finishedMeetingRoute);
-        } else if (currentRoute !== finishedMeetingRoute) {
-          // Anywhere else (Home, Chat, Settings, recording another note,
-          // a different meeting's detail page) → fire a native "Note
-          // ready" banner so the user knows their work-in-progress
-          // finished. Route comparison rather than window-focus check on
-          // purpose: it means a minimised Steno / alt-tabbed user who
-          // *was* sitting on this note's detail page still doesn't get a
-          // notification, because the route hasn't changed. They'll see
-          // the static summary the moment they come back.
-          //
-          // Clicking the banner navigates straight to this note (see the
-          // `navigate-to-meeting` listener below) — unlike the idle-route
-          // comparison above, a click is an explicit "take me there" from
-          // the user, so it doesn't have the back-to-back-recording
-          // interruption risk that auto-navigating here would.
+        }
+        if (shouldNotify) {
+          // A different route (Home, Chat, Settings, recording another note, a
+          // different meeting) OR this note's route but the window is
+          // hidden/minimised (tray-only after an auto-detected wrap-up) → fire a
+          // notification so the user learns their note finished. Clicking it
+          // navigates straight here (navigate-to-meeting listener below) — an
+          // explicit "take me there", so no back-to-back-recording interruption
+          // risk. When the window is visible AND already on this note, we skip
+          // it: the static summary is right there.
           const title =
             data.meetingData?.session_info.name?.trim() ||
             data.sessionName?.trim() ||
             'Your note has finished processing';
+          const isFailed =
+            Boolean(data.transcriptionFailed) ||
+            Boolean(data.meetingData?.session_info.transcription_failed);
+          const kind = classifyCompletionNotification({
+            notesGenerated: data.notesGenerated,
+            // Continue-recording (append) skips summarization but the note it
+            // appended to already has notes — treat as note-ready, not
+            // "generate notes?" (M2). meetingAlreadyHasNotes encodes the subtle
+            // notes_generated frontmatter semantics (absent = has notes).
+            notesAlreadyExist: meetingAlreadyHasNotes(data.meetingData),
+            transcriptionFailed: data.transcriptionFailed,
+            meetingTranscriptionFailed: data.meetingData?.session_info.transcription_failed,
+          });
           // Note: no `notifications_enabled` pre-check here — the IPC
-          // handler in main.js gates internally via
-          // `notificationsEnabled()` and short-circuits when the user
-          // has Desktop notifications disabled in Settings. Doing a
-          // round-trip from the renderer to fetch the setting before
-          // firing this IPC would be a wasted poll. The gate stays
-          // single-source-of-truth in main.
-          void ipc()
-            .settings.showNoteReadyNotification({
-              title,
-              summaryFile: finishedSummaryFile,
-              failed:
-                Boolean(data.transcriptionFailed) ||
-                Boolean(data.meetingData?.session_info.transcription_failed),
-            })
-            .catch(() => {
-              // Notification failure isn't fatal — the note is still
-              // visible in Home + sidebar. Don't bubble up.
-            });
+          // handlers in main.js gate internally via `notificationsEnabled()`
+          // and short-circuit when the user has notifications disabled. A
+          // renderer round-trip to fetch the setting first would be a wasted
+          // poll; the gate stays single-source-of-truth in main.
+          if (kind === 'note-ready') {
+            // Notes were generated (auto-summarize on, or the deferred
+            // Generate-notes/reprocess finished) — or a transcription failure
+            // that still wrote a note. Either way it's "ready": open on click.
+            void ipc()
+              .settings.showNoteReadyNotification({
+                title,
+                summaryFile: finishedSummaryFile,
+                failed: isFailed,
+              })
+              .catch(() => {
+                // Notification failure isn't fatal — the note is still
+                // visible in Home + sidebar. Don't bubble up.
+              });
+          } else {
+            // Transcript-only note (auto_summarize off → no notes generated).
+            // Prompt to generate notes rather than claim "Note ready" (#bug2);
+            // this is also the correctly-timed replacement for the old
+            // premature meeting-end "Summarise?" prompt (#bug3).
+            void ipc()
+              .settings.showTranscriptReadyNotification({
+                title,
+                summaryFile: finishedSummaryFile,
+                name: data.sessionName ?? null,
+              })
+              .catch(() => {
+                // Notification failure isn't fatal.
+              });
+          }
         }
         // else: on this note's own detail page → nothing. The streaming
         // UI's own listener swaps to the static view; no extra signal

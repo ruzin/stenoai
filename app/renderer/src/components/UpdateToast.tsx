@@ -34,7 +34,13 @@ export function UpdateToast() {
         border: '1px solid var(--border-subtle)',
         boxShadow: 'var(--shadow-md)',
         fontFamily: 'var(--font-sans)',
-      }}
+        // Overlaps MainToolbar's draggable top strip. Without an explicit
+        // no-drag here, macOS's window-drag hit test (computed from CSS
+        // regions, not paint z-order) swallows clicks on the upper portion
+        // of the buttons below — only the sliver poking below the strip
+        // was clickable.
+        WebkitAppRegion: 'no-drag',
+      } as React.CSSProperties}
       role="status"
       aria-live="polite"
     >

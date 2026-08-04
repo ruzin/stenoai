@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Loader2, Lock, Pin, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronLeft, Loader2, Lock, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Textarea } from '@/components/ui/input';
@@ -19,7 +19,7 @@ import {
   useSetDefaultTemplate,
   useTemplates,
 } from '@/hooks/useTemplates';
-import { COMPACT_BTN, SectionHeading } from './primitives';
+import { COMPACT_BTN } from './primitives';
 import { LANGUAGES_WHISPER, type LangOption } from './languages';
 
 // ---------------------------------------------------------------------------
@@ -38,14 +38,24 @@ import { LANGUAGES_WHISPER, type LangOption } from './languages';
 // transcript / global setting.
 const TEMPLATE_LANGUAGES: LangOption[] = LANGUAGES_WHISPER;
 
-export function TemplatesTab() {
+export function TemplatesTab({
+  onEditingChange,
+}: {
+  // Lets Settings.tsx hide its own page header (title/description/divider)
+  // while the editor is open — the editor is a full-page takeover with its
+  // own header, so the outer "Templates" header would just carry over as a
+  // redundant leftover from the list view above it.
+  onEditingChange?: (editing: boolean) => void;
+} = {}) {
   const { templates, defaultId } = useTemplates();
   const setDefault = useSetDefaultTemplate();
-  const reset = useResetTemplate();
   const del = useDeleteTemplate();
 
   // null = editor closed; a Template = edit existing; {} = new template.
   const [editing, setEditing] = React.useState<Partial<Template> | null>(null);
+  React.useEffect(() => {
+    onEditingChange?.(!!editing);
+  }, [editing, onEditingChange]);
   // Template pending deletion → drives the confirmation dialog.
   const [deleteTarget, setDeleteTarget] = React.useState<Template | null>(null);
   // Surfaced inside the confirm dialog when a delete fails, so a rejected
@@ -67,87 +77,117 @@ export function TemplatesTab() {
 
   return (
     <section data-settings-tab="templates">
-      <div style={{ maxWidth: 600 }}>
-        <SectionHeading>Templates</SectionHeading>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+      <div className="flex flex-col gap-2">
         <button
           onClick={() => setEditing({})}
-          className="flex flex-col items-center justify-center gap-2 rounded-[8px] p-4 text-[13px] font-medium transition-colors hover:bg-muted/50 text-center"
+          className="flex items-center gap-4 rounded-[8px] px-4 py-3 text-left transition-colors hover:bg-muted/50"
           style={{
             border: '1px dashed var(--border-subtle)',
             color: 'var(--fg-muted)',
-            minHeight: '180px'
           }}
         >
-          <Plus size={16} />
-          <span className="font-semibold" style={{ color: 'var(--fg-1)' }}>New Template</span>
-          <span className="text-[12px] max-w-[200px] leading-relaxed opacity-80 mt-1">
-            Create custom prompts to tailor how your meetings are summarised.
-          </span>
+          <Plus size={16} className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span className="text-[13px] font-medium" style={{ color: 'var(--fg-1)' }}>
+              New Template
+            </span>
+            <div className="truncate text-[12px] mt-0.5">
+              Create custom prompts to tailor how your meetings are summarised.
+            </div>
+          </div>
         </button>
 
-        {[...templates].sort((a, b) => (a.id === defaultId ? -1 : b.id === defaultId ? 1 : 0)).map((t) => {
+        {/* Natural (backend) order, not default-first — marking a template
+            default shouldn't reshuffle the list out from under the user. The
+            "Default" badge below is what marks it, in place. */}
+        {templates.map((t) => {
           const isDefault = t.id === defaultId;
-          const hasActions = !isDefault || !t.builtin || !t.locked;
+          // Locked built-ins can't be made default or deleted — nothing to
+          // reveal on hover, and (since clicking the row opens the editor)
+          // nothing to click into either.
+          const hasActions = !isDefault || !t.builtin;
+          const isEditable = !t.builtin || !t.locked;
 
           return (
             <div
               key={t.id}
-              className="flex flex-col rounded-[8px] transition-colors min-h-[180px]"
+              className={cn(
+                "group flex items-center gap-4 rounded-[8px] px-4 py-3 transition-all duration-fast ease-steno",
+                isEditable && "hover:shadow-sm hover:border-[color:var(--fg-2)]",
+                isEditable && !isDefault && "hover:bg-[color:var(--surface-hover)]",
+              )}
               style={{
                 border: isDefault ? '1px solid var(--fg-1)' : '1px solid var(--border-subtle)',
                 background:
                   isDefault ? 'var(--surface-raised)' : 'transparent',
               }}
             >
-              <div className="flex flex-col gap-2 p-4 pb-3 flex-1">
-                <div className="flex items-start justify-between gap-2">
+              {/* The row's edit trigger. Deliberately scoped to just this
+                  content block rather than the whole row div above — the
+                  actions div below (real <button> elements) is this div's
+                  sibling, not its child, so a role="button" ancestor never
+                  contains focusable descendants (an invalid nested-
+                  interactive-control pattern that confuses screen readers). */}
+              <div
+                className={cn("min-w-0 flex-1", isEditable && "cursor-pointer")}
+                role={isEditable ? 'button' : undefined}
+                tabIndex={isEditable ? 0 : undefined}
+                onClick={isEditable ? () => setEditing(t) : undefined}
+                onKeyDown={
+                  isEditable
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setEditing(t);
+                        }
+                      }
+                    : undefined
+                }
+              >
+                <div className="flex flex-wrap items-center gap-2">
                   <span
                     className="truncate text-[13px] font-medium"
                     style={{ color: 'var(--fg-1)' }}
                   >
                     {t.name}
                   </span>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {isDefault && (
-                      <span
-                        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold"
-                        style={{ color: 'var(--fg-1)' }}
-                      >
-                        <Pin size={10} aria-hidden="true" />
-                        Default
-                      </span>
-                    )}
-                    {t.locked && !isDefault && (
-                      <span
-                        className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider"
-                        style={{ color: 'var(--fg-muted)' }}
-                        title="Built-in template — protected from editing and deletion"
-                      >
-                        <Lock size={10} aria-hidden="true" />
-                        Locked
-                      </span>
-                    )}
-                    {t.builtin && !t.locked && !isDefault && (
-                      <span
-                        className="rounded-[3px] px-1.5 py-px text-[10px] uppercase tracking-wider"
-                        style={{
-                          color: 'var(--fg-muted)',
-                          border: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        Built-in
-                      </span>
-                    )}
-                  </div>
+                  {isDefault && (
+                    <span
+                      className="inline-flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider font-semibold"
+                      style={{ color: 'var(--fg-1)' }}
+                      title="Used automatically for new meetings unless you pick a different one"
+                    >
+                      <Check size={10} aria-hidden="true" />
+                      Default
+                    </span>
+                  )}
+                  {t.locked && !isDefault && (
+                    <span
+                      className="inline-flex shrink-0 items-center gap-1 text-[10px] uppercase tracking-wider"
+                      style={{ color: 'var(--fg-muted)' }}
+                      title="Built-in template — protected from editing and deletion"
+                    >
+                      <Lock size={10} aria-hidden="true" />
+                      Locked
+                    </span>
+                  )}
+                  {t.builtin && !t.locked && !isDefault && (
+                    <span
+                      className="shrink-0 rounded-[3px] px-1.5 py-px text-[10px] uppercase tracking-wider"
+                      style={{
+                        color: 'var(--fg-muted)',
+                        border: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      Built-in
+                    </span>
+                  )}
                 </div>
 
                 <div
                   className={cn(
-                    "text-[12px] leading-relaxed line-clamp-5 mt-1",
-                    !t.prompt && "italic"
+                    "line-clamp-2 text-[12px] leading-relaxed mt-0.5 cursor-[inherit]",
+                    !t.prompt && "italic",
                   )}
                   style={{ color: 'var(--fg-muted)', opacity: t.prompt ? 1 : 0.6 }}
                   title={t.prompt}
@@ -157,69 +197,39 @@ export function TemplatesTab() {
               </div>
 
               {hasActions && (
-                <div
-                  className="flex shrink-0 items-center justify-end gap-2 px-4 py-3 border-t"
-                  style={{ borderColor: 'var(--border-subtle)' }}
-                >
+                // Hidden until the row is hovered/focused — a sibling of the
+                // content div's edit-trigger above (not nested inside it), so
+                // there's no ancestor click/keydown handler these could leak
+                // into; these are just the secondary actions (make default /
+                // delete).
+                <div className="flex shrink-0 items-center gap-2 opacity-0 transition-opacity duration-fast ease-steno group-hover:opacity-100 group-focus-within:opacity-100">
                   {!isDefault && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className={cn(COMPACT_BTN, "mr-auto")}
+                      className={COMPACT_BTN}
                       disabled={setDefault.isPending}
                       onClick={() => setDefault.mutate(t.id)}
                     >
                       Make Default
                     </Button>
                   )}
-                  {t.builtin ? (
-                    !t.locked && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={COMPACT_BTN}
-                          disabled={reset.isPending}
-                          onClick={() => reset.mutate(t.id)}
-                        >
-                          Reset
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={COMPACT_BTN}
-                          onClick={() => setEditing(t)}
-                        >
-                          Edit
-                        </Button>
-                      </>
-                    )
-                  ) : (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className={COMPACT_BTN}
-                        onClick={() => setEditing(t)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          COMPACT_BTN,
-                          'text-[color:var(--fg-2)] hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]',
-                        )}
-                        onClick={() => {
-                          setDeleteError(null);
-                          setDeleteTarget(t);
-                        }}
-                        aria-label={`Delete ${t.name}`}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
-                    </>
+                  {!t.builtin && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn(
+                        COMPACT_BTN,
+                        'text-[color:var(--fg-2)] hover:bg-[color:var(--danger-bg)] hover:text-[color:var(--danger)]',
+                      )}
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleteTarget(t);
+                      }}
+                      aria-label={`Delete ${t.name}`}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
                   )}
                 </div>
               )}
@@ -286,8 +296,16 @@ function TemplateEditor({
   onClose: () => void;
 }) {
   const save = useSaveTemplate();
+  const reset = useResetTemplate();
   const { defaultId } = useTemplates();
   const setDefault = useSetDefaultTemplate();
+  // Save and Reset both write this template and both close the editor on
+  // success — letting them run concurrently (e.g. click Reset, then Save
+  // before it settles) races two writes against each other, and whichever
+  // response lands last silently wins over the other's intent. Mutual
+  // exclusion: each of Save/Reset/Make Default is disabled while any of the
+  // three is in flight.
+  const busy = save.isPending || reset.isPending || setDefault.isPending;
   const [name, setName] = React.useState(editing?.name ?? '');
   const [prompt, setPrompt] = React.useState(editing?.prompt ?? '');
   const [language, setLanguage] = React.useState(editing?.language ?? 'auto');
@@ -308,16 +326,28 @@ function TemplateEditor({
     <div className="flex flex-col h-full flex-1 pt-2 animate-in fade-in zoom-in-95 duration-200">
       {/* Header Area */}
       <div
-        className="flex items-center justify-between mb-6 pb-4 border-b shrink-0"
+        className="flex items-center justify-between gap-3 mb-6 pb-4 border-b shrink-0"
         style={{ borderColor: 'var(--border-subtle)' }}
       >
-        <div>
-          <h2 className="text-[20px] font-medium" style={{ color: 'var(--fg-1)' }}>
-            {editing?.id ? 'Edit template' : 'New template'}
-          </h2>
-          <p className="text-[13px] mt-1" style={{ color: 'var(--fg-muted)' }}>
-            Configure how your meetings should be summarized
-          </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Back to templates"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)] disabled:pointer-events-none disabled:opacity-50"
+            style={{ color: 'var(--fg-2)' }}
+          >
+            <ChevronLeft className="size-[18px]" />
+          </button>
+          <div>
+            <h2 className="text-[20px] font-medium" style={{ color: 'var(--fg-1)' }}>
+              {editing?.id ? 'Edit template' : 'New template'}
+            </h2>
+            <p className="text-[13px] mt-1" style={{ color: 'var(--fg-muted)' }}>
+              Configure how your meetings should be summarized
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -326,7 +356,7 @@ function TemplateEditor({
               variant="outline"
               size="sm"
               className={COMPACT_BTN}
-              disabled={setDefault.isPending}
+              disabled={busy}
               onClick={() => {
                 if (editing.id) setDefault.mutate(editing.id);
               }}
@@ -334,20 +364,25 @@ function TemplateEditor({
               Make Default
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={COMPACT_BTN}
-            onClick={onClose}
-            disabled={save.isPending}
-          >
-            Cancel
-          </Button>
+          {editing?.id && editing.builtin && !editing.locked && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={COMPACT_BTN}
+              disabled={busy}
+              title="Discard your edits and revert to Steno's shipped version of this template"
+              onClick={() => {
+                if (editing.id) reset.mutate(editing.id, { onSuccess: () => onClose() });
+              }}
+            >
+              Reset
+            </Button>
+          )}
           <Button
             size="sm"
             className={COMPACT_BTN}
             onClick={onSave}
-            disabled={save.isPending || !name.trim()}
+            disabled={busy || !name.trim()}
           >
             {save.isPending ? (
               <>
@@ -371,7 +406,7 @@ function TemplateEditor({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Weekly Sync, Executive Summary..."
-            className="text-[14px] bg-transparent"
+            className="text-[14px] bg-[color:var(--surface-raised)]"
           />
         </div>
         <div className="flex flex-col gap-2">
@@ -379,7 +414,7 @@ function TemplateEditor({
             Language
           </label>
           <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger className="text-[14px] bg-transparent">
+            <SelectTrigger className="text-[14px] bg-[color:var(--surface-raised)]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -398,7 +433,7 @@ function TemplateEditor({
         className="flex flex-col flex-1 min-h-0 rounded-[8px] overflow-hidden"
         style={{
           border: '1px solid var(--border-subtle)',
-          background: 'var(--surface-sunken)'
+          background: 'var(--surface-raised)'
         }}
       >
         <div
@@ -419,7 +454,7 @@ function TemplateEditor({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Write a prompt instructing the AI how to structure the meeting summary..."
-          className="flex-1 w-full p-5 text-[14px] leading-relaxed border-0 focus-visible:ring-0 resize-none bg-transparent shadow-none"
+          className="flex-1 w-full p-5 text-[14px] leading-relaxed border-0 focus-visible:ring-0 resize-none bg-[color:var(--surface-raised)] shadow-none"
           style={{ color: 'var(--fg-1)' }}
         />
       </div>

@@ -17,13 +17,16 @@ type SettingKind =
   | 'userName'
   | 'keepRecordings'
   | 'autoSummarize'
+  | 'autoInstallWhenIdle'
   | 'silenceEnabled'
   | 'silenceMinutes'
   | 'systemAudio'
   | 'telemetry'
   | 'transcriptionEngine'
   | 'dockIcon'
-  | 'launchOnLogin';
+  | 'launchOnLogin'
+  | 'menuBarIcon'
+  | 'premeetingNotifications';
 
 type SettingsBridge = {
   settings: {
@@ -31,12 +34,15 @@ type SettingsBridge = {
     setUserName: (v: string) => Promise<unknown>;
     setKeepRecordings: (v: boolean) => Promise<unknown>;
     setAutoSummarize: (v: boolean) => Promise<unknown>;
+    setAutoInstallWhenIdle: (v: boolean) => Promise<unknown>;
     setSilenceAutoStopEnabled: (v: boolean) => Promise<unknown>;
     setSilenceAutoStopMinutes: (v: number) => Promise<unknown>;
     setSystemAudio: (v: boolean) => Promise<unknown>;
     setTelemetry: (v: boolean) => Promise<unknown>;
     setDockIcon: (v: boolean) => Promise<unknown>;
     setLaunchOnLogin: (v: boolean) => Promise<unknown>;
+    setMenuBarIcon: (v: boolean) => Promise<unknown>;
+    setPremeetingNotifications: (v: boolean) => Promise<unknown>;
     setStoragePath: (p: string) => Promise<{ success?: boolean; error?: string }>;
     setMicrophone: (
       deviceId: string,
@@ -59,6 +65,9 @@ const CASES: Case[] = [
   // false flips the default (true) so the assertion has teeth — a no-op setter
   // would leave the key unset/true and fail this case.
   { kind: 'autoSummarize', value: false, configKey: 'auto_summarize_enabled' },
+  // false flips the default (true) so the assertion has teeth — a no-op setter
+  // would leave the key unset/true and fail this case.
+  { kind: 'autoInstallWhenIdle', value: false, configKey: 'auto_install_when_idle' },
   { kind: 'silenceEnabled', value: false, configKey: 'silence_auto_stop_enabled' },
   { kind: 'silenceMinutes', value: 15, configKey: 'silence_auto_stop_minutes' },
   // false flips the macOS default (true) so this has teeth on the primary signed
@@ -70,6 +79,11 @@ const CASES: Case[] = [
   // false flips the default (true) so the assertion has teeth — a no-op setter
   // would leave the key unset/true and fail this case.
   { kind: 'launchOnLogin', value: false, configKey: 'launch_on_login' },
+  // Both default true — false flips the default so a no-op setter fails
+  // the case. Persistence only: the live Tray create/destroy this setter
+  // also does is IS_E2E-gated (main.js), so there's no window here.
+  { kind: 'menuBarIcon', value: false, configKey: 'show_menu_bar_icon' },
+  { kind: 'premeetingNotifications', value: false, configKey: 'premeeting_notifications_enabled' },
 ];
 
 function applySetting(
@@ -89,6 +103,8 @@ function applySetting(
           return s.settings.setKeepRecordings(value as boolean);
         case 'autoSummarize':
           return s.settings.setAutoSummarize(value as boolean);
+        case 'autoInstallWhenIdle':
+          return s.settings.setAutoInstallWhenIdle(value as boolean);
         case 'silenceEnabled':
           return s.settings.setSilenceAutoStopEnabled(value as boolean);
         case 'silenceMinutes':
@@ -101,6 +117,10 @@ function applySetting(
           return s.settings.setDockIcon(value as boolean);
         case 'launchOnLogin':
           return s.settings.setLaunchOnLogin(value as boolean);
+        case 'menuBarIcon':
+          return s.settings.setMenuBarIcon(value as boolean);
+        case 'premeetingNotifications':
+          return s.settings.setPremeetingNotifications(value as boolean);
         case 'transcriptionEngine':
           return s.transcriptionEngine.set(value as string);
         default:

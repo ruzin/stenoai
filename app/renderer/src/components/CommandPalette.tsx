@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import { useMeetings, LIVE_SUMMARY_PREFIX } from '@/hooks/useMeetings';
 import { searchNotes, snippet } from '@/lib/noteSearch';
 import { navigate, useRoute } from '@/lib/router';
+import { isMac } from '@/lib/utils';
 import type { Meeting } from '@/lib/ipc';
 
 interface PaletteContextValue {
@@ -29,6 +30,72 @@ function recencyMs(m: Meeting): number {
   return new Date(m.session_info.processed_at ?? m.session_info.updated_at ?? 0).getTime();
 }
 
+interface SettingsEntry {
+  id: string;
+  /** A deep-link tab id accepted by Settings.tsx (its DEEP_LINK_IDS). Selecting
+   *  a row navigates to `/settings?tab=<tab>`. Keep these in sync with the
+   *  current nav rail (SettingsNav) — a stale id would land on the General tab. */
+  tab: string;
+  title: string;
+  sub: string;
+  /** Settings that only render on macOS (behind `isMac` in GeneralTab):
+   *  "Record system audio" and "Hide dock icon". On Windows those rows don't
+   *  exist, so indexing them would jump to a tab where nothing's there —
+   *  filtered out below when not on mac (#405). */
+  macOnly?: boolean;
+}
+
+// Searchable index of the app's settings, mapped to the tab each one lives on
+// today (post-v0.6.2 nav rail). Selecting a result opens that tab. Transcription
+// settings now live on the AI tab, so they map to `ai`. Adapted from @Vassista's
+// PR #349 and retargeted to the current tab layout.
+//
+// Keep titles in sync with the rendered setting labels (GeneralTab/AiTab/
+// AboutTab etc.) — the T1 spec asserts a few titles still match, to catch the
+// index drifting out from under a renamed control.
+const SETTINGS_INDEX: SettingsEntry[] = [
+  { id: 'general-name', tab: 'general', title: 'Your name', sub: 'In-app greeting' },
+  { id: 'general-theme', tab: 'general', title: 'Appearance', sub: 'Light, dark, or system theme' },
+  { id: 'general-calendar', tab: 'general', title: 'Connect calendar', sub: 'Google, Outlook' },
+  { id: 'general-scheduled', tab: 'general', title: 'Scheduled meetings', sub: 'Upcoming calendar events' },
+  { id: 'general-autodetect', tab: 'general', title: 'Auto-detected meetings', sub: 'Notify when another app uses the microphone' },
+  { id: 'general-notifications', tab: 'general', title: 'Post meeting notifications', sub: 'Desktop notifications when notes are ready' },
+  { id: 'general-mic', tab: 'general', title: 'Microphone', sub: 'Input device' },
+  { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Capture other participants', macOnly: true },
+  { id: 'general-silence', tab: 'general', title: 'Auto-stop on silence', sub: 'End a recording when it goes quiet' },
+  { id: 'general-launch', tab: 'general', title: 'Launch on login', sub: 'Start Steno automatically' },
+  // Cross-platform row (Electron's Tray covers the macOS menu bar and the
+  // Windows system tray); its rendered label switches on platform, so mirror
+  // that here so the title matches whatever GeneralTab shows.
+  {
+    id: 'general-menubar',
+    tab: 'general',
+    title: isMac ? 'Show in menu bar' : 'Show in system tray',
+    sub: 'Quick-access icon in the menu bar or system tray',
+  },
+  { id: 'general-dock', tab: 'general', title: 'Hide dock icon', sub: 'Menu bar / tray icon only', macOnly: true },
+  { id: 'ai-language', tab: 'ai', title: 'Language', sub: 'Transcription and summary language' },
+  { id: 'ai-transcription', tab: 'ai', title: 'Transcription model', sub: 'Parakeet, Whisper, or OpenAI-compatible ASR' },
+  { id: 'ai-save-recordings', tab: 'ai', title: 'Save recordings', sub: 'Keep the audio files after transcription' },
+  { id: 'ai-autonotes', tab: 'ai', title: 'Generate notes automatically', sub: 'Summarise after transcription' },
+  { id: 'ai-provider', tab: 'ai', title: 'AI provider', sub: 'Local, private server, cloud, or organisation' },
+  { id: 'templates', tab: 'templates', title: 'Templates', sub: 'Custom note formats' },
+  { id: 'org', tab: 'organisation', title: 'Organisation', sub: 'Sign in and back up notes to your org' },
+  { id: 'advanced-storage', tab: 'advanced', title: 'Storage location', sub: 'Where notes and recordings are saved' },
+  { id: 'advanced-setup', tab: 'advanced', title: 'Setup wizard', sub: 'Re-run first-time setup' },
+  { id: 'advanced-clear', tab: 'advanced', title: 'Clear recording state', sub: 'Reset a stuck recording' },
+  { id: 'advanced-analytics', tab: 'advanced', title: 'Anonymous usage analytics', sub: 'Opt in or out' },
+  { id: 'developer', tab: 'developer', title: 'Developer', sub: 'Diagnostics and logs' },
+  { id: 'about', tab: 'about', title: 'About', sub: 'Version, release notes, check for updates' },
+  { id: 'about-discord', tab: 'about', title: 'Discord', sub: 'Join the community, ask questions, share feedback' },
+];
+
+// Only the settings that actually render on this platform. macOS-only rows
+// ("Record system audio", "Hide dock icon") don't exist on Windows/Linux, so
+// they're dropped from the index there — otherwise selecting one would jump to
+// a tab where the row isn't shown (#405).
+const AVAILABLE_SETTINGS = SETTINGS_INDEX.filter((s) => !s.macOnly || isMac);
+
 /**
  * Global ⌘K search. Provides `open()` to descendants (the sidebar trigger) and
  * renders the overlay itself. Searches notes (title + summary) from any screen
@@ -45,28 +112,9 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   );
 }
 
-const SETTINGS_INDEX = [
-  { id: 'general-theme', tab: 'general', title: 'Appearance', sub: 'Dark mode, light mode, system theme' },
-  { id: 'general-name', tab: 'general', title: 'Your name', sub: 'In-app greetings' },
-  { id: 'general-calendar', tab: 'general', title: 'Calendar', sub: 'Google, Outlook integration' },
-  { id: 'general-notifications', tab: 'general', title: 'Desktop notifications', sub: 'App notifications' },
-  { id: 'general-mic', tab: 'general', title: 'Microphone', sub: 'Input device' },
-  { id: 'general-system-audio', tab: 'general', title: 'Record system audio', sub: 'Screen recording access' },
-  { id: 'general-autodetect', tab: 'general', title: 'Auto-detect meetings', sub: 'Notification when another app starts using mic' },
-  { id: 'general-launch', tab: 'general', title: 'Launch on login', sub: 'Start automatically' },
-  { id: 'transcription-engine', tab: 'transcription', title: 'Transcription engine', sub: 'Parakeet, Whisper, Cloud API (OpenAI)' },
-  { id: 'transcription-lang', tab: 'transcription', title: 'Language', sub: 'Transcription and summaries language' },
-  { id: 'transcription-keep', tab: 'transcription', title: 'Keep recordings', sub: 'Save audio files' },
-  { id: 'transcription-notes', tab: 'transcription', title: 'Generate notes automatically', sub: 'Summarise after transcription' },
-  { id: 'ai-provider', tab: 'ai', title: 'AI provider', sub: 'Local, Private Server, Cloud API, Organisation' },
-  { id: 'templates', tab: 'templates', title: 'Templates', sub: 'Custom note formats' },
-  { id: 'org', tab: 'organisation', title: 'Organisation', sub: 'Sign in to share notes' },
-  { id: 'advanced-export', tab: 'advanced', title: 'Export data', sub: 'Download all notes' },
-  { id: 'advanced-cache', tab: 'advanced', title: 'Storage & Cache', sub: 'Clear cached models' },
-  { id: 'developer', tab: 'developer', title: 'Developer', sub: 'Debug logs, experimental features' },
-];
-
 function CommandPalette({ onClose }: { onClose: () => void }) {
+  // Context-aware: while the Settings page is open, ⌘K searches settings and
+  // jumps to the tab each one lives on; everywhere else it searches notes.
   const currentRoute = useRoute();
   const isSettingsMode = currentRoute.startsWith('/settings');
   const meetings = useMeetings();
@@ -98,12 +146,12 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     return () => prev?.focus?.();
   }, []);
 
-  const settingsResults = React.useMemo(() => {
+  const settingsResults = React.useMemo<SettingsEntry[]>(() => {
     if (!isSettingsMode) return [];
-    if (!query.trim()) return SETTINGS_INDEX;
-    const q = query.toLowerCase();
-    return SETTINGS_INDEX.filter((s) => 
-      s.title.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q)
+    if (!query.trim()) return AVAILABLE_SETTINGS;
+    const q = query.trim().toLowerCase();
+    return AVAILABLE_SETTINGS.filter(
+      (s) => s.title.toLowerCase().includes(q) || s.sub.toLowerCase().includes(q),
     );
   }, [isSettingsMode, query]);
 
@@ -134,7 +182,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     onClose();
   };
 
-  const openSetting = (s: typeof SETTINGS_INDEX[0] | undefined) => {
+  const openSetting = (s: SettingsEntry | undefined) => {
     if (!s) return;
     navigate(`/settings?tab=${s.tab}`);
     onClose();
@@ -155,11 +203,8 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
       setSelected((s) => Math.max(s - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (isSettingsMode) {
-        openSetting(settingsResults[selected]);
-      } else {
-        openMeeting(noteResults[selected]);
-      }
+      if (isSettingsMode) openSetting(settingsResults[selected]);
+      else openMeeting(noteResults[selected]);
     } else if (e.key === 'Tab') {
       // The input is the only tab stop in the dialog; trap Tab so focus can't
       // escape behind the aria-modal overlay.
@@ -167,7 +212,13 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const activeId = resultCount > 0 ? `cmdk-opt-${selected}` : undefined;
+  // Guard against `selected` briefly pointing past the list right after it
+  // shrinks (before the clamp effect runs) — only expose activedescendant when
+  // an option actually exists at that index, so aria never references a
+  // nonexistent id.
+  const activeId = (isSettingsMode ? settingsResults[selected] : noteResults[selected])
+    ? `cmdk-opt-${selected}`
+    : undefined;
 
   return (
     <div
@@ -179,7 +230,7 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Search notes"
+        aria-label={isSettingsMode ? 'Search settings' : 'Search notes'}
         className="relative mt-[12vh] w-[min(620px,92vw)] overflow-hidden rounded-xl shadow-[var(--shadow-md)]"
         style={{ background: 'var(--surface-raised)', border: '1px solid hsl(var(--border))' }}
         onMouseDown={(e) => e.stopPropagation()}
@@ -195,8 +246,8 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
             data-testid="command-palette-input"
             className="w-full bg-transparent text-[14px] outline-none"
             style={{ color: 'var(--fg-1)', fontFamily: 'var(--font-sans)' }}
-            placeholder={isSettingsMode ? "Search settings…" : "Search notes…"}
-            aria-label={isSettingsMode ? "Search settings" : "Search notes"}
+            placeholder={isSettingsMode ? 'Search settings…' : 'Search notes…'}
+            aria-label={isSettingsMode ? 'Search settings' : 'Search notes'}
             role="combobox"
             aria-expanded="true"
             aria-controls="cmdk-listbox"
@@ -221,66 +272,68 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
               className="px-3.5 py-6 text-center text-[13px]"
               style={{ color: 'var(--fg-muted)' }}
             >
-              {query.trim() 
-                ? `No results for “${query.trim()}”` 
-                : (isSettingsMode ? 'No settings match' : 'No notes yet')}
+              {query.trim()
+                ? `No ${isSettingsMode ? 'settings' : 'notes'} match “${query.trim()}”`
+                : isSettingsMode
+                  ? 'No settings'
+                  : 'No notes yet'}
             </li>
+          ) : isSettingsMode ? (
+            settingsResults.map((s, i) => (
+              <li
+                key={s.id}
+                id={`cmdk-opt-${i}`}
+                role="option"
+                aria-selected={i === selected}
+                data-index={i}
+                data-testid="command-palette-result"
+                className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
+                style={i === selected ? { background: 'var(--surface-active)' } : undefined}
+                onMouseEnter={() => setSelected(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  openSetting(s);
+                }}
+              >
+                <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
+                  {s.title}
+                </div>
+                <div className="truncate text-[12px]" style={{ color: 'var(--fg-muted)' }}>
+                  {s.sub}
+                </div>
+              </li>
+            ))
           ) : (
-            isSettingsMode 
-              ? settingsResults.map((s, i) => (
-                  <li
-                    key={s.id}
-                    id={`cmdk-opt-${i}`}
-                    role="option"
-                    aria-selected={i === selected}
-                    data-index={i}
-                    data-testid="command-palette-result"
-                    className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
-                    style={i === selected ? { background: 'var(--surface-active)' } : undefined}
-                    onMouseEnter={() => setSelected(i)}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      openSetting(s);
-                    }}
-                  >
-                    <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
-                      {s.title}
-                    </div>
+            noteResults.map((m, i) => {
+              const title = m.session_info.name || 'Untitled Meeting';
+              const sub = snippet(m.summary, query);
+              return (
+                <li
+                  key={m.session_info.summary_file}
+                  id={`cmdk-opt-${i}`}
+                  role="option"
+                  aria-selected={i === selected}
+                  data-index={i}
+                  data-testid="command-palette-result"
+                  className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
+                  style={i === selected ? { background: 'var(--surface-active)' } : undefined}
+                  onMouseEnter={() => setSelected(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    openMeeting(m);
+                  }}
+                >
+                  <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
+                    {title}
+                  </div>
+                  {sub && (
                     <div className="truncate text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-                      {s.sub}
+                      {sub}
                     </div>
-                  </li>
-                ))
-              : noteResults.map((m, i) => {
-                  const title = m.session_info.name || 'Untitled Meeting';
-                  const sub = snippet(m.summary, query);
-                  return (
-                    <li
-                      key={m.session_info.summary_file}
-                      id={`cmdk-opt-${i}`}
-                      role="option"
-                      aria-selected={i === selected}
-                      data-index={i}
-                      data-testid="command-palette-result"
-                      className="mx-1 cursor-pointer rounded-md px-2.5 py-2"
-                      style={i === selected ? { background: 'var(--surface-active)' } : undefined}
-                      onMouseEnter={() => setSelected(i)}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        openMeeting(m);
-                      }}
-                    >
-                      <div className="truncate text-[13.5px]" style={{ color: 'var(--fg-1)' }}>
-                        {title}
-                      </div>
-                      {sub && (
-                        <div className="truncate text-[12px]" style={{ color: 'var(--fg-muted)' }}>
-                          {sub}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })
+                  )}
+                </li>
+              );
+            })
           )}
         </ul>
 

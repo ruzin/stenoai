@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ChevronDown,
   Globe,
+  HelpCircle,
   Home as HomeIcon,
   Inbox,
   LogIn,
@@ -12,10 +13,11 @@ import {
   Search,
   Settings as SettingsIcon,
 } from 'lucide-react';
-import { navigate, rememberNonSettingsRoute, toggleSettings, getLastNonSettingsRoute, getRouteParam } from '@/lib/router';
-import { SETTINGS_TABS } from '@/routes/Settings';
+import { navigate, rememberNonSettingsRoute, toggleSettings, getLastNonSettingsRoute } from '@/lib/router';
 import { cn, shortcut } from '@/lib/utils';
+import { ipc } from '@/lib/ipc';
 import { LucideIcon, IconPicker } from '@/components/IconPicker';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useUpdateFolderIcon } from '@/hooks/useFolders';
 import { useOrgLogout, useOrgSession, useSharedNotesGate } from '@/hooks/useOrg';
 import { useCommandPalette } from '@/components/CommandPalette';
@@ -168,30 +170,19 @@ export function Sidebar({
   const [iconPicker, setIconPicker] = React.useState<{ id: string; anchorRect: DOMRect } | null>(null);
 
   const isSettingsMode = currentRoute === '/settings' || currentRoute.startsWith('/settings?');
-  const requestedSettingsTab = getRouteParam(currentRoute, 'tab');
-  const activeSettingsTab = isSettingsMode && SETTINGS_TABS.some((t) => t.id === requestedSettingsTab)
-    ? requestedSettingsTab
-    : isSettingsMode
-      ? 'general'
-      : null;
+
   const updateIcon = useUpdateFolderIcon();
 
   const isHomeActive = currentRoute === '/' || currentRoute === '';
   const isAllMeetingsActive = currentRoute === '/meetings';
-  // Match /chat as well as any /chat/<id> conversation route — the same Chat
-  // tab item should stay highlighted when drilling into a session.
   const isChatActive = currentRoute === '/chat' || currentRoute.startsWith('/chat/');
   const isOrgSharedActive = currentRoute.startsWith('/org/');
 
   const orgSession = useOrgSession();
   const orgLogout = useOrgLogout();
   const orgSignedIn = orgSession.data?.signedIn ?? false;
-  // Enterprise can hide the Shared notes feature (tab + cross-folder chat).
-  // `enabled` stays false until policy resolves, so the tab doesn't flash in
-  // then vanish for an org that has the feature turned off.
   const sharedNotes = useSharedNotesGate(orgSignedIn);
-  // Malformed % escapes throw URIError. Guard so a bad route can't crash
-  // the entire sidebar render.
+
   const activeFolderId = React.useMemo<string | null>(() => {
     if (!currentRoute.startsWith('/folders/')) return null;
     const raw = currentRoute.slice('/folders/'.length);
@@ -242,21 +233,15 @@ export function Sidebar({
     [width, onWidthChange],
   );
 
-
   return (
     <aside
       data-sidebar
       className="fixed inset-y-0 left-0 z-20 flex flex-col"
       style={{
         width,
-        // Disable pointer events on the collapsed aside so clicks reach the
-        // content behind it. sb-top overrides this below to stay interactive.
         pointerEvents: collapsed ? 'none' : undefined,
       }}
     >
-      {/* Full-sidebar background + right border — fades when collapsed.
-          zIndex:-1 keeps it behind sb-top and content inside the aside's
-          stacking context (position:fixed creates one). */}
       <div
         aria-hidden
         style={{
@@ -271,19 +256,10 @@ export function Sidebar({
         }}
       />
 
-      {/* Top band — drag region for macOS traffic lights.
-          The toggle button is rendered in MainToolbar instead (position:fixed,
-          inside a no-drag DOM branch) so Electron's app-region logic reliably
-          registers the no-drag exclusion. Spacer preserves the visual gap. */}
-      {/* sb-top: drag region for traffic lights. Height spacer preserves the
-          original 46px row height (14px padding-top + 26px + 6px padding-bottom)
-          so the brand section clears the traffic lights. */}
       <div className="sb-top">
         <div style={{ height: 26 }} aria-hidden />
       </div>
 
-      {/* Sidebar content — fades with the background. No explicit pointer-events
-          needed: inherits none from aside when collapsed, auto when expanded. */}
       <div
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
         style={{
@@ -347,41 +323,16 @@ export function Sidebar({
         {/* Nav */}
         <nav className="scrollbar-clean flex min-h-0 flex-1 flex-col gap-px overflow-auto px-2 pb-2 pt-2">
           {isSettingsMode ? (
-            <>
-              <div className="mb-5 mt-1 px-1">
-                <button
-                  type="button"
-                  className="group flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-3 py-[5px] text-left text-[13px] font-medium text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
-                  onClick={() => navigate(getLastNonSettingsRoute() || '/')}
-                >
-                  <ArrowLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
-                  <span>Back to Home</span>
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-0.5 px-1">
-                {SETTINGS_TABS.map((t) => {
-                  const isActive = activeSettingsTab === t.id;
-                  const Icon = t.icon;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={cn(
-                        'flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-[5px] text-left text-[13px] transition-colors',
-                        isActive
-                          ? 'bg-[color:var(--surface-active)] font-medium text-[color:var(--fg-1)]'
-                          : 'font-normal text-[color:var(--fg-2)] hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]'
-                      )}
-                      onClick={() => navigate(`/settings?tab=${t.id}`)}
-                    >
-                      <Icon className="size-[14px]" style={isActive ? undefined : { opacity: 0.8 }} />
-                      <span className="flex-1 truncate">{t.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
+            <div className="mb-5 mt-1 px-1">
+              <button
+                type="button"
+                className="group flex w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-3 py-[5px] text-left text-[13px] font-medium text-[color:var(--fg-2)] transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]"
+                onClick={() => navigate(getLastNonSettingsRoute() || '/')}
+              >
+                <ArrowLeft size={14} className="transition-transform group-hover:-translate-x-0.5" />
+                <span>Back to Home</span>
+              </button>
+            </div>
           ) : (
             <>
               <button
@@ -455,15 +406,20 @@ export function Sidebar({
                     <ChevronDown className={cn('size-3 transition-transform', !foldersOpen && '-rotate-90')} />
                     <span>Folders</span>
                   </span>
-                  <button
-                    type="button"
-                    className="inline-flex size-5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] [.sb-group-head:hover_&]:opacity-100"
-                    onClick={(e) => { e.stopPropagation(); onNewFolder(); }}
-                    aria-label="New folder"
-                    style={{ color: 'var(--fg-2)' }}
-                  >
-                    <Plus className="size-3" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex size-5 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[color:var(--surface-active)] [.sb-group-head:hover_&]:opacity-100"
+                        onClick={(e) => { e.stopPropagation(); onNewFolder(); }}
+                        aria-label="New folder"
+                        style={{ color: 'var(--fg-2)' }}
+                      >
+                        <Plus className="size-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Create folder</TooltipContent>
+                  </Tooltip>
                 </div>
 
                 {foldersOpen &&
@@ -528,58 +484,69 @@ export function Sidebar({
           )}
         </nav>
 
-        {/* Profile chip + Settings cog. When the user is signed in to an org
-            adapter, the chip sits on the left and the cog moves to the right
-            (justify-between). When signed out we surface a one-click sign-in
-            CTA, but ONLY for users who've previously connected to an org —
-            personal users who have never signed in don't see clutter for a
-            feature they don't use. */}
         {/* Profile chip + Settings cog */}
-        {!isSettingsMode && (
-          <div className="flex items-center justify-between gap-2 px-3 py-2">
-            {orgSignedIn ? (
-              <ProfileChip
-                email={orgSession.data?.email ?? ''}
-                name={orgSession.data?.name ?? ''}
-                orgId={orgSession.data?.orgId ?? ''}
-                onSignOut={() => orgLogout.mutate()}
-              />
-            ) : orgSession.data?.everSignedIn ? (
-              <button
-                type="button"
-                onClick={() => {
-                  rememberNonSettingsRoute(currentRoute);
-                  navigate('/settings?tab=organisation');
-                }}
-                className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
-                style={{ color: 'var(--fg-1)' }}
-                title="Sign in to share notes with your organisation"
-              >
-                <LogIn className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
-                <span className="truncate">Sign in to org</span>
-              </button>
-            ) : (
-              <span />
-            )}
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          {orgSignedIn ? (
+            <ProfileChip
+              email={orgSession.data?.email ?? ''}
+              name={orgSession.data?.name ?? ''}
+              orgId={orgSession.data?.orgId ?? ''}
+              onSignOut={() => orgLogout.mutate()}
+            />
+          ) : orgSession.data?.everSignedIn ? (
             <button
               type="button"
-              onClick={() => toggleSettings(currentRoute)}
-              aria-label="Settings"
-              title="Settings"
-              // startsWith so the cog still reads "active" on deep-link routes
-              // like /settings?tab=organisation, not just bare /settings.
-              aria-pressed={currentRoute.startsWith('/settings')}
-              className={cn(
-                'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-hover)] hover:text-[color:var(--fg-1)]',
-                currentRoute.startsWith('/settings')
-                  ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
-                  : 'text-[color:var(--fg-2)]',
-              )}
+              onClick={() => {
+                rememberNonSettingsRoute(currentRoute);
+                navigate('/settings?tab=organisation');
+              }}
+              className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-colors hover:bg-[color:var(--surface-hover)]"
+              style={{ color: 'var(--fg-1)' }}
+              title="Sign in to share notes with your organisation"
             >
-              <SettingsIcon className="size-[15px]" />
+              <LogIn className="size-[13px]" style={{ color: 'var(--fg-2)' }} />
+              <span className="truncate">Sign in to org</span>
             </button>
+          ) : (
+            <span />
+          )}
+
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => void ipc().shell.openExternal('https://docs.stenoai.co')}
+                  aria-label="Help"
+                  className="inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-active)] hover:text-[color:var(--fg-1)]"
+                  style={{ color: 'var(--fg-2)' }}
+                >
+                  <HelpCircle className="size-[15px]" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Documentation</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => toggleSettings(currentRoute)}
+                  aria-label="Settings"
+                  aria-pressed={currentRoute.startsWith('/settings')}
+                  className={cn(
+                    'inline-flex h-[26px] w-7 items-center justify-center rounded-md transition-colors hover:bg-[color:var(--surface-active)] hover:text-[color:var(--fg-1)]',
+                    currentRoute.startsWith('/settings')
+                      ? 'bg-[color:var(--surface-active)] text-[color:var(--fg-1)]'
+                      : 'text-[color:var(--fg-2)]',
+                  )}
+                >
+                  <SettingsIcon className="size-[15px]" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Settings</TooltipContent>
+            </Tooltip>
           </div>
-        )}
+        </div>
 
         {iconPicker && (
           <IconPicker
@@ -590,7 +557,6 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Resize handle */}
       {!collapsed && (
         <div
           onMouseDown={onResizeMouseDown}
@@ -602,12 +568,6 @@ export function Sidebar({
     </aside>
   );
 }
-
-// ---------------------------------------------------------------------------
-// ProfileChip — shown bottom-left when signed in to an org adapter. Click
-// opens a small popover with the full identity + sign-out button. The avatar
-// is an emoji per email so we don't need a real photo backend for the demo.
-// ---------------------------------------------------------------------------
 
 const AVATAR_BY_LOCAL_PART: Record<string, string> = {
   alice: '👩‍💼',
@@ -648,7 +608,7 @@ function ProfileChip({ email, name, orgId, onSignOut }: ProfileChipProps) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-[color:var(--surface-hover)]"
+        className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-[color:var(--surface-active)]"
         title={`${name || email} · ${orgId}`}
         aria-haspopup="menu"
         aria-expanded={open}

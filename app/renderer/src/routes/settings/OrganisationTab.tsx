@@ -12,7 +12,7 @@ import {
   useOrgSsoGoogle,
   useSetOrgAutoBackup,
 } from '@/hooks/useOrg';
-import { COMPACT_BTN, SectionHeading } from './primitives';
+import { COMPACT_BTN } from './primitives';
 
 // ---------------------------------------------------------------------------
 // Organisation tab — connect to a self-hosted Steno enterprise adapter.
@@ -129,14 +129,6 @@ export function OrganisationTab() {
 
   return (
     <section data-settings-tab="organisation">
-      <SectionHeading>Organisation</SectionHeading>
-      <p
-        className="mb-5 text-[13px] leading-[1.55]"
-        style={{ color: 'var(--fg-2)', maxWidth: '60ch' }}
-      >
-        Connect to Steno Enterprise for your organisation.
-      </p>
-
       {status?.signedIn ? (
         <div
           className="mb-5 rounded-[10px] p-4"
@@ -213,7 +205,7 @@ export function OrganisationTab() {
                 value={adapterUrl}
                 onChange={(e) => setAdapterUrl(e.target.value)}
                 placeholder="https://steno-adapter.yourcompany.com"
-                className="h-[30px] rounded-[6px] text-[13px]"
+                className="h-[30px] rounded-[6px] bg-[color:var(--surface-raised)] text-[13px]"
                 disabled={busy}
               />
             </div>
@@ -255,7 +247,7 @@ export function OrganisationTab() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@yourcompany.com"
                   autoComplete="email"
-                  className="h-[30px] rounded-[6px] text-[13px]"
+                  className="h-[30px] rounded-[6px] bg-[color:var(--surface-raised)] text-[13px]"
                   disabled={busy}
                 />
               </div>
@@ -269,7 +261,7 @@ export function OrganisationTab() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••"
                   autoComplete="current-password"
-                  className="h-[30px] rounded-[6px] text-[13px]"
+                  className="h-[30px] rounded-[6px] bg-[color:var(--surface-raised)] text-[13px]"
                   disabled={busy}
                   onKeyDown={(e) => {
                     // Mirror the Sign-in button's own disabled guard so the

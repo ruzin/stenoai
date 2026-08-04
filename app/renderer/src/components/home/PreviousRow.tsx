@@ -57,9 +57,10 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
       }}
     >
       <div className="flex min-w-0 flex-1 items-center gap-3.5">
-        {/* Neutral note glyph — paper+ink, no per-note colour. Notes are told
-            apart by title + preview, not an arbitrary hash colour (which read
-            as meaningful and collided with the reserved status hues). */}
+        {/* Letter avatar — the note title's first initial, native-macOS-style.
+            Still paper+ink with no per-note colour: notes are told apart by
+            title + preview, not an arbitrary hash colour (which read as
+            meaningful and collided with the reserved status hues). */}
         <div
           aria-hidden="true"
           className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg text-[15px] font-medium"

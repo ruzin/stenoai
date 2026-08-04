@@ -3,6 +3,94 @@ title: "Changelog"
 description: "What's new in Steno -- recent releases and notable changes."
 ---
 
+<Update label="v0.6.7" description="August 4, 2026">
+**Added**
+- **Sync to Obsidian** — mirror your notes into an Obsidian vault folder as Markdown, one file per note with Obsidian-friendly properties, organised into subfolders that mirror your Steno folders. Turn it on in Settings → Integrations and choose a vault folder. One-way (Steno → vault); notes you edit in Obsidian are never overwritten, and renames/deletes are kept in sync.
+</Update>
+
+<Update label="v0.6.6" description="August 3, 2026">
+**Changed**
+- **Transcript-first recordings** — Steno now stops at a transcript by default and lets you summarise on demand, rather than generating notes automatically. Turn on "Summarise after transcription" in Settings → AI to go back to automatic notes.
+
+**Improved**
+- **One-tap meeting notes** — tapping "Take Notes" on a detected meeting starts recording immediately and opens the live note. When the meeting ends Steno auto-stops, and once the transcript is ready a single "Summarise?" tap opens the note and generates it — the notification body and its button now do the same thing, so it's always one click. "Note ready" now shows the note's title.
+- Live transcription holds a flat render cost and bounds its GPU memory, so long meetings stay smooth.
+- Settings toggles respond instantly instead of waiting on a round-trip.
+- The global record shortcut can be turned on or off in Settings.
+
+**Fixed**
+- One auto-detected recording no longer appears as two entries in your list.
+- "Save as PDF" now exports the note you're viewing, not always the Standard summary.
+- Summaries and folders are written durably, so an interrupted save can't lose them.
+- Processing no longer spins forever when a stop produced no recording to process.
+- The About tab now says what actually failed when an update errors.
+</Update>
+
+<Update label="v0.6.5" description="July 26, 2026">
+**New**
+- **System audio without the Screen Recording permission** — record both sides of a call without granting Screen Recording. This uses Core Audio Process Taps, so Steno now requires macOS 14.4 or later. (Turn the "Record system audio" toggle off any time to record the microphone only.)
+- **Automatic updates** — Steno now installs a downloaded update while your Mac is idle and relaunches on its own, and never while you're recording or processing. Turn off "Install updates automatically" in Settings → General to keep the manual "Restart to update" prompt.
+- **Re-transcribe a recording** — re-run transcription on an existing recording from its note, useful after switching engines or language.
+- **Undo a deleted note** — deleting a note now shows an Undo, so a note is soft-deleted and recoverable rather than gone immediately.
+- **Chinese transcription** — choose Simplified or Traditional Chinese when the Whisper transcription engine is selected in Settings → AI.
+- **Low-memory warning** — Settings now warns when a local summarization model may exceed your Mac's available memory before you switch to it.
+
+**Improved**
+- Deleting a note no longer asks for confirmation first, since Undo can restore it.
+
+**Fixed**
+- The macOS Keychain "Safe Storage" prompt no longer appears on every launch.
+- The manual check-for-updates now follows redirects, so it keeps working after the download location moves.
+- Opening Settings from a bare link now lands on General instead of stranding you on a stale tab.
+- The AI's internal reasoning tags no longer leak into your notes in a few remaining cases.
+- Fewer false "meeting detected" prompts.
+- Macs below macOS 14.4 are no longer offered an update they can't install; a manual check explains that a newer macOS is required instead.
+</Update>
+
+<Update label="v0.6.4" description="July 24, 2026">
+**New**
+- **Settings search** — Press ⌘K on the Settings screen to search every setting and jump straight to the tab it lives on.
+- Notes in the Previous list now show a letter avatar (the note's initial) instead of a generic file icon.
+- Calendar settings now show the account you've connected.
+
+**Changed**
+- All app notifications — meeting detected/ended, note ready, errors, and more — now appear as Steno's own in-app toast rather than native OS notifications.
+
+**Fixed**
+- The Restart button in the update banner now has a larger, easier-to-hit clickable area.
+</Update>
+
+<Update label="v0.6.3" description="July 22, 2026">
+**New**
+- **Save notes as PDF** — export a meeting's notes (summary, key topics, key points, action items, participants) as a branded, print-ready PDF from the note's ⋯ menu. It's rendered on-device, so nothing leaves your machine.
+- A one-time privacy notice on first launch explains that Steno records, transcribes, and summarises entirely on your device.
+
+**Improved**
+- The setup wizard now shows model-download progress instead of an indeterminate spinner, so you can see how far along a download is.
+
+**Fixed**
+- Fixed Amazon Bedrock connections failing for inference-profile models by fully percent-encoding the profile ARN in the request URL.
+- Live transcript partials now keep pace on slower Apple Silicon instead of drifting behind the speaker.
+</Update>
+
+<Update label="v0.6.2" description="July 19, 2026">
+**Improved**
+- Redesigned Settings with a persistent left navigation rail and grouped sections (Preferences, AI, Templates, Workspace, System), replacing the old row of tabs.
+- Added an About tab that shows your app version with a built-in check-for-updates flow.
+- Added finer control over which notifications you see and how the menu-bar (tray) icon behaves.
+
+**Fixed**
+- The "Generate notes" button no longer stays visible after you resume recording into a note.
+- Resuming a recording now keeps the transcript continuous instead of breaking it.
+</Update>
+
+<Update label="v0.6.1" description="July 19, 2026">
+**Fixed**
+- Notes you summarise on demand ("Generate notes") now get an AI-generated title, instead of staying "Note". A title you set yourself is never overwritten.
+- Fixed the speech-recognition model failing to download with an authorization error when an unrelated Hugging Face token was set in your environment.
+- Auto-detect meetings now recognises calls whose microphone is captured by a browser helper process.
+</Update>
+
 <Update label="v0.5.8" description="July 5, 2026">
 **New**
 - Added a "Generate notes automatically" toggle in Settings -- turn it off to skip AI summaries while recording, then generate them later whenever you're ready.

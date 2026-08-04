@@ -3,6 +3,9 @@ import { cn } from '@/lib/utils';
 interface AppIconProps {
   size?: number;
   className?: string;
+  /** Stroke color for the mark. Defaults to the themed foreground token;
+   *  pass `currentColor` to inherit the parent's text color (e.g. inside the
+   *  notification toast, which recolors it per state). */
   color?: string;
 }
 

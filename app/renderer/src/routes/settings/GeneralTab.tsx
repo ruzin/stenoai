@@ -3,6 +3,8 @@ import { ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { GoogleCalendarIcon } from '@/components/ui/google-calendar-icon';
+import { OutlookIcon } from '@/components/ui/outlook-icon';
 import {
   Select,
   SelectContent,
@@ -18,26 +20,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { isMac } from '@/lib/utils';
+import { isMac, shortcut } from '@/lib/utils';
 import { useTheme } from '@/hooks/useTheme';
 import {
   useAutoDetectMeetingsSetting,
+  useAutoInstallWhenIdleSetting,
   useDockIconSetting,
   useLaunchOnLoginSetting,
   useMicrophoneSetting,
   useNotificationsSetting,
-  useOpenScreenRecordingSettings,
-  useRelaunchApp,
-  useRequestScreenRecordingPermission,
+  usePremeetingNotificationsSetting,
+  useRecordHotkeySetting,
   useSetAutoDetectMeetings,
+  useSetAutoInstallWhenIdle,
   useSetDockIcon,
   useSetLaunchOnLogin,
   useSetMicrophone,
   useSetNotifications,
+  useSetRecordHotkey,
+  useSetPremeetingNotifications,
+  useSetShowMenuBarIcon,
   useSetSilenceAutoStopEnabled,
   useSetSilenceAutoStopMinutes,
   useSetSystemAudio,
   useSetUserName,
+  useShowMenuBarIconSetting,
   useSilenceAutoStopSetting,
   useSystemAudioSetting,
   useSystemAudioSupport,
@@ -48,7 +55,7 @@ import {
   useGoogleCalendarAuth,
   useOutlookCalendarAuth,
 } from '@/hooks/useCalendarEvents';
-import { COMPACT_BTN, COMPACT_TRIGGER, SettingRow } from './primitives';
+import { COMPACT_BTN, COMPACT_TRIGGER, SectionHeading, SettingRow } from './primitives';
 
 const DEFAULT_MIC_VALUE = 'default';
 
@@ -56,47 +63,48 @@ export function GeneralTab() {
   const { theme, setTheme } = useTheme();
   const notifications = useNotificationsSetting();
   const setNotifications = useSetNotifications();
+  const premeetingNotifications = usePremeetingNotificationsSetting();
+  const setPremeetingNotifications = useSetPremeetingNotifications();
   const systemAudio = useSystemAudioSetting();
   const setSystemAudio = useSetSystemAudio();
   const systemAudioSupport = useSystemAudioSupport();
-  const requestScreenRecording = useRequestScreenRecordingPermission();
-  const openScreenRecordingSettings = useOpenScreenRecordingSettings();
-  const relaunchApp = useRelaunchApp();
-  // Screen Recording permission changes don't apply to an already-running
-  // process — `screenPermissionAtLaunch` is frozen main-side at startup, so
-  // comparing it to the live `screenPermission` tells apart "granted before
-  // launch" from "granted mid-session, needs a relaunch to take effect."
-  // (Deliberately not component state: that broke on tab remount, since a
-  // freshly-mounted component would re-seed its "initial" value from the
-  // now-live 'granted' status and silently lose the relaunch prompt.)
-  const needsRelaunchForScreenRecording =
-    systemAudioSupport.data?.screenPermissionAtLaunch !== 'granted' &&
-    systemAudioSupport.data?.screenPermission === 'granted';
-  const screenPermission = systemAudioSupport.data?.screenPermission;
   const systemAudioDescription = (() => {
     if (systemAudioSupport.data && !systemAudioSupport.data.supported) {
       return `Capture both sides of a call (requires macOS 14.4+, you're on ${systemAudioSupport.data.osVersion || 'an older version'}). Mic-only recording still works.`;
-    }
-    if (needsRelaunchForScreenRecording) {
-      return 'Screen Recording access granted — relaunch Steno to start capturing both sides of a call.';
-    }
-    if (screenPermission === 'not-determined') {
-      return 'Capture both sides of a call. Needs Screen Recording access first — mic-only recording still works either way.';
-    }
-    if (screenPermission === 'denied' || screenPermission === 'restricted') {
-      return 'Capture both sides of a call. Screen Recording access was denied — enable it in System Settings, then relaunch Steno. Mic-only recording still works either way.';
     }
     return 'Capture both sides of a call. Turn off to record your mic only.';
   })();
   const autoDetect = useAutoDetectMeetingsSetting();
   const setAutoDetect = useSetAutoDetectMeetings();
+  // Auto-detect is a macOS-14+ feature (the mic-monitor binary is macOS-only and
+  // only has a reliable per-app signal on 14+ — see #116). Mirror main's
+  // isAutoDetectSupported() exactly so the toggle isn't a no-op-but-enabled
+  // control: non-darwin is unsupported (main never spawns the watcher there), and
+  // darwin < 14 is unsupported. While the probe is loading (data undefined) we
+  // don't disable (matching the other rows); a darwin osVersion that won't parse
+  // stays permissive (a real 14+ user must never lose the feature over a hiccup).
+  const autoDetectSupported = (() => {
+    const data = systemAudioSupport.data;
+    if (!data) return true; // probe still loading — don't disable prematurely
+    if (data.platform !== 'darwin') return false; // macOS-only feature
+    const major = parseInt(String(data.osVersion).split('.')[0], 10);
+    if (!Number.isFinite(major)) return true; // permissive on parse failure
+    return major >= 14;
+  })();
   const launchOnLogin = useLaunchOnLoginSetting();
   const setLaunchOnLogin = useSetLaunchOnLogin();
+  const autoInstallWhenIdle = useAutoInstallWhenIdleSetting();
+  const setAutoInstallWhenIdle = useSetAutoInstallWhenIdle();
+  const recordHotkey = useRecordHotkeySetting();
+  const setRecordHotkey = useSetRecordHotkey();
+  const recordAccel = shortcut('⌘⇧R', 'Ctrl+Shift+R');
   const silenceAutoStop = useSilenceAutoStopSetting();
   const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();
   const dockIcon = useDockIconSetting();
   const setDockIcon = useSetDockIcon();
+  const menuBarIcon = useShowMenuBarIconSetting();
+  const setMenuBarIcon = useSetShowMenuBarIcon();
   const microphone = useMicrophoneSetting();
   const setMicrophone = useSetMicrophone();
   const audioInputDevices = useAudioInputDevices();
@@ -143,6 +151,13 @@ export function GeneralTab() {
     ? 'Google'
     : outlook.status.data?.connected
       ? 'Outlook'
+      : null;
+  // Only populated for connections made after the email-capture change —
+  // pre-existing connections fall back to the provider name below.
+  const calendarEmail = google.status.data?.connected
+    ? google.status.data.email
+    : outlook.status.data?.connected
+      ? outlook.status.data.email
       : null;
 
   const [oauth, setOauth] = React.useState<
@@ -220,6 +235,12 @@ export function GeneralTab() {
     setOauth(null);
   };
 
+  // Both the menu bar icon and the dock icon are ways back into a hidden
+  // window (see Sidebar's requestSingleInstanceLock recovery via
+  // Applications/Spotlight relaunch) — hiding both isn't blocked, just
+  // called out, since it's easy to miss that the recovery path still works.
+  const bothIconsHidden = (dockIcon.data ?? false) && !(menuBarIcon.data ?? true);
+
   return (
     <section data-settings-tab="general">
       <SettingRow
@@ -241,9 +262,9 @@ export function GeneralTab() {
               (e.target as HTMLInputElement).blur();
             }
           }}
-          placeholder="Ruzin"
+          placeholder="Your name"
           autoComplete="given-name"
-          className="h-[30px] w-[180px] rounded-[6px] text-[13px]"
+          className="h-[30px] w-[180px] rounded-[6px] bg-[color:var(--surface-raised)] text-[13px]"
           data-testid="user-name-input"
         />
       </SettingRow>
@@ -251,6 +272,7 @@ export function GeneralTab() {
       <SettingRow
         label="Appearance"
         description="Choose light, dark, or match your system"
+        noBorder
       >
         <Select
           value={theme}
@@ -270,13 +292,16 @@ export function GeneralTab() {
         </Select>
       </SettingRow>
 
+      <SectionHeading>Calendar</SectionHeading>
+
       <SettingRow
-        label="Calendar"
+        label="Connect calendar"
         description={
           calendarConnected
-            ? `Connected to ${calendarProvider}`
+            ? `Connected to ${calendarEmail || calendarProvider}`
             : 'Show upcoming meetings on the home screen'
         }
+        noBorder
       >
         {calendarConnected ? (
           <Button
@@ -288,6 +313,11 @@ export function GeneralTab() {
               else outlook.disconnect.mutate();
             }}
           >
+            {google.status.data?.connected ? (
+              <GoogleCalendarIcon size={13} />
+            ) : (
+              <OutlookIcon size={13} />
+            )}
             Disconnect
           </Button>
         ) : (
@@ -298,6 +328,7 @@ export function GeneralTab() {
               className={COMPACT_BTN}
               onClick={() => void startConnect('google')}
             >
+              <GoogleCalendarIcon size={13} />
               Google
             </Button>
             <Button
@@ -306,6 +337,7 @@ export function GeneralTab() {
               className={COMPACT_BTN}
               onClick={() => void startConnect('outlook')}
             >
+              <OutlookIcon size={13} />
               Outlook
             </Button>
           </div>
@@ -318,9 +350,40 @@ export function GeneralTab() {
         onRetry={() => oauth && void startConnect(oauth.provider)}
       />
 
+      <SectionHeading>Meeting notifications</SectionHeading>
+
       <SettingRow
-        label="Desktop notifications"
-        description="App Notifications"
+        label="Scheduled meetings"
+        description="Show a notification before meetings start, based on your calendar."
+      >
+        <Switch
+          checked={premeetingNotifications.data ?? true}
+          onCheckedChange={(v) => setPremeetingNotifications.mutate(v)}
+          disabled={premeetingNotifications.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Auto-detected meetings"
+        description={
+          autoDetectSupported
+            ? 'Watch for other apps using your microphone and notify you when a call starts, with a one-click button to record.'
+            : `Watch for other apps using your microphone and notify you when a call starts. Requires macOS 14 (Sonoma) or later${
+                systemAudioSupport.data?.osVersion ? `, you're on ${systemAudioSupport.data.osVersion}` : ''
+              }.`
+        }
+      >
+        <Switch
+          checked={autoDetectSupported && (autoDetect.data ?? true)}
+          onCheckedChange={(v) => setAutoDetect.mutate(v)}
+          disabled={autoDetect.data === undefined || !autoDetectSupported}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Post meeting notifications"
+        description="Notify when your notes are ready or a recording auto-stops from silence."
+        noBorder
       >
         <Switch
           checked={notifications.data ?? false}
@@ -328,6 +391,8 @@ export function GeneralTab() {
           disabled={notifications.data === undefined}
         />
       </SettingRow>
+
+      <SectionHeading>Recording</SectionHeading>
 
       <SettingRow
         label="Microphone"
@@ -379,87 +444,18 @@ export function GeneralTab() {
           mic+system (toggle hidden), so this control isn't shown there. */}
       {isMac && (
         <SettingRow label="Record system audio" description={systemAudioDescription}>
-          <div className="flex items-center gap-2">
-            {/* Only offer permission actions when the OS actually supports the
-                feature — on an unsupported macOS version, screenPermission can
-                still read 'not-determined'/'denied' (that API predates the
-                14.4 loopback requirement), but granting it wouldn't do
-                anything: the toggle below is already disabled for OS reasons,
-                so the description explaining "requires macOS 14.4+" should be
-                the only thing shown, not an actionable-looking button. */}
-            {systemAudioSupport.data?.supported === false ? null : needsRelaunchForScreenRecording ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className={COMPACT_BTN}
-                onClick={() => relaunchApp.mutate()}
-              >
-                Relaunch
-              </Button>
-            ) : screenPermission === 'not-determined' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className={COMPACT_BTN}
-                onClick={() => requestScreenRecording.mutate()}
-                disabled={requestScreenRecording.isPending}
-              >
-                Grant Access
-              </Button>
-            ) : screenPermission === 'denied' || screenPermission === 'restricted' ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={COMPACT_BTN}
-                  onClick={() => void systemAudioSupport.refetch()}
-                >
-                  Check Again
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={COMPACT_BTN}
-                  onClick={() => openScreenRecordingSettings.mutate()}
-                >
-                  Open Settings
-                </Button>
-              </>
-            ) : null}
-            <Switch
-              checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
-              onCheckedChange={(v) => setSystemAudio.mutate(v)}
-              disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
-            />
-          </div>
+          <Switch
+            checked={(systemAudio.data ?? true) && (systemAudioSupport.data?.supported ?? true)}
+            onCheckedChange={(v) => setSystemAudio.mutate(v)}
+            disabled={systemAudio.data === undefined || systemAudioSupport.data?.supported === false}
+          />
         </SettingRow>
       )}
 
       <SettingRow
-        label="Auto-detect meetings"
-        description="Show a notification when another app starts using the microphone, with a one-click button to start recording."
-      >
-        <Switch
-          checked={autoDetect.data ?? true}
-          onCheckedChange={(v) => setAutoDetect.mutate(v)}
-          disabled={autoDetect.data === undefined}
-        />
-      </SettingRow>
-
-      <SettingRow
-        label="Launch on login"
-        description="Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually."
-      >
-        <Switch
-          checked={launchOnLogin.data ?? true}
-          onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
-          disabled={launchOnLogin.data === undefined}
-        />
-      </SettingRow>
-
-      <SettingRow
         label="Auto-stop on silence"
         description="End the recording and start processing it once both the mic and system audio have been silent for the chosen duration. Useful when you forget to stop after a meeting ends."
+        noBorder
       >
         <div className="flex items-center gap-3">
           <Select
@@ -488,13 +484,60 @@ export function GeneralTab() {
         </div>
       </SettingRow>
 
-      {/* Dock + menu bar are macOS-only concepts and the apply logic in
-          main.js is darwin-gated, so the toggle is a no-op off-mac. Hide it
-          entirely on Windows/Linux rather than show a broken control. */}
+      <SectionHeading>System</SectionHeading>
+
+      <SettingRow
+        label="Launch on login"
+        description="Start Steno automatically when you log in, hidden in the menu bar. Turn off to launch it manually."
+      >
+        <Switch
+          checked={launchOnLogin.data ?? true}
+          onCheckedChange={(v) => setLaunchOnLogin.mutate(v)}
+          disabled={launchOnLogin.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label="Install updates automatically"
+        description="When the app is idle and not recording, download and install updates in the background, then restart. You'll still be notified when an update is available."
+      >
+        <Switch
+          checked={autoInstallWhenIdle.data ?? true}
+          onCheckedChange={(v) => setAutoInstallWhenIdle.mutate(v)}
+          disabled={autoInstallWhenIdle.data === undefined}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={isMac ? 'Show in menu bar' : 'Show in system tray'}
+        description={
+          bothIconsHidden
+            ? 'Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.'
+            : isMac
+              ? 'Show a Steno icon in the menu bar for quick access.'
+              : 'Show a Steno icon in the system tray for quick access.'
+        }
+      >
+        <Switch
+          checked={menuBarIcon.data ?? true}
+          onCheckedChange={(v) => setMenuBarIcon.mutate(v)}
+          disabled={menuBarIcon.data === undefined}
+        />
+      </SettingRow>
+
+      {/* The dock is a macOS-only concept and the apply logic in main.js is
+          darwin-gated, so this toggle is a no-op off-mac. Hide it entirely on
+          Windows/Linux rather than show a broken control. (Unlike the tray
+          row above, which is cross-platform — Electron's Tray API covers the
+          macOS menu bar and the Windows system tray alike.) */}
       {isMac && (
         <SettingRow
           label="Hide dock icon"
-          description="Run as menu bar app only"
+          description={
+            bothIconsHidden
+              ? 'Both your dock icon and menu bar icon will be hidden. Reopen Steno from Applications or Spotlight to bring the window back.'
+              : 'Run as menu bar app only'
+          }
           noBorder
         >
           <Switch
@@ -504,6 +547,31 @@ export function GeneralTab() {
           />
         </SettingRow>
       )}
+
+      <SectionHeading>Keyboard shortcut</SectionHeading>
+
+      <SettingRow
+        label="Global record shortcut"
+        description={
+          <>
+            Start or stop recording from anywhere with {recordAccel}. Turn off if it
+            conflicts with another app.
+            {recordHotkey.data?.enabled === true &&
+              recordHotkey.data.registered === false && (
+                <span className="mt-1 block" style={{ color: 'var(--fg-2)' }}>
+                  Couldn't register — another app may be using this shortcut.
+                </span>
+              )}
+          </>
+        }
+        noBorder
+      >
+        <Switch
+          checked={recordHotkey.data?.enabled ?? true}
+          onCheckedChange={(v) => setRecordHotkey.mutate(v)}
+          disabled={recordHotkey.data === undefined}
+        />
+      </SettingRow>
     </section>
   );
 }

@@ -49,7 +49,7 @@ const json = (res, status, body) => {
  * @param {object} [opts.policy] override the /policy response.
  * @param {boolean} [opts.failS3Put] start with the S3 PUT returning 500 (used
  *   to exercise the upload-failure path). Toggle at runtime via setFailS3Put.
- * @returns {Promise<{ url: string, close: () => Promise<void>, s3Puts: () => number, setFailS3Put: (v: boolean) => void }>}
+ * @returns {Promise<{ url: string, close: () => Promise<void>, s3Puts: () => number, policyFetches: () => number, setFailS3Put: (v: boolean) => void }>}
  */
 function startMockAdapter(opts = {}) {
   const policy = opts.policy || { auto_share_default: true, shared_notes_enabled: true };
@@ -57,6 +57,7 @@ function startMockAdapter(opts = {}) {
   let idSeq = 0;
   let keySeq = 0;
   let s3PutCount = 0;
+  let policyFetchCount = 0;
   let failS3Put = Boolean(opts.failS3Put);
   let baseUrl = '';
 
@@ -85,6 +86,7 @@ function startMockAdapter(opts = {}) {
           });
         }
         if (method === 'GET' && url === '/policy') {
+          policyFetchCount++;
           return json(res, 200, policy);
         }
 
@@ -152,6 +154,7 @@ function startMockAdapter(opts = {}) {
         url: baseUrl,
         close: () => new Promise((r) => server.close(() => r())),
         s3Puts: () => s3PutCount,
+        policyFetches: () => policyFetchCount,
         setFailS3Put: (v) => {
           failS3Put = Boolean(v);
         },

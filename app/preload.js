@@ -58,7 +58,6 @@ const stenoai = {
 
   app: {
     getVersion: () => invoke('get-app-version'),
-    relaunch: () => invoke('relaunch-app'),
   },
 
   window: {
@@ -91,11 +90,14 @@ const stenoai = {
     triggerWizard: () => invoke('trigger-setup-wizard'),
   },
 
+  privacy: {
+    getNoticeSeen: () => invoke('get-privacy-notice-seen'),
+    markNoticeSeen: () => invoke('set-privacy-notice-seen'),
+  },
+
   perm: {
     checkMicrophone: () => invoke('check-microphone-permission'),
     requestMicrophone: () => invoke('request-microphone-permission'),
-    requestScreenRecording: () => invoke('request-screen-recording-permission'),
-    openScreenRecordingSettings: () => invoke('open-screen-recording-settings'),
   },
 
   recording: {
@@ -147,7 +149,14 @@ const stenoai = {
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
     revealFolder: (filePath) => invoke('reveal-meeting-folder', filePath),
     delete: (meeting) => invoke('delete-meeting', meeting),
+    undoDelete: (id) => invoke('undo-delete-meeting', id),
+    commitDelete: (id) => invoke('commit-delete-meeting', id),
+    listPendingDeletes: () => invoke('list-pending-deletes'),
     reprocess: (summaryFile, regenTitle, name) => invoke('reprocess-meeting', summaryFile, regenTitle, name),
+    // Re-transcribe (#266): re-run ASR on the source recording then re-summarise
+    // (regenTitle false; the retranscribe flag is the trailing arg).
+    retranscribe: (summaryFile, name) => invoke('reprocess-meeting', summaryFile, false, name, true),
+    recordingAvailable: (summaryFile) => invoke('recording-available', summaryFile),
     regenTitle: (summaryFile, name) => invoke('regen-meeting-title', summaryFile, name),
     saveNotes: (name, notes) => invoke('save-meeting-notes', name, notes),
     generateReport: (summaryFile, templateId) => invoke('generate-report-meeting', summaryFile, templateId),
@@ -155,6 +164,8 @@ const stenoai = {
     deleteReport: (summaryFile, reportId) => invoke('delete-report', summaryFile, reportId),
     exportTranscript: (defaultFilename, content) =>
       invoke('export-transcript', defaultFilename, content),
+    exportNotePdf: (defaultFilename, html) =>
+      invoke('export-note-pdf', defaultFilename, html),
   },
 
   query: {
@@ -228,14 +239,20 @@ const stenoai = {
   settings: {
     getNotifications: () => invoke('get-notifications'),
     setNotifications: (v) => invoke('set-notifications', v),
+    getRecordHotkey: () => invoke('get-record-hotkey'),
+    setRecordHotkey: (v) => invoke('set-record-hotkey', v),
     getTelemetry: () => invoke('get-telemetry'),
     setTelemetry: (v, source) => invoke('set-telemetry', v, source),
     getDockIcon: () => invoke('get-dock-icon'),
     setDockIcon: (v) => invoke('set-dock-icon', v),
+    getMenuBarIcon: () => invoke('get-menu-bar-icon'),
+    setMenuBarIcon: (v) => invoke('set-menu-bar-icon', v),
     getSystemAudio: () => invoke('get-system-audio'),
     setSystemAudio: (v) => invoke('set-system-audio', v),
     getAutoDetectMeetings: () => invoke('get-auto-detect-meetings'),
     setAutoDetectMeetings: (v) => invoke('set-auto-detect-meetings', v),
+    getPremeetingNotifications: () => invoke('get-premeeting-notifications'),
+    setPremeetingNotifications: (v) => invoke('set-premeeting-notifications', v),
     getLaunchOnLogin: () => invoke('get-launch-on-login'),
     setLaunchOnLogin: (v) => invoke('set-launch-on-login', v),
     getWhisperModel: () => invoke('get-whisper-model'),
@@ -244,11 +261,14 @@ const stenoai = {
     setKeepRecordings: (v) => invoke('set-keep-recordings', v),
     getAutoSummarize: () => invoke('get-auto-summarize'),
     setAutoSummarize: (v) => invoke('set-auto-summarize', v),
+    getAutoInstallWhenIdle: () => invoke('get-auto-install-when-idle'),
+    setAutoInstallWhenIdle: (v) => invoke('set-auto-install-when-idle', v),
     getSilenceAutoStop: () => invoke('get-silence-auto-stop'),
     setSilenceAutoStopEnabled: (v) => invoke('set-silence-auto-stop-enabled', v),
     setSilenceAutoStopMinutes: (v) => invoke('set-silence-auto-stop-minutes', v),
     showSilenceAutoStopNotification: (payload) => invoke('show-silence-auto-stop-notification', payload),
     showNoteReadyNotification: (payload) => invoke('show-note-ready-notification', payload),
+    showTranscriptReadyNotification: (payload) => invoke('show-transcript-ready-notification', payload),
     showSystemAudioMicOnlyNotification: () => invoke('show-system-audio-mic-only-notification'),
     // Design-for-test seam: the production fire path is the main-side scheduler
     // timer; this lets e2e drive the gate + suppression deterministically.
@@ -262,6 +282,12 @@ const stenoai = {
     getStoragePath: () => invoke('get-storage-path'),
     setStoragePath: (p) => invoke('set-storage-path', p),
     pickStorageFolder: () => invoke('select-storage-folder'),
+    getObsidianSync: () => invoke('get-obsidian-sync'),
+    setObsidianSync: (v) => invoke('set-obsidian-sync', v),
+    getObsidianVaultPath: () => invoke('get-obsidian-vault-path'),
+    setObsidianVaultPath: (p) => invoke('set-obsidian-vault-path', p),
+    pickObsidianVaultFolder: () => invoke('select-obsidian-vault-folder'),
+    getObsidianConflicts: () => invoke('get-obsidian-conflicts'),
     getAiPrompts: () => invoke('get-ai-prompts'),
     saveDiagnostics: (defaultFilename, content) =>
       invoke('save-diagnostics', defaultFilename, content),
@@ -299,6 +325,7 @@ const stenoai = {
 
   updates: {
     check: () => invoke('check-for-updates'),
+    getStatus: () => invoke('get-update-status'),
     openReleasePage: (url) => invoke('open-release-page', url),
     install: () => send('install-update'),
   },
@@ -359,12 +386,18 @@ const stenoai = {
     whisperPullComplete: (cb) => subscribe('whisper-pull-complete', cb),
     parakeetPullProgress: (cb) => subscribe('parakeet-pull-progress', cb),
     parakeetPullComplete: (cb) => subscribe('parakeet-pull-complete', cb),
+    setupOllamaProgress: (cb) => subscribe('setup-ollama-progress', cb),
     liveTranscriptReady: (cb) => subscribe('live-transcript-ready', cb),
     liveTranscriptChunk: (cb) => subscribe('live-transcript-chunk', cb),
     liveTranscriptError: (cb) => subscribe('live-transcript-error', cb),
     updateAvailable: (cb) => subscribe('update-available', cb),
     updateDownloadProgress: (cb) => subscribe('update-download-progress', cb),
     updateDownloaded: (cb) => subscribe('update-downloaded', cb),
+    updateError: (cb) => subscribe('update-error', cb),
+    // Main cleared a failure the About tab may still be showing (a cycle that
+    // came back clean). Without this the banner would linger on a mounted tab
+    // until the user navigated away and back.
+    updateErrorCleared: (cb) => subscribe('update-error-cleared', cb),
     googleAuthChanged: (cb) => subscribe('google-auth-changed', cb),
     outlookAuthChanged: (cb) => subscribe('outlook-auth-changed', cb),
     shortcutStartRecording: (cb) => subscribe('shortcut-start-recording', cb),
@@ -375,6 +408,7 @@ const stenoai = {
     autoPauseRequested: (cb) => subscribe('auto-pause-requested', cb),
     autoResumeRequested: (cb) => subscribe('auto-resume-requested', cb),
     autoSummariseRequested: (cb) => subscribe('auto-summarise-requested', cb),
+    generateNotesRequested: (cb) => subscribe('generate-notes-requested', cb),
     navigateToMeeting: (cb) => subscribe('navigate-to-meeting', cb),
     trayOpenSettings: (cb) => subscribe('tray-open-settings', cb),
     showQuitDialog: (cb) => subscribe('show-quit-dialog', cb),

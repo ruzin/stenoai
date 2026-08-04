@@ -104,13 +104,7 @@ export interface CalendarEvent {
   meeting_url?: string;
   description?: string;
   is_all_day?: boolean;
-  response_status?:
-    | 'accepted'
-    | 'declined'
-    | 'tentative'
-    | 'needsAction'
-    | 'organizer'
-    | 'unknown';
+  response_status?: 'accepted' | 'declined' | 'tentative' | 'needsAction' | 'organizer' | 'unknown';
   color?: string;
 }
 
@@ -328,18 +322,17 @@ export type SetupCheckResponse = Result<{
 
 export type MicPermissionResponse = Result<{ status: MicPermissionStatus }>;
 export type MicPermissionGrantResponse = Result<{ granted: boolean }>;
-export type ScreenRecordingPermissionResponse = Result<{ screenPermission: string }>;
 
 /** Mirrors RECORDING_TRIGGERS in main.js -- what UI action started the
  *  recording, so PostHog can tell whether the meeting-detected nudge
  *  actually moves the needle. */
 export type RecordingTrigger = 'manual' | 'notification_click' | 'hotkey' | 'tray' | 'url_scheme';
 
-/** Mirrors TELEMETRY_TOGGLE_SOURCES in main.js -- which SCREEN the telemetry
- *  toggle was flipped from. 'setup' names the Setup.tsx screen, not a
- *  lifecycle stage: it's also reachable later via "run setup wizard" from
- *  Settings, so this does not mean "first run". */
-export type TelemetryToggleSource = 'setup' | 'settings';
+/** Mirrors TELEMETRY_TOGGLE_SOURCES in main.js -- which UI surface the
+ *  telemetry toggle was flipped from. 'setup' names the Setup.tsx screen,
+ *  not a lifecycle stage: it's also reachable later via "run setup wizard"
+ *  from Settings, so this does not mean "first run". */
+export type TelemetryToggleSource = 'setup' | 'settings' | 'consent';
 
 export type StartRecordingResponse = Result<{ message: string; sessionName?: string }>;
 export type StopRecordingResponse = Result<{
@@ -371,6 +364,19 @@ export interface QueueStatus {
   isPaused: boolean;
   elapsedSeconds: number;
   sessionName: string | null;
+  /** The note (summary-file realpath) an active continue/resume is recording
+   *  INTO — lets a detail view tell "recording this note" from "recording a
+   *  different one" by identity rather than the collidable display name. Null
+   *  for a fresh new-note recording or when idle. */
+  recordingSummaryFile?: string | null;
+  /** The real note file the current recording/processing session produces (the
+   *  instant-stop placeholder, then rewritten by the pipeline). Deterministic
+   *  from the audio stem and stable across record→process, so useMeetings can
+   *  dedupe the synthetic "__live__/…" row against the real note once it exists
+   *  (one recording, one row — #bug4). Only the Parakeet instant-stop path
+   *  writes that placeholder, so dedup only bites there; Whisper/import have no
+   *  placeholder (dedup is a no-op even when this is set), and it's null idle. */
+  liveSummaryFile?: string | null;
 }
 
 export type PickAudioFileResponse = Result<{ filePath: string }>;
@@ -379,7 +385,21 @@ export type RecordingsDirResponse = Result<{ path: string }>;
 export type ListMeetingsResponse = Result<{ meetings: Meeting[] }>;
 export type GetMeetingResponse = Result<{ meeting: Meeting }>;
 export type UpdateMeetingResponse = Result<{ message: string; updatedData: Meeting }>;
-export type DeleteMeetingResponse = Result<{ message: string }>;
+// Soft-delete (#234): main hides only the summary and returns an `id` + a
+// MAIN-owned `deadline` (epoch ms) so the renderer can offer Undo. `message` is
+// set instead when there was nothing to delete (no summary / already gone).
+export type DeleteMeetingResponse = Result<{ message?: string; id?: string; deadline?: number }>;
+
+/** A note with an in-flight soft-delete window (#234), from list-pending-deletes. */
+export interface PendingDelete {
+  id: string;
+  /** The exact `summary_file` string the note is listed under. */
+  summaryFile: string;
+  /** MAIN-owned deadline (epoch ms) — the countdown is display-only. */
+  deadline: number;
+  meeting: Meeting;
+}
+export type ListPendingDeletesResponse = Result<{ pending: PendingDelete[] }>;
 export type SaveMeetingNotesResponse = Result<{ path: string }>;
 
 export type QueryResponse = Result<{ answer: string }>;
@@ -440,6 +460,9 @@ export type ListModelsResponse = Result<{
   supported_models: Record<string, RawSupportedModel>;
   current_model: string;
   provider: string;
+  // Machine RAM in GB (main.js attaches os.totalmem()); used to flag local
+  // models that may exceed available memory. Absent -> never warn.
+  total_ram_gb?: number;
 }>;
 export type GetCurrentModelResponse = Result<{ model: string }>;
 
@@ -499,18 +522,30 @@ export type SetOpenAiAsrConfigResponse = Result<{
 }>;
 
 export type GetNotificationsResponse = Result<{ notifications_enabled: boolean }>;
+// `enabled` is the persisted preference; `registered` is the live global-
+// shortcut registration state (false when enabled but another app owns the
+// accelerator). The setter returns the same two fields.
+export type GetRecordHotkeyResponse = Result<{ enabled: boolean; registered: boolean }>;
+export type SetRecordHotkeyResponse = Result<{ enabled: boolean; registered: boolean }>;
 export type GetTelemetryResponse = Result<{
   telemetry_enabled: boolean;
   anonymous_id?: string;
 }>;
+export type GetPrivacyNoticeSeenResponse = Result<{ privacy_notice_seen: boolean }>;
 export type GetDockIconResponse = Result<{ hide_dock_icon: boolean }>;
+export type GetMenuBarIconResponse = Result<{ show_menu_bar_icon: boolean }>;
 export type GetSystemAudioResponse = Result<{ system_audio_enabled: boolean }>;
 export type GetAutoDetectMeetingsResponse = Result<{ auto_detect_meetings_enabled: boolean }>;
+export type GetPremeetingNotificationsResponse = Result<{
+  premeeting_notifications_enabled: boolean;
+}>;
 export type GetLaunchOnLoginResponse = Result<{ launch_on_login: boolean }>;
 export type GetWhisperModelResponse = Result<{ whisper_model: string; supported_models: string[] }>;
 export type GetKeepRecordingsResponse = Result<{ keep_recordings: boolean }>;
 
 export type GetAutoSummarizeResponse = Result<{ auto_summarize_enabled: boolean }>;
+
+export type GetAutoInstallWhenIdleResponse = Result<{ auto_install_when_idle: boolean }>;
 
 export type GetSilenceAutoStopResponse = Result<{
   silence_auto_stop_enabled: boolean;
@@ -532,6 +567,10 @@ export type StoragePathResponse = Result<{
   default_path: string;
 }>;
 export type PickStorageFolderResponse = Result<{ folderPath: string }>;
+export type GetObsidianSyncResponse = Result<{ obsidian_sync_enabled: boolean }>;
+export type GetObsidianVaultPathResponse = Result<{ obsidian_vault_path: string }>;
+export type ObsidianConflict = { vaultRelPath: string; detectedAt: string; reason: string };
+export type GetObsidianConflictsResponse = Result<{ conflicts: Record<string, ObsidianConflict> }>;
 export type GetAiPromptsResponse = Result<{ summarization: string }>;
 
 export type GetAiProviderResponse = Result<{
@@ -551,7 +590,7 @@ export type GetAiProviderResponse = Result<{
   bedrock_supported_models: string[];
 }>;
 
-export type AuthStatusResponse = Result<{ connected: boolean }>;
+export type AuthStatusResponse = Result<{ connected: boolean; email?: string | null }>;
 export type GetCalendarEventsResponse =
   | { success: true; events: CalendarEvent[] }
   | { success: false; needsAuth: true }
@@ -564,6 +603,25 @@ export type CheckForUpdatesResponse = Result<{
   releaseUrl: string;
   releaseName: string;
   downloadUrl: string | null;
+  // macOS only: false when this OS is below the app's launch floor (14.4), so
+  // an available update can't be auto-installed and the About tab explains that
+  // instead of offering a broken Restart (#432). Absent/true elsewhere.
+  osUpdateEligible?: boolean;
+}>;
+
+// downloadedVersion is null until a download finishes (or after one already
+// installed). downloadPercent is non-null only while a download is actively
+// in flight — cleared once it lands in downloadedVersion. Lets a freshly-
+// mounted About tab recover either state instead of only reacting to
+// whichever one-shot 'update-available'/'update-download-progress'/
+// 'update-downloaded' IPC event fires while it happens to be mounted.
+export type GetUpdateStatusResponse = Result<{
+  downloadedVersion: string | null;
+  downloadPercent: number | null;
+  // The last surfaced auto-updater error, so a freshly-mounted About tab can
+  // rehydrate a failed background update instead of only reacting to the
+  // one-shot 'update-error' event. Null when the last cycle didn't fail.
+  downloadError: string | null;
 }>;
 
 // ---------- event payloads ----------
@@ -619,6 +677,11 @@ export interface ProcessingCompleteEvent {
    *  reprocess banner regardless of whether STREAM_ERROR or a non-zero exit
    *  ended it. */
   report?: boolean;
+  /** True when summarization actually ran (STREAM_COMPLETE), i.e. the note has
+   *  generated notes. False/absent on the transcript-only path (auto_summarize
+   *  off → SUMMARY_SKIPPED). Drives whether the renderer fires "Note ready" vs
+   *  the "Transcript ready — generate notes?" prompt (#bug2/#bug3). */
+  notesGenerated?: boolean;
 }
 export interface QueryChunkEvent {
   queryId: string;
@@ -659,6 +722,18 @@ export interface ParakeetPullCompleteEvent {
   success: boolean;
   error?: string;
 }
+/** Byte-level progress from the onboarding wizard's local summarization-model
+ *  download (main.js 'setup-ollama-and-model'). Dedicated to the Setup flow -
+ *  distinct from the Settings model-pull events, whose payload is a
+ *  { model, progress: string } string. Ollama streams per-blob progress, so
+ *  `pct` can step back toward 0 as each new layer starts; the label carries the
+ *  current phase alongside the bar. */
+export interface SetupOllamaProgressEvent {
+  status: string;
+  pct: number;
+  completed: number;
+  total: number;
+}
 
 // ---------- live transcript ----------
 export interface LiveSegment {
@@ -679,6 +754,11 @@ export interface LiveSegment {
 export type LiveTranscriptStateResponse = Result<{
   sessionName: string | null;
   segments: LiveSegment[];
+  /** Finalised segments carried over from the previous recording into this
+   *  same note on a resume/continue. Display-only — rendered before the live
+   *  tail so the bar shows earlier speech instead of starting blank. Static
+   *  for the session's lifetime; empty on a fresh (non-continued) recording. */
+  priorSegments?: LiveSegment[];
   /** True once the Python side has loaded the Parakeet model. Before this
    *  flips, the UI should show a model-loading state instead of an empty
    *  "no speech yet" panel — the difference matters for first-launch UX. */
@@ -711,6 +791,9 @@ export interface UpdateProgressEvent {
 export interface UpdateDownloadedEvent {
   version: string;
 }
+export interface UpdateErrorEvent {
+  message: string;
+}
 export interface ShortcutStartRecordingEvent {
   sessionName: string | null;
 }
@@ -725,10 +808,6 @@ export interface StenoaiBridge {
 
   app: {
     getVersion: RequestFn<[], AppVersionResponse>;
-    /** Screen Recording permission changes don't apply to an already-running
-     *  process on macOS — this is the one-click "apply it now" follow-up.
-     *  Never actually resolves (the process exits first). */
-    relaunch: RequestFn<[], void>;
   };
 
   window: { focus: SendFn<[]>; readyToShow: SendFn<[]> };
@@ -757,17 +836,14 @@ export interface StenoaiBridge {
     triggerWizard: RequestFn<[], Result<Record<string, unknown>>>;
   };
 
+  privacy: {
+    getNoticeSeen: RequestFn<[], GetPrivacyNoticeSeenResponse>;
+    markNoticeSeen: RequestFn<[], Result<{ privacy_notice_seen: boolean }>>;
+  };
+
   perm: {
     checkMicrophone: RequestFn<[], MicPermissionResponse>;
     requestMicrophone: RequestFn<[], MicPermissionGrantResponse>;
-    /** macOS only: safely triggers the native prompt for a 'not-determined'
-     *  user by calling desktopCapturer.getSources() in an ordinary, properly
-     *  try/caught main-process handler — deliberately NOT the same code path
-     *  recording capture uses (see main.js for why that one can't do this). */
-    requestScreenRecording: RequestFn<[], ScreenRecordingPermissionResponse>;
-    /** Deep-links to System Settings > Screen Recording — macOS won't
-     *  re-prompt once denied/restricted, so this is the only way back. */
-    openScreenRecordingSettings: RequestFn<[], Result<Record<string, never>>>;
   };
 
   recording: {
@@ -792,12 +868,6 @@ export interface StenoaiBridge {
       Result<{
         supported: boolean;
         osVersion: string;
-        screenPermission: string;
-        // Screen Recording permission as of process launch (macOS only;
-        // frozen at startup — a mid-session grant only takes effect after a
-        // relaunch, so consumers gating loopback usability must read this,
-        // not the live `screenPermission`).
-        screenPermissionAtLaunch: string;
         experimental?: boolean;
         platform?: string;
       }>
@@ -835,15 +905,37 @@ export interface StenoaiBridge {
     update: RequestFn<[summaryFile: string, patch: UpdateMeetingPatch], UpdateMeetingResponse>;
     revealFolder: RequestFn<[filePath: string], Result<Record<string, never>>>;
     delete: RequestFn<[meeting: Meeting], DeleteMeetingResponse>;
+    undoDelete: RequestFn<[id: string], Result<{ meeting: Meeting }>>;
+    commitDelete: RequestFn<[id: string], Result<Record<string, never>>>;
+    listPendingDeletes: RequestFn<[], ListPendingDeletesResponse>;
     reprocess: RequestFn<
       [summaryFile: string, regenTitle: boolean, name: string],
       Result<{ message: string }>
     >;
+    /** Re-run transcription on the source recording (#266) with the current
+     *  settings, then re-summarise. Only wired when `recordingAvailable` is true. */
+    retranscribe: RequestFn<[summaryFile: string, name: string], Result<{ message: string }>>;
+    /** Whether the source recording for a note still exists on disk, gating the
+     *  re-transcribe action (available only when keep-recordings was on). */
+    recordingAvailable: RequestFn<[summaryFile: string], Result<{ available: boolean }>>;
     saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
-    exportTranscript: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
+    exportTranscript: RequestFn<
+      [defaultFilename: string, content: string],
+      Result<{ path: string }>
+    >;
+    exportNotePdf: RequestFn<
+      [defaultFilename: string, html: string],
+      Result<{ path: string }>
+    >;
     regenTitle: RequestFn<[summaryFile: string, name: string], Result<Record<string, never>>>;
-    generateReport: RequestFn<[summaryFile: string, templateId: string], Result<{ message: string }>>;
-    setActiveReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
+    generateReport: RequestFn<
+      [summaryFile: string, templateId: string],
+      Result<{ message: string }>
+    >;
+    setActiveReport: RequestFn<
+      [summaryFile: string, reportId: string],
+      Result<Record<string, never>>
+    >;
     deleteReport: RequestFn<[summaryFile: string, reportId: string], Result<Record<string, never>>>;
   };
 
@@ -866,10 +958,7 @@ export interface StenoaiBridge {
     updateIcon: RequestFn<[id: string, icon: string], Result<Record<string, never>>>;
     delete: RequestFn<[id: string], Result<Record<string, never>>>;
     reorder: RequestFn<[ids: string[]], Result<Record<string, never>>>;
-    addMeeting: RequestFn<
-      [summaryFile: string, folderId: string],
-      Result<Record<string, never>>
-    >;
+    addMeeting: RequestFn<[summaryFile: string, folderId: string], Result<Record<string, never>>>;
     removeMeeting: RequestFn<
       [summaryFile: string, folderId: string],
       Result<Record<string, never>>
@@ -926,14 +1015,23 @@ export interface StenoaiBridge {
   settings: {
     getNotifications: RequestFn<[], GetNotificationsResponse>;
     setNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getRecordHotkey: RequestFn<[], GetRecordHotkeyResponse>;
+    setRecordHotkey: RequestFn<[v: boolean], SetRecordHotkeyResponse>;
     getTelemetry: RequestFn<[], GetTelemetryResponse>;
-    setTelemetry: RequestFn<[v: boolean, source: TelemetryToggleSource], Result<Record<string, never>>>;
+    setTelemetry: RequestFn<
+      [v: boolean, source: TelemetryToggleSource],
+      Result<Record<string, never>>
+    >;
     getDockIcon: RequestFn<[], GetDockIconResponse>;
     setDockIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getMenuBarIcon: RequestFn<[], GetMenuBarIconResponse>;
+    setMenuBarIcon: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSystemAudio: RequestFn<[], GetSystemAudioResponse>;
     setSystemAudio: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getAutoDetectMeetings: RequestFn<[], GetAutoDetectMeetingsResponse>;
     setAutoDetectMeetings: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getPremeetingNotifications: RequestFn<[], GetPremeetingNotificationsResponse>;
+    setPremeetingNotifications: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getLaunchOnLogin: RequestFn<[], GetLaunchOnLoginResponse>;
     setLaunchOnLogin: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getWhisperModel: RequestFn<[], GetWhisperModelResponse>;
@@ -942,6 +1040,8 @@ export interface StenoaiBridge {
     setKeepRecordings: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getAutoSummarize: RequestFn<[], GetAutoSummarizeResponse>;
     setAutoSummarize: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getAutoInstallWhenIdle: RequestFn<[], GetAutoInstallWhenIdleResponse>;
+    setAutoInstallWhenIdle: RequestFn<[v: boolean], Result<Record<string, never>>>;
     getSilenceAutoStop: RequestFn<[], GetSilenceAutoStopResponse>;
     setSilenceAutoStopEnabled: RequestFn<[v: boolean], SetSilenceAutoStopEnabledResponse>;
     setSilenceAutoStopMinutes: RequestFn<[v: number], SetSilenceAutoStopMinutesResponse>;
@@ -949,9 +1049,8 @@ export interface StenoaiBridge {
       [payload: { minutes: number; sessionName: string | null }],
       Result<Record<string, never>>
     >;
-    /** Fired at recording start when loopback is skipped specifically because
-     *  Screen Recording permission isn't granted (see main.js — not fired for
-     *  the toggle-off or OS-unsupported cases, which aren't a surprise). */
+    /** Fired when an enabled loopback acquisition genuinely fails; not fired
+     *  for the toggle-off or OS-unsupported cases. */
     showSystemAudioMicOnlyNotification: RequestFn<[], Result<Record<string, never>>>;
     showNoteReadyNotification: RequestFn<
       [
@@ -963,6 +1062,20 @@ export interface StenoaiBridge {
         },
       ],
       Result<Record<string, never>>
+    >;
+    /** Transcript-only note finished transcription with no notes generated
+     *  (auto_summarize off). Prompts "Generate notes?" — the action starts
+     *  generation in the background, a body tap opens the note. Returns `shown`
+     *  for the notifications_enabled gate. (#bug2/#bug3) */
+    showTranscriptReadyNotification: RequestFn<
+      [
+        payload: {
+          title?: string;
+          summaryFile?: string | null;
+          name?: string | null;
+        },
+      ],
+      Result<{ shown?: boolean }>
     >;
     /** Design-for-test seam for the pre-meeting notification (production fire
      *  path is the main-side scheduler). Returns `shown` for the gate/suppression. */
@@ -979,8 +1092,17 @@ export interface StenoaiBridge {
     getStoragePath: RequestFn<[], StoragePathResponse>;
     setStoragePath: RequestFn<[p: string], Result<Record<string, never>>>;
     pickStorageFolder: RequestFn<[], PickStorageFolderResponse>;
+    getObsidianSync: RequestFn<[], GetObsidianSyncResponse>;
+    setObsidianSync: RequestFn<[v: boolean], Result<Record<string, never>>>;
+    getObsidianVaultPath: RequestFn<[], GetObsidianVaultPathResponse>;
+    setObsidianVaultPath: RequestFn<[p: string], Result<Record<string, never>>>;
+    pickObsidianVaultFolder: RequestFn<[], PickStorageFolderResponse>;
+    getObsidianConflicts: RequestFn<[], GetObsidianConflictsResponse>;
     getAiPrompts: RequestFn<[], GetAiPromptsResponse>;
-    saveDiagnostics: RequestFn<[defaultFilename: string, content: string], Result<{ path: string }>>;
+    saveDiagnostics: RequestFn<
+      [defaultFilename: string, content: string],
+      Result<{ path: string }>
+    >;
   };
 
   ai: {
@@ -1015,6 +1137,7 @@ export interface StenoaiBridge {
 
   updates: {
     check: RequestFn<[], CheckForUpdatesResponse>;
+    getStatus: RequestFn<[], GetUpdateStatusResponse>;
     openReleasePage: RequestFn<[url: string], Result<Record<string, never>>>;
     install: SendFn<[]>;
   };
@@ -1040,12 +1163,15 @@ export interface StenoaiBridge {
     whisperPullComplete: Subscribe<WhisperPullCompleteEvent>;
     parakeetPullProgress: Subscribe<ParakeetPullProgressEvent>;
     parakeetPullComplete: Subscribe<ParakeetPullCompleteEvent>;
+    setupOllamaProgress: Subscribe<SetupOllamaProgressEvent>;
     liveTranscriptReady: Subscribe<LiveTranscriptReadyEvent>;
     liveTranscriptChunk: Subscribe<LiveTranscriptChunkEvent>;
     liveTranscriptError: Subscribe<LiveTranscriptErrorEvent>;
     updateAvailable: Subscribe<UpdateAvailableEvent>;
     updateDownloadProgress: Subscribe<UpdateProgressEvent>;
     updateDownloaded: Subscribe<UpdateDownloadedEvent>;
+    updateError: Subscribe<UpdateErrorEvent>;
+    updateErrorCleared: Subscribe<void>;
     googleAuthChanged: Subscribe<{ connected: boolean }>;
     outlookAuthChanged: Subscribe<{ connected: boolean }>;
     shortcutStartRecording: Subscribe<ShortcutStartRecordingEvent>;
@@ -1056,16 +1182,21 @@ export interface StenoaiBridge {
     autoPauseRequested: Subscribe<void>;
     autoResumeRequested: Subscribe<void>;
     autoSummariseRequested: Subscribe<void>;
+    /** Main asks the renderer to generate notes for a transcript-only note in
+     *  the background (from the "Generate notes" action on the transcript-ready
+     *  notification). Renderer runs the same reprocess path as GenerateNotesBar. */
+    generateNotesRequested: Subscribe<{ summaryFile: string; name?: string | null }>;
     navigateToMeeting: Subscribe<{ summaryFile: string }>;
     trayOpenSettings: Subscribe<void>;
     showQuitDialog: Subscribe<{ type: 'recording' | 'processing'; jobCount?: number }>;
     showNotification: Subscribe<{
       id?: string;
       title: string;
-      time?: string;
       body?: string;
+      time?: string;
       meeting_url?: string;
       attendees?: string;
+      premeeting?: boolean;
       iconType?: 'app' | 'alert' | 'success' | 'recording';
       color?: string;
       actions?: { id: string; text: string; type?: 'primary' | 'secondary' }[];

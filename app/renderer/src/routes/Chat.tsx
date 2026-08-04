@@ -2,6 +2,7 @@ import * as React from 'react';
 import {
   ArrowUp,
   ChevronRight,
+  History,
   Sparkles,
 } from 'lucide-react';
 import { ChatHistoryRow } from '@/components/ChatHistoryRow';
@@ -436,10 +437,7 @@ export function Chat() {
               }}
             >
               <div className="mb-3 flex justify-center">
-                <Sparkles
-                  className="size-6"
-                  style={{ color: '#A855F7', opacity: 0.8 }}
-                />
+                <History className="size-4 text-muted-foreground" />
               </div>
               Your past chats will show up here.
             </div>

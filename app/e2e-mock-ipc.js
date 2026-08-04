@@ -143,6 +143,28 @@ const seededMeeting = () =>
     ? { ...SEED_MEETING, reports: [SEED_REPORT], active_report: seedActiveReport }
     : SEED_MEETING;
 
+/**
+ * Carried-over segments for the resume/continue case, keyed off
+ * STENOAI_E2E_SEED_PRIOR_SEGMENTS: `1` is one earlier recording, `twice` is a
+ * note continued a second time - two recordings' worth, each numbering its
+ * segments from its own start, which is what produces repeated (start, speaker)
+ * pairs in a single carried-over list.
+ */
+function seedPriorSegments(rec) {
+  const mode = process.env.STENOAI_E2E_SEED_PRIOR_SEGMENTS;
+  if (!mode || !(rec.active || rec.processing)) return [];
+  const first = [
+    { text: 'earlier bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+    { text: 'earlier bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+  ];
+  if (mode !== 'twice') return first;
+  return [
+    ...first,
+    { text: 'second session bit one', start: 3, end: 5, isFinal: true, speaker: 'You' },
+    { text: 'second session bit two', start: 6, end: 8, isFinal: true, speaker: 'Others' },
+  ];
+}
+
 function install({ ipcMain }) {
   // In-memory stand-in for the org session + provider config that the real
   // handlers persist to disk. Mutated by the org-login / org-logout / set-ai
@@ -155,6 +177,7 @@ function install({ ipcMain }) {
     cloudProvider: 'openai',
     cloudModel: 'gpt-4o',
     remoteUrl: '', // remote Ollama URL (empty = not configured)
+    autoInstallWhenIdle: true, // idle auto-install toggle (config default on)
   };
 
   // In-memory recording state machine for the pill-dock T1: start/pause/
@@ -167,6 +190,10 @@ function install({ ipcMain }) {
     paused: false,
     processing: false,
     sessionName: null,
+    // The append/resume target (summary file) of the active recording, mirrored
+    // into get-queue-status.recordingSummaryFile so the detail view can match
+    // "recording this note" by identity (not display name).
+    appendTo: null,
     startedAt: 0,
     pausedAt: 0,
   };
@@ -175,6 +202,12 @@ function install({ ipcMain }) {
   // tab in T1 (summaryFile → { user_notes }). The real handler persists to the
   // note file; the T1 seeds are consts, so we overlay here instead.
   const meetingOverlay = {};
+
+  // In-flight soft-deletes (#234), id → the deleted meeting. Mirrors main's
+  // pendingDelete map just far enough for undo to hand the row back.
+  const pendingDeletes = {};
+  let pendingDeleteSeq = 0;
+
   const applyOverlay = (m) => {
     if (!m || !m.session_info) return m;
     const o = meetingOverlay[m.session_info.summary_file];
@@ -185,17 +218,19 @@ function install({ ipcMain }) {
   // real ipcMain.handle callback. Mirror the real handlers' return shapes from
   // app/main.js (get-ai-provider ~5950, org-* ~7990).
   const MOCKS = {
-    'start-recording-ui': async (_event, name) => {
+    'start-recording-ui': async (_event, name, _trigger, appendTo) => {
       rec.active = true;
       rec.paused = false;
       rec.processing = false;
       rec.sessionName = name && String(name).trim() ? String(name).trim() : 'Note';
+      rec.appendTo = appendTo && String(appendTo).trim() ? String(appendTo).trim() : null;
       rec.startedAt = Date.now();
       return { success: true, sessionName: rec.sessionName };
     },
     'stop-recording-ui': async () => {
       rec.active = false;
       rec.paused = false;
+      rec.appendTo = null;
       // Park in "processing" — T1 has no backend to complete it; the spec only
       // asserts the renderer's optimistic transition to the processing dock.
       rec.processing = true;
@@ -223,18 +258,67 @@ function install({ ipcMain }) {
       }
       return { success: true };
     },
-    'get-queue-status': async () => ({
+    // Scripted-sequence seam for the processing-watchdog T1: when
+    // STENOAI_E2E_QUEUE_STATE_PATH points at a JSON file, each poll returns that
+    // file's contents (merged over the idle defaults) so a spec can drive the
+    // real stop→enqueue state SEQUENCE over time (optimistic processing → a
+    // legitimate idle+empty handoff gap → late enqueue) by rewriting the file
+    // between polls. Falls through to the rec-based machine if the file is
+    // absent/unreadable (e.g. not yet written on the first poll).
+    'get-queue-status': async () => {
+      const statePath = process.env.STENOAI_E2E_QUEUE_STATE_PATH;
+      if (statePath) {
+        try {
+          const override = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+          return {
+            success: true,
+            isProcessing: false,
+            queueSize: 0,
+            currentJob: null,
+            currentReprocesses: [],
+            hasRecording: false,
+            isPaused: false,
+            elapsedSeconds: 0,
+            sessionName: null,
+            recordingSummaryFile: null,
+            ...override,
+          };
+        } catch {
+          /* file not ready yet — fall through to the rec-based default below */
+        }
+      }
+      return {
+        success: true,
+        isProcessing: rec.processing,
+        queueSize: 0,
+        currentJob: rec.processing ? rec.sessionName : null,
+        currentReprocesses: [],
+        hasRecording: rec.active,
+        isPaused: rec.paused,
+        elapsedSeconds: rec.active
+          ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
+          : 0,
+        sessionName: rec.active || rec.processing ? rec.sessionName : null,
+        recordingSummaryFile: rec.active ? rec.appendTo : null,
+      };
+    },
+
+    // Live transcript backfill. Real main.js populates liveTranscriptState from
+    // the ASR sidecar (a model) — unreachable in T1 — so we seed it here. With
+    // STENOAI_E2E_SEED_PRIOR_SEGMENTS=1 it returns carried-over priorSegments
+    // (the resume/continue case) so the generate-notes-bar T1 can assert the
+    // live bar shows earlier speech instead of starting blank. `=twice` seeds
+    // the note that has been continued a second time: main.js prepends the
+    // existing priors on every continue (main.js, `carryPrior`), and each
+    // recording's `start` counts from zero again, so the carried-over text
+    // legitimately contains repeated offsets for the same speaker.
+    'get-live-transcript-state': async () => ({
       success: true,
-      isProcessing: rec.processing,
-      queueSize: 0,
-      currentJob: rec.processing ? rec.sessionName : null,
-      currentReprocesses: [],
-      hasRecording: rec.active,
-      isPaused: rec.paused,
-      elapsedSeconds: rec.active
-        ? Math.floor(((rec.paused ? rec.pausedAt : Date.now()) - rec.startedAt) / 1000)
-        : 0,
       sessionName: rec.active || rec.processing ? rec.sessionName : null,
+      segments: [],
+      priorSegments: seedPriorSegments(rec),
+      ready: true,
+      error: null,
     }),
 
     // Engine is static per launch; STENOAI_E2E_MOCK_ENGINE lets the pill-dock
@@ -273,6 +357,19 @@ function install({ ipcMain }) {
       return { success: true, ai_provider: provider };
     },
 
+    // Stateful idle auto-install toggle: set updates the in-memory value that
+    // get returns, like the other stateful setting mocks — so a T1 flip is
+    // observable on the next get (and the switch isn't stuck disabled). Lives
+    // in MOCKS (which shadows DEFAULTS) so this is the single source.
+    'get-auto-install-when-idle': async () => ({
+      success: true,
+      auto_install_when_idle: state.autoInstallWhenIdle,
+    }),
+    'set-auto-install-when-idle': async (_event, enabled) => {
+      state.autoInstallWhenIdle = !!enabled;
+      return { success: true, auto_install_when_idle: state.autoInstallWhenIdle };
+    },
+
     // Seed meetings for the specs that need them, gated per env so the
     // org/shared-notes specs keep an empty Home. STENOAI_E2E_SEED_MEETING (one
     // known meeting) drives the transcript-export T1; STENOAI_E2E_SEED_MEETINGS
@@ -303,6 +400,15 @@ function install({ ipcMain }) {
       return { success: true };
     },
 
+    // Mirrors main.js's set-record-hotkey shape (enabled + live registered
+    // flag). Stateless under mock IPC — the real registration is asserted by
+    // the T2 spec; here it just keeps the toggle mutation from erroring.
+    'set-record-hotkey': async (_event, enabled) => ({
+      success: true,
+      enabled,
+      registered: !!enabled,
+    }),
+
     // The detail route loads via get-meeting (the lazy per-meeting fetch), not
     // by filtering list-meetings — answer it with the same seeded meeting so the
     // transcript-export detail route resolves and renders the transcript actions.
@@ -329,6 +435,33 @@ function install({ ipcMain }) {
         : { success: false, error: 'meeting not found' };
     },
 
+    // Soft-delete (#234). The permissive unknown-channel default would answer
+    // `{success:true}` with no `id`, and useDeleteMeeting skips the Undo toast
+    // without one — so the delete-UX T1 needs the real response shape here.
+    // State is per-launch: the id counter and store let undo/commit key off it
+    // the way main's pendingDelete map does.
+    'delete-meeting': async (_event, meeting) => {
+      const id = `e2e-delete-${++pendingDeleteSeq}`;
+      pendingDeletes[id] = meeting;
+      // Long enough that the window can't expire mid-assertion; the spec drives
+      // undo/dismiss explicitly rather than waiting this out.
+      return { success: true, id, deadline: Date.now() + 60_000 };
+    },
+    'undo-delete-meeting': async (_event, id) => {
+      const meeting = pendingDeletes[id];
+      if (!meeting) return { success: false, error: 'no pending delete' };
+      delete pendingDeletes[id];
+      return { success: true, meeting };
+    },
+    'commit-delete-meeting': async (_event, id) => {
+      delete pendingDeletes[id];
+      return { success: true };
+    },
+    // Nothing survives a mock launch, so there is never a window to restore —
+    // but answer with the real shape (`pending: []`) rather than letting the
+    // permissive default hand the toast an undefined array to map over.
+    'list-pending-deletes': async () => ({ success: true, pending: [] }),
+
     // My notes autosave: persist the overlay so a follow-up get-meeting sees
     // the edit (mirrors the real update-meeting body-section upsert).
     'update-meeting': async (_event, summaryFile, patch) => {
@@ -352,6 +485,29 @@ function install({ ipcMain }) {
       const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
       if (!seamPath) return { success: false, error: EXPORT_CANCELED };
       fs.writeFileSync(seamPath, content, 'utf-8');
+      return { success: true, path: seamPath };
+    },
+
+    // Notification handlers — the real ones return { success, shown } after the
+    // notifications_enabled gate; the mock has no OS toast, so it just reports
+    // "shown" so a T1 that drives the transcript-ready branch (#bug2/#bug3) sees
+    // a realistic shape instead of the permissive fallback. (The gate itself is
+    // covered by the T2 spec against the real handler.)
+    'show-transcript-ready-notification': async () => ({ success: true, shown: true }),
+
+    // Mirror the real export-note-pdf handler's seam. The mock has no Chromium
+    // to rasterise HTML, so instead of a PDF it writes the renderer-built HTML
+    // verbatim to STENOAI_E2E_EXPORT_PATH — that lets a T1 spec assert the exact
+    // document the renderer produced (the HTML→PDF render is covered by the T2
+    // spec against the real handler). Without the seam there's no dialog here,
+    // so report a cancel.
+    'export-note-pdf': async (_event, _defaultFilename, html) => {
+      if (typeof html !== 'string' || html.length === 0) {
+        return { success: false, error: 'No notes content to export.' };
+      }
+      const seamPath = process.env.STENOAI_E2E_EXPORT_PATH;
+      if (!seamPath) return { success: false, error: EXPORT_CANCELED };
+      fs.writeFileSync(seamPath, html, 'utf-8');
       return { success: true, path: seamPath };
     },
 
@@ -418,6 +574,48 @@ function install({ ipcMain }) {
       state.provider = 'local';
       return { success: true };
     },
+
+    // Onboarding permission gate. The real handlers ask macOS; under mock IPC we
+    // grant so the setup-progress spec can run past the first step. Harmless for
+    // other specs, none of which invoke these channels.
+    'check-microphone-permission': async () => ({ success: true, status: 'granted' }),
+    'request-microphone-permission': async () => ({ success: true, granted: true }),
+
+    // Onboarding model downloads. With STENOAI_E2E_SETUP_PROGRESS=1 the handler
+    // emits the same renderer progress events the real handlers do, then holds
+    // the step in its 'running' state (the promise never resolves) so the
+    // download-progress spec can observe the bar. The app is torn down at test
+    // end. Without the flag they resolve success, matching the permissive
+    // default so nothing else changes.
+    'setup-parakeet': async (event) => {
+      if (process.env.STENOAI_E2E_SETUP_PROGRESS === '1') {
+        const wc = event && event.sender;
+        if (wc && !wc.isDestroyed()) {
+          // Parakeet exposes only coarse stages (no byte counts).
+          wc.send('parakeet-pull-progress', { stage: 'downloading' });
+        }
+        return new Promise(() => {});
+      }
+      return { success: true, message: 'Parakeet model ready' };
+    },
+    'setup-ollama-and-model': async (event) => {
+      if (process.env.STENOAI_E2E_SETUP_PROGRESS === '1') {
+        const wc = event && event.sender;
+        if (wc && !wc.isDestroyed()) {
+          // Two records: the phase change (manifest -> blob) and a byte-progress
+          // line, mirroring the real { status, pct, completed, total } payload.
+          wc.send('setup-ollama-progress', { status: 'pulling manifest', pct: 0, completed: 0, total: 0 });
+          wc.send('setup-ollama-progress', {
+            status: 'pulling sha256:abcd',
+            pct: 42,
+            completed: 42,
+            total: 100,
+          });
+        }
+        return new Promise(() => {});
+      }
+      return { success: true, message: 'Ollama and AI model ready' };
+    },
   };
 
   // Static shapes for the channels that fire on first paint and would throw in
@@ -443,8 +641,94 @@ function install({ ipcMain }) {
         ]
       : [];
 
+  // Matches src/parakeet.py's platform dispatch: MLX on darwin, ONNX
+  // elsewhere. Mock IDs should track that split so a T1 run on Windows/Linux
+  // CI doesn't advertise a macOS-only model as installed/current.
+  const PARAKEET_MODEL_ID =
+    process.platform === 'darwin'
+      ? 'mlx-community/parakeet-tdt-0.6b-v3'
+      : 'istupakov/parakeet-tdt-0.6b-v3-onnx';
+
+  // Mirrors main.js: a successful check that finds no update settles an earlier
+  // FAILED check, and it does so in the state the About tab rehydrates from —
+  // so the T1 spec asserts the contract (check clears it for good), not just a
+  // local setState. Seeded by STENOAI_E2E_SEED_UPDATE_ERROR.
+  let seededUpdateError =
+    process.env.STENOAI_E2E_SEED_UPDATE_ERROR === '1'
+      ? "Steno couldn't reach the update server. Check your connection — it will try again later."
+      : null;
+
+  // Only the FIRST get-update-status is delayed, so the About tab's mount-time
+  // request is still in flight when the check that settles the error completes,
+  // and its stale reply lands last. Delaying every call would let the check's
+  // own re-read arrive after it and paper over the bug being guarded against.
+  let slowUpdateStatusCallsLeft = process.env.STENOAI_E2E_SLOW_UPDATE_STATUS === '1' ? 1 : 0;
+
   const DEFAULTS = {
-    'get-app-version': '0.0.0-e2e',
+    'get-app-version': { success: true, version: '0.0.0-e2e', name: 'Steno' },
+    // Read-only display poll for the About tab's "Check for Updates" button
+    // (settings-about.t1). Fully hermetic — no real GitHub call under mock
+    // IPC, so this is the only source of truth for that flow in T1.
+    'check-for-updates': () => {
+      // STENOAI_E2E_SEED_UPDATE_BLOCKED_OS=1 simulates an under-floor Mac: an
+      // update exists on GitHub but this OS is below the 14.4 launch floor, so
+      // osUpdateEligible is false and the About tab must explain that instead of
+      // offering a broken install/download nudge (#432, settings-about.t1).
+      if (process.env.STENOAI_E2E_SEED_UPDATE_BLOCKED_OS === '1') {
+        return {
+          success: true,
+          updateAvailable: true,
+          currentVersion: '0.0.0-e2e',
+          latestVersion: '9.9.9',
+          releaseUrl: 'https://github.com/stenolabs/stenoai/releases/latest',
+          releaseName: 'Version 9.9.9',
+          downloadUrl: null,
+          osUpdateEligible: false,
+        };
+      }
+      // Up to date, and that settles a previously failed check — main.js
+      // clears the persisted error in exactly this branch, so the mock does
+      // too and the spec can assert it stays gone across a remount.
+      seededUpdateError = null;
+      return {
+        success: true,
+        updateAvailable: false,
+        currentVersion: '0.0.0-e2e',
+        latestVersion: '0.0.0-e2e',
+        releaseUrl: '',
+        releaseName: '',
+        downloadUrl: null,
+        osUpdateEligible: true,
+      };
+    },
+    // AboutTab's mount-time re-seed effect. Without an explicit stub, both
+    // fields fall through to the permissive default (undefined, not null),
+    // and `downloadPercent !== null` reads true for undefined — showing a
+    // stray "Downloading update… undefined%" bar on first paint.
+    // STENOAI_E2E_SEED_UPDATE_ERROR seeds a persisted failed background update
+    // so the About tab's mount-time rehydration (settings-about.t1) can assert
+    // the failure is restored on navigation, not just from the live one-shot
+    // 'update-error' event.
+    'get-update-status': async () => {
+      // Answer with the state as of the REQUEST, not as of the reply. That is
+      // what main.js does (it reads pendingUpdateError when the handler runs),
+      // and it is what makes STENOAI_E2E_SLOW_UPDATE_STATUS a real race rather
+      // than a sleep.
+      const snapshot = seededUpdateError;
+      if (slowUpdateStatusCallsLeft > 0) {
+        slowUpdateStatusCallsLeft -= 1;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      return {
+        success: true,
+        downloadedVersion: null,
+        downloadPercent: null,
+        // main.js sends the About tab a finished sentence, not the raw
+        // electron-updater text (update-error-copy.js), so the seed mirrors that
+        // shape and the spec asserts what a user would actually read.
+        downloadError: snapshot,
+      };
+    },
     // Fires on first paint once signed in (Sidebar + RouteView gate the
     // Shared notes feature on it). Default to feature-enabled to match the
     // adapter's default and keep the org-lock spec's UI unchanged. A spec can
@@ -458,19 +742,173 @@ function install({ ipcMain }) {
     },
     'list-folders': { success: true, folders: [] },
     'get-calendar-events': { success: true, events: [] },
+    // Without these, both new toggles fall through to the permissive
+    // {success:true} default (no show_menu_bar_icon/premeeting_notifications_enabled
+    // field), and GeneralTab's disabled={...data === undefined} leaves both
+    // switches permanently disabled under mock IPC.
+    'get-menu-bar-icon': { success: true, show_menu_bar_icon: true },
+    'get-premeeting-notifications': { success: true, premeeting_notifications_enabled: true },
+    // Global record shortcut toggle (GeneralTab's "Global record shortcut"
+    // row + the hero copy). Default enabled + registered so T1 renderer specs
+    // render the ON state without a real globalShortcut registration.
+    'get-record-hotkey': { success: true, enabled: true, registered: true },
     // parakeet-status lives in MOCKS (env-gated installed flag).
     // Transcribe tab reads this on first paint. (The engine itself moved to
     // MOCKS so STENOAI_E2E_MOCK_ENGINE can override it; default parakeet keeps
     // the language picker enabled — parakeet-language-picker.t1.)
     'get-language': { success: true, language: 'auto' },
+    // Real production catalog (src/whisper_models.py / src/parakeet_models.py)
+    // rather than empty — so the Settings UI's model list actually renders
+    // cards to look at (manual/dev use) instead of always erroring "Could not
+    // load transcription models." Parakeet ships pre-"installed" (matches the
+    // fresh-install default engine); Whisper stays uninstalled so the
+    // Download button state is also visible in the same screen.
     'list-whisper-models': {
       success: true,
-      supported_models: {},
+      supported_models: {
+        'large-v3-turbo': {
+          name: 'Whisper Large V3 Turbo',
+          size: '1.6GB',
+          installed: false,
+          description:
+            'Best accuracy Whisper model. Supports 99 languages including non-European languages such as Chinese, Japanese, Arabic, Korean, and Hindi.',
+          speed: 'medium',
+          quality: 'excellent',
+        },
+      },
       current_model: '',
       provider: 'whisper',
     },
+    'list-parakeet-models': {
+      success: true,
+      supported_models: {
+        [PARAKEET_MODEL_ID]: {
+          name: 'Parakeet TDT v3',
+          size: '572MB',
+          installed: true,
+          description:
+            'Highest quality. Supports live transcription in English and 25 European languages — Spanish, French, German, Italian, Portuguese, Dutch, Russian, Polish, Czech, and 16 others.',
+          speed: 'very fast',
+          quality: 'excellent',
+        },
+      },
+      current_model: PARAKEET_MODEL_ID,
+    },
+    // Summarisation & Chat's local "Model" list (ModelList in AiTab.tsx). Real
+    // production catalog (Config.SUPPORTED_MODELS in src/config.py) so that
+    // section also renders cards to look at under mock IPC instead of always
+    // erroring "Could not reach Ollama." -- the same reasoning as the Whisper/
+    // Parakeet lists above. Only the default model ships "installed"; the
+    // matches config.py's fresh-install default and its deprecated flag.
+    'list-models': {
+      success: true,
+      current_model: 'gemma4:e2b-it-qat',
+      provider: 'local',
+      // A 16 GB Mac: enough for the small models but not gemma4:12b / gpt-oss:20b,
+      // which drives the "May exceed memory" badge (see model-memory.ts, #248).
+      total_ram_gb: 16,
+      supported_models: {
+        'gemma4:e2b-it-qat': {
+          name: 'Gemma 4 E2B (QAT)',
+          size: '4.3GB',
+          params: '2B',
+          description: 'Lightest Gemma 4, quantization-aware, real 128K context (default)',
+          speed: 'fast',
+          quality: 'good',
+          installed: true,
+        },
+        'gemma4:e4b-it-qat': {
+          name: 'Gemma 4 E4B (QAT)',
+          size: '6.1GB',
+          params: '4B',
+          description: 'Quantization-aware E4B — higher quality than E2B at a modest footprint',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'llama3.2:3b': {
+          name: 'Llama 3.2 3B',
+          size: '2GB',
+          params: '3B',
+          description: 'Replaced by Gemma 4 E2B',
+          speed: 'very fast',
+          quality: 'good',
+          deprecated: true,
+          installed: false,
+        },
+        'qwen3.5:9b': {
+          name: 'Qwen 3.5 9B',
+          size: '6.6GB',
+          params: '9B',
+          description: 'Excellent at structured output and action items',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'gemma4:12b-it-qat': {
+          name: 'Gemma 4 12B (QAT)',
+          size: '7.2GB',
+          params: '12B',
+          description: 'Large 256K context, quantization-aware - best for long meetings',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+        'gpt-oss:20b': {
+          name: 'GPT-OSS 20B',
+          size: '14GB',
+          params: '20B',
+          description: 'OpenAI open-weight model with reasoning capabilities',
+          speed: 'medium',
+          quality: 'excellent',
+          installed: false,
+        },
+      },
+    },
+    'get-current-model': { success: true, model: 'gemma4:e2b-it-qat' },
     // get-queue-status lives in MOCKS (stateful recording machine) — its idle
     // shape is identical to the static default that used to sit here.
+    // Settings > Templates renders a row per template with badge/prompt/action
+    // variety (default, locked built-in, unlocked built-in, custom) — an empty
+    // list would only ever show the "New Template" row.
+    'list-templates': {
+      success: true,
+      templates: [
+        {
+          id: 'standard',
+          name: 'Standard Summary',
+          icon: '',
+          prompt: '',
+          language: 'auto',
+          format: 'structured',
+          builtin: true,
+          locked: true,
+        },
+        {
+          id: 'action-items',
+          name: 'Action Items',
+          icon: '',
+          prompt:
+            'Summarise the meeting into a punchy list of action items, each with an owner and a due date if one was mentioned.',
+          language: 'auto',
+          format: 'markdown',
+          builtin: true,
+          locked: false,
+        },
+        {
+          id: 'exec-summary',
+          name: '1:1 Notes',
+          icon: '',
+          prompt:
+            'Write a short executive summary followed by decisions made and open questions still outstanding.',
+          language: 'en',
+          format: 'markdown',
+          builtin: false,
+          locked: false,
+        },
+      ],
+      default_template_id: 'standard',
+    },
   };
 
   const originalHandle = ipcMain.handle.bind(ipcMain);
@@ -480,7 +918,9 @@ function install({ ipcMain }) {
       fn = MOCKS[channel];
     } else if (Object.prototype.hasOwnProperty.call(DEFAULTS, channel)) {
       const value = DEFAULTS[channel];
-      fn = async () => value;
+      // A function-valued default is evaluated per invoke (so it can read
+      // env seeds set for a specific spec); a plain value is returned as-is.
+      fn = typeof value === 'function' ? value : async () => value;
     } else {
       // Unknown channel — resolve permissively so no renderer invoke() rejects
       // with "no handler registered". The real (backend-spawning) handler is

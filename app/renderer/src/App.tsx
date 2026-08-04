@@ -20,6 +20,8 @@ import { BottomDockSlot } from '@/components/BottomDockSlot';
 import { PrimaryDock } from '@/components/PrimaryDock';
 import { useLiveTranscriptOpen } from '@/hooks/liveTranscriptOpenStore';
 import { QuitDialog } from '@/components/QuitDialog';
+import { PrivacyConsentModal } from '@/components/PrivacyConsentModal';
+import { usePrivacyNoticeSeen } from '@/hooks/useSettings';
 import { ImportDropZone } from '@/components/ImportDropZone';
 import { CommandPaletteProvider, useCommandPalette } from '@/components/CommandPalette';
 import { AskBarProvider } from '@/lib/askBarContext';
@@ -38,6 +40,17 @@ export function App() {
   useTheme();
   const route = useRoute();
 
+  // One-time privacy disclosure for upgraders. Show it only when the marker is
+  // explicitly false (existing install predating telemetry/launch-on-login) and
+  // we're NOT on /setup — an upgrader who also lacks a model lands on onboarding,
+  // which discloses the same toggles and marks the notice seen on exit
+  // (Setup.finishOnboarding), so we don't double up. A config-but-no-model
+  // upgrader can see the modal for a sub-second frame before the async /setup
+  // redirect lands; accepted as cosmetic for that rare state (the redirect and
+  // onboarding's mark-seen still make it correct).
+  const privacyNotice = usePrivacyNoticeSeen();
+  const showPrivacyModal = privacyNotice.data === false && route !== '/setup';
+
   React.useLayoutEffect(() => {
     if (typeof window !== 'undefined' && window.stenoai) {
       ipc().window.readyToShow();
@@ -47,6 +60,16 @@ export function App() {
       document.documentElement.dataset.appReady = '1';
     }
   }, []);
+
+  // Reflect the resolved privacy-gate value onto the root element so e2e can
+  // deterministically wait for the query to settle (data-privacy-gate="true"
+  // means the notice was already seen) before asserting the modal's absence,
+  // instead of racing a not-yet-resolved query. Mirrors the data-app-ready
+  // readiness signal; no effect on production behaviour.
+  React.useEffect(() => {
+    if (privacyNotice.data === undefined) return;
+    document.documentElement.dataset.privacyGate = String(privacyNotice.data);
+  }, [privacyNotice.data]);
 
 
 
@@ -190,6 +213,7 @@ export function App() {
       <AskBarProvider>
         <RouteView route={route} />
         <QuitDialog />
+        <PrivacyConsentModal open={showPrivacyModal} />
         <ImportDropZone />
 
         {/* Bottom dock — shared anchor across recording → processing → meeting.

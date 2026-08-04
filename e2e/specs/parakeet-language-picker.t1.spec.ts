@@ -23,10 +23,10 @@ async function openTranscribeLanguagePicker(page: Page) {
   await page.evaluate(() => {
     window.location.hash = '#/settings?tab=transcription';
   });
-  // The Language Select is the only combobox in the Transcribe section (keep-
-  // recordings is a Switch, the model list uses buttons), so scope to the
-  // section rather than relying on document order.
-  const trigger = page.locator('[data-settings-tab="transcription"]').getByRole('combobox');
+  // The Transcribe section now has two comboboxes (Language, and the
+  // Parakeet/Whisper Model picker) — target the Language trigger by testid
+  // rather than relying on it being the only one.
+  const trigger = page.getByTestId('transcription-language-select');
   await expect(trigger).toBeVisible();
   await trigger.click();
 }

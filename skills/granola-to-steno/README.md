@@ -1,6 +1,6 @@
 # granola-to-steno
 
-Originally contributed by @SylvainRamousse in ruzin/stenoai#265, polished for
+Originally contributed by @SylvainRamousse in stenolabs/stenoai#265, polished for
 inclusion in the repo.
 
 A Cowork / Claude **skill** that syncs Granola meeting notes into Steno's

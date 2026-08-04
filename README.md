@@ -7,8 +7,8 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/ruzin/stenoai/actions/workflows/build-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ruzin/stenoai/build-release.yml?style=for-the-badge" alt="Build"></a>
-  <a href="https://github.com/ruzin/stenoai/releases"><img src="https://img.shields.io/github/v/release/ruzin/stenoai?style=for-the-badge" alt="Release"></a>
+  <a href="https://github.com/stenolabs/stenoai/actions/workflows/build-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/stenolabs/stenoai/build-release.yml?style=for-the-badge" alt="Build"></a>
+  <a href="https://github.com/stenolabs/stenoai/releases"><img src="https://img.shields.io/github/v/release/stenolabs/stenoai?style=for-the-badge" alt="Release"></a>
   <a href="https://discord.gg/DZ6vcQnxxu"><img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">
@@ -16,9 +16,9 @@
   <a href="#sponsors"><img src="https://img.shields.io/badge/Sponsors-%E2%9D%A4-EA4AAA?style=for-the-badge" alt="Sponsors"></a>
 </p>
 
-<p align="center">Steno is the privacy-first AI notepad for all your confidential conversations. No cloud, no usage limits and your private data never leaves your premises. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence, finance, legal and C-suite professionals with confidential data needs.</p>
+<p align="center">Steno is the privacy-first AI notepad for all your confidential conversations. No cloud, no usage limits and your private data never leaves your premises. Record, transcribe, summarize, and query your meetings using local AI models. Perfect for government, defence and C-suite professionals with confidential data needs.</p>
 
-<p align="center"><sub>Trusted by users at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Hashicorp</b>, <b>Rutgers</b> & <b>European Union</b>.</sub></p>
+<p align="center"><sub>Trusted by teams at <b>AWS</b>, <b>Deliveroo</b>, <b>Tesco</b>, <b>Hashicorp</b>, <b>Rutgers</b> & <b>European Union</b>.</sub></p>
 
 <div align="center">
   <picture>
@@ -42,10 +42,10 @@
 If you're looking for a hosted desktop recording API, consider checking out [Recall.ai](https://www.recall.ai/product/desktop-recording-sdk?utm_source=github&utm_medium=sponsorship&utm_campaign=ruzin-stenoai), an API that records Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
 
 ## 📢 What's New
-- **2026-07-18** 🎙️ Recording that stays out of your way — a compact transcription pill docks beside the app instead of taking over, Stop lands you on the note instantly, and you can resume recording into any note (it appends). Plus a dedicated **My notes** tab that stays editable alongside the AI summary.
-- **2026-07-18** 🎚️ Microphone selection — choose which input device Steno records from in Settings.
-- **2026-07-18** 🚀 Launch on login — Steno can start hidden when you log in so capture is always ready; opt out in Settings.
-- **2026-07-18** 🌍 Smarter language detection — auto output-language now detects the transcript's language instead of defaulting to English.
+- **2026-08-04** 💎 Sync to Obsidian — mirror your notes into an Obsidian vault folder as Markdown. Turn it on in Settings → Integrations and pick a vault folder. One-way (Steno → vault); notes you edit in Obsidian are never overwritten.
+- **2026-08-03** 🔔 One-tap meeting notes — "Take Notes" starts recording instantly, meetings auto-stop when they end, and a single "Summarise?" tap opens the note and generates it. Recordings are transcript-first now — turn on auto-summarise in Settings → AI for automatic notes.
+- **2026-07-26** 🎙️ System audio without Screen Recording — record both sides of a call with no Screen Recording permission. Now requires macOS 14.4 or later.
+- **2026-07-26** ⬇️ Automatic updates — Steno installs a downloaded update while you're idle and relaunches, never mid-recording. Turn it off in Settings to keep the manual prompt.
 
 
 ## Features
@@ -55,6 +55,7 @@ If you're looking for a hosted desktop recording API, consider checking out [Rec
 - **Auto start/stop meetings** — Steno notices when a meeting starts and offers to take notes, then offers to summarise when it ends. Granola-style frictionless capture.
 - **System audio capture** — Record both sides of virtual meetings, headphones on, no extra setup or virtual cable. Native Core Audio Tap on macOS 14.4+, with selectable microphone input.
 - **Recording that coexists** — A compact transcription pill docks beside the app instead of taking over; Stop lands you on the note instantly and you can resume recording into an existing note (it appends and re-generates on demand).
+- **Global record shortcut** — Start or stop recording from anywhere with `⌘⇧R` (`Ctrl+Shift+R` on Windows). Toggle it off in Settings if it clashes with another app. On macOS, power users can additionally bind any key of their own via the `stenoai://record/start` / `record/stop` deep links (Shortcuts app).
 - **In-app note-taking** — Jot notes while you record, or keep a dedicated **My notes** tab that stays editable alongside the AI summary; your notes are folded straight into the summary.
 - **Ask your meetings** — Natural-language Q&A across a single note *or* your entire library via the Chat tab. Pulls from summary, key topics, and the full transcript.
 - **Multi-language (25 live, 99 total)** — Parakeet covers 25 European languages with live transcription; Whisper handles 99 languages including Chinese, Japanese, Arabic, and Hindi post-stop.
@@ -75,6 +76,19 @@ drop into your skills folder and invoke conversationally ("sync Granola to
 Steno"), not an in-app feature. See
 [`skills/granola-to-steno/README.md`](skills/granola-to-steno/README.md) for
 setup and limitations.
+
+## Use your notes from an agent (`/steno`)
+
+The [`steno`](skills/steno/README.md) skill makes an AI agent aware of your local
+Steno notes. Run `/steno` (or just mention your meetings) and it pulls in the
+relevant notes and acts on them — answer a question across meetings, recap your
+week, extract action items, or use the meetings as source material to draft a
+spec, PRD, or follow-up. It can also **guide you through setting up a cloud model**
+(`/steno setup`) — OpenAI, Anthropic, AWS Bedrock, or a custom endpoint.
+
+It's read-only over your notes (never modifies them), needs only Python 3.8+ (no
+dependencies), and is a drop-in agent skill — copy `skills/steno/` into your
+skills folder. See [`skills/steno/README.md`](skills/steno/README.md).
 
 ## macOS Shortcuts (Optional)
 
@@ -169,15 +183,15 @@ Have questions or suggestions? [Join our Discord](https://discord.gg/DZ6vcQnxxu)
 - Live transcription during recording
 - NVIDIA Parakeet as a transcription engine option
 - Editing notes after processing
-- Windows version
+- Windows: GA hardening (alpha already ships on Windows 10/11 x64)
 
 ## Installation
 
-Download the latest release (**Apple Silicon Mac, macOS 12 Monterey or later**):
+Download the latest release (**Apple Silicon Mac, macOS 14.4 or later**):
 
-- [Apple Silicon (M1-M5)](https://github.com/ruzin/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg)
+- [Apple Silicon (M1-M5)](https://github.com/stenolabs/stenoai/releases/latest/download/stenoAI-macos-arm64.dmg)
 
-> **Intel Mac users**: v0.4.0 is Apple Silicon only. Stay on [v0.3.8](https://github.com/ruzin/stenoai/releases/tag/v0.3.8) — the last release supporting Intel Macs. Auto-update on existing Intel installs will not push v0.4.0 to those machines.
+> **Intel Mac users**: v0.4.0 is Apple Silicon only. Stay on [v0.3.8](https://github.com/stenolabs/stenoai/releases/tag/v0.3.8) — the last release supporting Intel Macs. Auto-update on existing Intel installs will not push v0.4.0 to those machines.
 
 ### Installing on macOS
 
@@ -198,9 +212,9 @@ You can run it locally as well (see below) if you don't want to install a DMG.
 
 Windows 10/11 (x64) is supported in **alpha**, with the full pipeline verified working: record → live Parakeet transcription → batch transcript → Ollama summary, **including system-audio loopback capture with `[You]`/`[Others]` diarisation**.
 
-**Install:** download **`stenoAI-windows-x64.exe`** from the [latest release](https://github.com/ruzin/stenoai/releases/latest) and run it — it installs per-user (no admin needed) and creates Start-menu/desktop shortcuts. On first launch, Windows SmartScreen warns because the alpha is unsigned — click **More info → Run anyway**. The first-run setup wizard then downloads the transcription model (~670 MB) and the default summarisation model, Gemma 4 E2B (~4.3 GB).
+**Install:** download **`stenoAI-windows-x64.exe`** from the [latest release](https://github.com/stenolabs/stenoai/releases/latest) and run it — it installs per-user (no admin needed) and creates Start-menu/desktop shortcuts. On first launch, Windows SmartScreen warns because the alpha is unsigned — click **More info → Run anyway**. The first-run setup wizard then downloads the transcription model (~670 MB) and the default summarisation model, Gemma 4 E2B (~4.3 GB).
 
-> Before the first tagged Windows release lands, grab the installer from the [Windows build workflow](https://github.com/ruzin/stenoai/actions/workflows/build-windows.yml): sign in to GitHub, open the latest green run, download the `stenoai-windows` artifact, and run the `.exe` inside.
+> Before the first tagged Windows release lands, grab the installer from the [Windows build workflow](https://github.com/stenolabs/stenoai/actions/workflows/build-windows.yml): sign in to GitHub, open the latest green run, download the `stenoai-windows` artifact, and run the `.exe` inside.
 
 Known alpha limitations:
 
@@ -219,7 +233,7 @@ Issues + feedback welcome on the GitHub issues tracker.
 
 ### Setup
 ```bash
-git clone https://github.com/ruzin/stenoai.git
+git clone https://github.com/stenolabs/stenoai.git
 cd stenoai
 
 # Backend setup
@@ -283,9 +297,9 @@ log stream --predicate 'eventMessage CONTAINS "ollama" OR process CONTAINS "Sten
 ### Common Issues
 
 - **Update didn't install**: Auto-updates are applied on next quit. Quit via the **Steno → Quit** menu (not just closing the window), then reopen.
-- **No system audio / no `[Others]` speaker labels**: macOS needs **Screen Recording** permission. Go to **System Settings → Privacy & Security → Screen & System Audio Recording**, enable Steno, and relaunch the app.
+- **No system audio / no `[Others]` speaker labels**: On macOS, allow Steno to record system audio in **System Settings → Privacy & Security → Screen & System Audio Recording**. Screen Recording access is not required.
 - **`stenoai://` deep link doesn't start recording**: Make sure Steno has launched at least once after install so the URL scheme is registered. If it still fails, check the terminal log for `Protocol handler registration` output.
-- **Recording stops early**: Check microphone permissions, Screen Recording permission (if using system audio), and available disk space.
+- **Recording stops early**: Check microphone permission, System Audio Recording permission (if recording system audio), and available disk space.
 - **"Processing failed"**: Usually an Ollama service or model issue — check the terminal logs.
 - **Empty transcripts**: Whisper couldn't detect speech — verify audio input levels.
 - **Slow processing**: Normal for longer recordings; Ollama is CPU-intensive. If summaries are unusually slow, switch to a lighter model in Settings → AI (Gemma 4 E2B is the lightest/fastest).

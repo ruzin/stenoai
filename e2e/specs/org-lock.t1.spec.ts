@@ -34,9 +34,11 @@ test('UI sign-in flips provider to org and locks the picker', async ({ launchApp
   const aiSection = page.locator('[data-settings-tab="ai"]');
   await expect(aiSection).toBeVisible();
 
-  // The picker now reflects the org lock: the provider Select (the only
-  // combobox while not on 'cloud') shows "Organisation", and the managed-by-org
-  // copy appears (the Select is disabled while signed in).
-  await expect(aiSection.getByRole('combobox')).toContainText('Organisation');
+  // The picker now reflects the org lock: the AI provider Select (scoped by
+  // testid — the AI page also shows the Transcription section's Language
+  // combobox on the same screen since the merge, so "the only combobox"
+  // no longer holds) shows "Organisation", and the managed-by-org copy
+  // appears (the Select is disabled while signed in).
+  await expect(aiSection.getByTestId('ai-provider-select')).toContainText('Organisation');
   await expect(aiSection.getByText(/managed by your organisation/i)).toBeVisible();
 });

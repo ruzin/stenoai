@@ -13,7 +13,9 @@ export default defineConfig({
   },
   integrations: [
     react(),
-    sitemap(),
+    sitemap({
+      filter: (page) => !page.startsWith('https://stenoai.co/download'),
+    }),
   ],
   vite: {
     plugins: [tailwindcss()],

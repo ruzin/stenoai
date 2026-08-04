@@ -112,3 +112,109 @@ jobs:
             app/test-results
           retention-days: 7
           if-no-files-found: ignore
+
+  # Real-summarization smoke (@summarize-real, #382). NIGHTLY-ONLY: it drives a
+  # REAL small Ollama model (llama3.2:1b, CPU) through the actual `reprocess`
+  # prompt-build + response-parse path — the gap the mock-Ollama
+  # summarize-contract.t2 can't cover. Heavy + non-deterministic, so it is kept
+  # OUT of the per-PR lanes (e2e.yml greps @summarize-real out of the model-free
+  # t2 jobs; the @pipeline jobs never select it) and asserts only WEAK
+  # invariants (a non-empty, floored, structurally-parsed summary — never
+  # section-exactness, which a 1B model won't reliably emit). Reuses the macOS
+  # backend bundle the suite just built (download-artifact across the
+  # reusable-workflow boundary), same as long-meeting-windows.
+  summarize-real-macos:
+    name: T2 real-summarize (llama3.2:1b, macOS CPU)
+    runs-on: macos-latest
+    needs: suite
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Download backend bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-backend-macos
+          path: dist/stenoai
+
+      # upload-artifact strips the exec bit — restore it or the app can't launch
+      # the bundled launcher / spawn ollama (mirrors t2-pipeline-macos).
+      - name: Restore exec bits on bundled binaries
+        run: |
+          find dist/stenoai -type f \( -name stenoai -o -name ffmpeg -o -name ollama \) \
+            -exec chmod +x {} +
+          test -x dist/stenoai/stenoai
+
+      - name: Ensure no stray Ollama
+        run: pkill -f ollama || true
+
+      # Cache the pulled model blobs in Ollama's default store (~/.ollama/models)
+      # so only the first nightly pays the ~1.3 GB download; later runs restore
+      # in seconds. start_ollama_server sets no custom OLLAMA_MODELS, so the app's
+      # bundled `ollama serve` reads the same store this pre-pull writes.
+      - name: Cache Ollama summary model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-summary-llama3.2-1b
+
+      - name: Install Electron dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build renderer
+        working-directory: app
+        run: npm run build:renderer
+
+      # Pre-pull the small model, then VERIFY it actually loads + responds on
+      # this runner (verify-model runs a 1-token chat via the HTTP API). This
+      # fails THIS job loudly on an infra problem (bad pull, GPU-less load issue)
+      # instead of letting the spec silently skip green with zero real-summary
+      # coverage — mirrors the whisper/parakeet model guards in e2e.yml.
+      - name: Ensure summary model present
+        run: |
+          ./dist/stenoai/stenoai pull-model llama3.2:1b
+          ./dist/stenoai/stenoai verify-model llama3.2:1b \
+            | python3 -c "import sys,json; sys.exit(0 if json.load(sys.stdin).get('success') else 1)"
+
+      # Playwright exits 0 when --grep matches no tests. Assert the tagged spec is
+      # actually selected so a future rename / dropped @summarize-real tag can't
+      # silently run zero tests and pass.
+      # Assert the tagged spec is selected (Playwright exits 0 on a zero-match
+      # --grep). Capture first, then grep — piping straight into `grep -q` lets
+      # grep close the pipe on first match (EPIPE to the node writer) and can
+      # mask a failed/incomplete listing behind grep's exit code. Mirrors the
+      # @long-meeting guard.
+      - name: Guard — @summarize-real test is selected
+        shell: bash
+        working-directory: app
+        run: |
+          out=$(npm run test:e2e -- --project=t2 --grep @summarize-real --list)
+          echo "$out" | grep -q '@summarize-real'
+
+      - name: Run T2 real-summarize (llama3.2:1b)
+        working-directory: app
+        env:
+          # Model was pre-pulled + verify-model'd above; make a not-ready model a
+          # hard failure here (not a green skip), so the nightly can't pass with
+          # zero real-summary coverage.
+          STENOAI_E2E_REQUIRE_SUMMARY_MODEL: '1'
+        run: npm run test:e2e -- --project=t2 --grep '@summarize-real'
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-summarize-real-report
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 7
+          if-no-files-found: ignore

@@ -159,6 +159,17 @@ for pkg in _DATA_PKGS:
     except Exception:
         pass
 
+# OpenCC ships the Chinese Simplified↔Traditional conversion dictionaries
+# (JSON + text) as package data, loaded by path at runtime. Without bundling
+# them the s2t/t2s converters raise on init and zh-Hant output silently falls
+# back to Simplified. Pure-Python + cross-platform, so this applies to both the
+# macOS and Windows bundles (no platform gate). Guarded so a missing/renamed
+# package never breaks the build.
+try:
+    datas += collect_data_files('opencc')
+except Exception:
+    pass
+
 # Copy package metadata (.dist-info) for packages that read their own version
 # via importlib.metadata at import time. onnx_asr/__init__.py does
 # `__version__ = importlib.metadata.version("onnx-asr")` on import — without the

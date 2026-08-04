@@ -39,18 +39,21 @@ logger = logging.getLogger(__name__)
 BEDROCK_REGION_RE = re.compile(r"[a-z]{2}(-gov)?-[a-z]+-[0-9]{1,2}")
 
 
-def _atomic_write_json(path: Path, payload) -> None:
-    """Write `payload` as JSON to `path` atomically.
+def _atomic_write(path: Path, render, encoding: str = 'utf-8') -> None:
+    """Durably replace `path` with whatever `render(fh)` writes.
 
-    The shared atomic writer for every JSON file the CLI persists —
-    config.json here, recorder_state.json and the final summary JSON via
-    the re-export in simple_recorder. tempfile + os.replace in the same
-    directory keeps the rename a single filesystem operation on POSIX and
-    Windows, so a crash mid-write leaves the prior file intact rather
-    than a half-written one. config.json in particular is read by many
-    concurrent CLI subprocesses; a plain truncate-and-rewrite lets a
-    reader see a torn file, fall back to defaults, and (pre-fix) persist
-    those defaults over the user's real settings.
+    The shared core behind _atomic_write_json and _atomic_write_text: a
+    tempfile in the SAME directory (so the rename can't cross a filesystem
+    boundary), flush + fsync so the bytes are on the platter before the
+    rename, then os.replace — a single filesystem operation on POSIX and
+    Windows. A crash, a full disk, or a killed process mid-write therefore
+    leaves the previous file intact rather than a half-written one, and a
+    concurrent reader sees either the old file or the new one, never a torn
+    mix. The temp file is removed on any failure so a failed write leaves
+    no debris next to the real file.
+
+    `render` takes the open text handle and writes the payload; anything it
+    raises propagates to the caller after cleanup.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,10 +63,10 @@ def _atomic_write_json(path: Path, payload) -> None:
         prefix=f'.{path.name}.',
         suffix='.tmp',
         delete=False,
-        encoding='utf-8',
+        encoding=encoding,
     )
     try:
-        json.dump(payload, tmp, indent=2)
+        render(tmp)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp.close()
@@ -88,6 +91,36 @@ def _atomic_write_json(path: Path, payload) -> None:
         except OSError:
             pass
         raise
+
+
+def _atomic_write_json(path: Path, payload) -> None:
+    """Write `payload` as JSON to `path` atomically.
+
+    The shared atomic writer for every JSON file the CLI persists —
+    config.json and folders.json here, recorder_state.json and the final
+    summary JSON via the re-export in simple_recorder. config.json in
+    particular is read by many concurrent CLI subprocesses; a plain
+    truncate-and-rewrite lets a reader see a torn file, fall back to
+    defaults, and (pre-fix) persist those defaults over the user's real
+    settings. See _atomic_write for the durability mechanics.
+    """
+    _atomic_write(path, lambda fh: json.dump(payload, fh, indent=2))
+
+
+def _atomic_write_text(path: Path, text: str, encoding: str = 'utf-8') -> None:
+    """Write `text` to `path` atomically — the Path.write_text replacement.
+
+    The summary Markdown is the app's primary user artifact and is rewritten
+    in place on every reprocess, retranscribe, title regeneration and live
+    append. Plain write_text truncates first, so a crash (or a full disk)
+    between truncate and write leaves the user with an empty or half-written
+    note and no previous version to fall back to. See _atomic_write.
+
+    Note: the .md and its sidecar .json are each written atomically but are
+    NOT written as one transaction — a crash between the two can still leave
+    them disagreeing. Out of scope here; the individual files stay readable.
+    """
+    _atomic_write(path, lambda fh: fh.write(text), encoding=encoding)
 
 
 def get_user_data_dir() -> Path:
@@ -216,7 +249,8 @@ class Config:
         "nl": "Dutch",
         "pt": "Portuguese",
         "ja": "Japanese",
-        "zh": "Chinese",
+        "zh-Hans": "Chinese (Simplified)",
+        "zh-Hant": "Chinese (Traditional)",
         "ko": "Korean",
         "hi": "Hindi",
         "ar": "Arabic",
@@ -297,8 +331,25 @@ class Config:
         self._migrate_whisper_model()
         self._migrate_summary_model()
         self._migrate_transcription_engine()
+        self._migrate_language_zh()
+        self._migrate_privacy_notice_seen()
         self._normalize_templates()
         self._seed_sample_template()
+
+    def _migrate_language_zh(self) -> None:
+        """Migrate the legacy single ``"zh"`` language to Simplified (``zh-Hans``).
+
+        Chinese used to be one selectable entry ("zh"); it's now split into
+        ``zh-Hans`` (Simplified) and ``zh-Hant`` (Traditional). whisper.cpp
+        emits Simplified for "zh", so an existing "zh" user was effectively on
+        Simplified — map them there and leave the Traditional opt-in to the
+        Settings dropdown.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if self._config.get("language") == "zh":
+            self._config["language"] = "zh-Hans"
+            self._save()
 
     def _migrate_transcription_engine(self) -> None:
         """Decide the active ASR engine on first launch of a version that has
@@ -317,6 +368,64 @@ class Config:
             "whisper" if self._existed_at_load else "parakeet"
         )
         self._save()
+
+    def _migrate_privacy_notice_seen(self) -> None:
+        """Seed the one-time privacy notice marker for fresh and existing installs.
+
+        Fresh installs are disclosed during onboarding, so their default marker
+        is True. Existing installs whose on-disk config predates the marker get
+        False so the upgrade notice appears once. Inspecting the disk directly
+        keeps a default-filled in-memory config from masking key absence.
+        """
+        if self._load_failed:
+            return  # never persist defaults over a corrupt-but-recoverable file
+        if not self._existed_at_load:
+            self._config["privacy_notice_seen"] = True
+            return
+
+        on_disk = self._read_disk_for_merge()
+        if on_disk is not None and "privacy_notice_seen" in on_disk:
+            adopted = on_disk.get("privacy_notice_seen") is True
+            self._config["privacy_notice_seen"] = adopted
+            self._snapshot["privacy_notice_seen"] = adopted
+            return
+
+        self._config["privacy_notice_seen"] = False
+        self._persist_privacy_notice_migration()
+        # Keep an ordinary later _save() from bypassing the locked CAS. If the
+        # persist lost a race, the helper has already adopted the disk value.
+        self._snapshot["privacy_notice_seen"] = self._config[
+            "privacy_notice_seen"
+        ]
+
+    def _persist_privacy_notice_migration(self) -> None:
+        """Locked compare-and-set write for the privacy notice marker.
+
+        Re-read config.json while holding the lock. If another process wrote
+        the marker first, adopt its value rather than clobbering it. Failures
+        leave the existing install's in-memory value False and retry next load.
+        """
+        lock_path = str(self.config_path) + ".lock"
+        try:
+            with filelock.FileLock(lock_path, timeout=self._SAVE_LOCK_TIMEOUT):
+                base = self._read_disk_for_merge()
+                if base is None:
+                    return
+                if "privacy_notice_seen" in base:
+                    adopted = base.get("privacy_notice_seen") is True
+                    self._config["privacy_notice_seen"] = adopted
+                    self._snapshot["privacy_notice_seen"] = adopted
+                    return
+                base["privacy_notice_seen"] = False
+                _atomic_write_json(self.config_path, base)
+                self._snapshot["privacy_notice_seen"] = False
+        except filelock.Timeout:
+            logger.warning(
+                "Timed out acquiring config lock for privacy notice migration; "
+                "will retry on next load"
+            )
+        except Exception as e:
+            logger.error(f"Error persisting privacy notice migration: {e}")
 
     def _migrate_whisper_model(self) -> None:
         """Map any out-of-current-list whisper model to the supported one.
@@ -584,7 +693,19 @@ class Config:
         return {
             "model": self.DEFAULT_MODEL,
             "notifications_enabled": True,
+            # Default ON — the calendar-based pre-meeting heads-up, independent
+            # of notifications_enabled (which now only covers note-ready/
+            # silence-auto-stop). Requires a connected calendar to fire at all.
+            "premeeting_notifications_enabled": True,
+            # Default ON — mirrors hide_dock_icon's absence from this dict
+            # (both use a .get() fallback); listed explicitly here since it's
+            # new and the default matters for the "both hidden" warning logic.
+            "show_menu_bar_icon": True,
             "telemetry_enabled": True,
+            # Fresh installs see the disclosure during onboarding. Existing
+            # configs missing this key are migrated to False so the one-time
+            # upgrade notice is shown.
+            "privacy_notice_seen": True,
             # Default ON on macOS — CoreAudio Process Tap captures system
             # audio alongside the mic on macOS 14.4+. Older macOS auto-falls
             # back to mic-only via main.js's loadSystemAudioEnabled() OS gate.
@@ -602,6 +723,11 @@ class Config:
             # item and suppresses the first window show on a login launch.
             # Users opt out in Settings.
             "launch_on_login": True,
+            # Default ON — the global (system-wide) record shortcut
+            # (CommandOrControl+Shift+R) is registered at startup so recording
+            # can be toggled from anywhere. Users turn it off in Settings when
+            # it conflicts with another app (e.g. a browser's hard-reload).
+            "record_hotkey_enabled": True,
             # "auto" so _resolve_output_language() picks the transcript's
             # detected language instead of silently defaulting every
             # unconfigured install to English summaries (#281).
@@ -614,7 +740,18 @@ class Config:
             "anonymous_id": str(uuid.uuid4()),
             "storage_path": "",
             "keep_recordings": False,
-            "auto_summarize_enabled": True,
+            "auto_summarize_enabled": False,
+            # Obsidian vault sync (#413). Off by default — a note only ever
+            # leaves the app's own store when the user opts in and picks a
+            # vault folder. One-way (Steno -> vault); see app/obsidian-sync.js.
+            "obsidian_sync_enabled": False,
+            "obsidian_vault_path": "",
+            # Default ON — when the app is idle and nothing is in flight, a
+            # downloaded update installs itself and relaunches so the user
+            # never has to click "Restart". The "update available/downloaded"
+            # notification is unchanged; this only removes the manual click,
+            # and main.js keeps autoInstallOnAppQuit as the safe fallback.
+            "auto_install_when_idle": True,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             # OpenAI-compatible ASR endpoint settings.
@@ -840,6 +977,47 @@ class Config:
         self._config["notifications_enabled"] = enabled
         return self._save()
 
+    def get_record_hotkey_enabled(self) -> bool:
+        """Get whether the global record shortcut is registered at startup.
+
+        Absence of the key = ON (back-compat). Only a literal ``False`` disables
+        it, matching the Electron-side ``record_hotkey_enabled !== false`` gate,
+        so a malformed non-boolean value doesn't diverge between the two reads.
+        """
+        return self._config.get("record_hotkey_enabled", True) is not False
+
+    def set_record_hotkey_enabled(self, enabled: bool) -> bool:
+        """
+        Set whether the global record shortcut is enabled.
+
+        Args:
+            enabled: True to register the shortcut, False to disable it
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["record_hotkey_enabled"] = enabled
+        return self._save()
+
+    def get_premeeting_notifications_enabled(self) -> bool:
+        """Get whether the calendar-based pre-meeting heads-up notification
+        is enabled. Independent of notifications_enabled (post-meeting)."""
+        return self._config.get("premeeting_notifications_enabled", True)
+
+    def set_premeeting_notifications_enabled(self, enabled: bool) -> bool:
+        """
+        Set whether the calendar-based pre-meeting heads-up notification
+        is enabled.
+
+        Args:
+            enabled: True to enable the pre-meeting notification, False to disable
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["premeeting_notifications_enabled"] = enabled
+        return self._save()
+
     def get_telemetry_enabled(self) -> bool:
         """Get whether anonymous usage analytics are enabled."""
         return self._config.get("telemetry_enabled", True)
@@ -855,6 +1033,15 @@ class Config:
             True if saved successfully, False otherwise
         """
         self._config["telemetry_enabled"] = enabled
+        return self._save()
+
+    def get_privacy_notice_seen(self) -> bool:
+        """Get whether the one-time privacy notice has been acknowledged."""
+        return self._config.get("privacy_notice_seen", True) is True
+
+    def set_privacy_notice_seen(self, seen: bool) -> bool:
+        """Set the privacy notice marker and end the migration window."""
+        self._config["privacy_notice_seen"] = seen
         return self._save()
 
     def get_hide_dock_icon(self) -> bool:
@@ -874,6 +1061,23 @@ class Config:
         self._config["hide_dock_icon"] = enabled
         return self._save()
 
+    def get_show_menu_bar_icon(self) -> bool:
+        """Get whether the menu bar / system tray icon should be shown."""
+        return self._config.get("show_menu_bar_icon", True)
+
+    def set_show_menu_bar_icon(self, enabled: bool) -> bool:
+        """
+        Set whether the menu bar / system tray icon should be shown.
+
+        Args:
+            enabled: True to show the tray icon, False to hide it
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        self._config["show_menu_bar_icon"] = enabled
+        return self._save()
+
     def get_org_auto_backup_enabled(self) -> bool:
         """Get whether new notes should auto-upload to the org adapter (S3)
         once summarization finishes. Only takes effect when the user is signed
@@ -883,6 +1087,13 @@ class Config:
     def set_org_auto_backup_enabled(self, enabled: bool) -> bool:
         self._config["org_auto_backup_enabled"] = enabled
         return self._save()
+
+    def has_org_auto_backup_preference(self) -> bool:
+        """Whether a stored auto-backup preference exists yet. Distinguishes
+        an unset pref (no key) from an explicit False, so the desktop can skip
+        the sign-in `/policy` fetch + seed once a preference exists and only
+        pays it in the genuinely-unset sign-in window (see issue #192)."""
+        return "org_auto_backup_enabled" in self._config
 
     def seed_org_auto_backup_default(self, default: bool) -> bool:
         """Seed the auto-backup preference from the enterprise adapter's
@@ -906,16 +1117,69 @@ class Config:
         self._config["keep_recordings"] = enabled
         return self._save()
 
+    def get_auto_install_when_idle(self) -> bool:
+        """Get whether a downloaded update auto-installs (and relaunches) when
+        the app is idle and nothing is in flight. Default on — removes the
+        manual "Restart" click; the download/notification behaviour and the
+        autoInstallOnAppQuit fallback are unaffected."""
+        return self._config.get("auto_install_when_idle", True)
+
+    def set_auto_install_when_idle(self, enabled: bool) -> bool:
+        """Set whether idle auto-install is enabled."""
+        self._config["auto_install_when_idle"] = enabled
+        return self._save()
+
     def get_auto_summarize_enabled(self) -> bool:
         """Get whether notes (summary/title/template report) are generated
-        automatically after transcription. Default on — existing users keep
-        the transcribe→summarize behaviour. When off, recordings stop at a
-        transcript-only note and the user generates notes on demand."""
-        return self._config.get("auto_summarize_enabled", True)
+        automatically after transcription. Default OFF — recordings stop at a
+        transcript-only note and the user generates notes on demand (the
+        meeting-end "Summarise" prompt, or the in-note "Generate notes" CTA).
+        Only the fallback default changed; users who previously set this keep
+        their stored value."""
+        return self._config.get("auto_summarize_enabled", False)
 
     def set_auto_summarize_enabled(self, enabled: bool) -> bool:
         """Set whether notes are generated automatically after transcription."""
         self._config["auto_summarize_enabled"] = enabled
+        return self._save()
+
+    def get_obsidian_sync_enabled(self) -> bool:
+        """Whether notes are mirrored to an Obsidian vault folder (#413).
+        Default off — the mirror only runs when the user opts in AND has set
+        obsidian_vault_path. One-way, local; see app/obsidian-sync.js."""
+        return self._config.get("obsidian_sync_enabled", False)
+
+    def set_obsidian_sync_enabled(self, enabled: bool) -> bool:
+        """Enable/disable the Obsidian vault mirror."""
+        self._config["obsidian_sync_enabled"] = enabled
+        return self._save()
+
+    def get_obsidian_vault_path(self) -> str:
+        """Absolute path to the vault folder notes are mirrored into. Empty =
+        not configured (mirror stays inert even if the toggle is on)."""
+        return self._config.get("obsidian_vault_path", "")
+
+    def set_obsidian_vault_path(self, vault_path: str) -> bool:
+        """Set the Obsidian vault folder. Must be an absolute path (or empty to
+        clear). Mirrors set_storage_path's validation; the directory is created
+        if missing so the first sync has somewhere to write."""
+        if vault_path is None:
+            vault_path = ""
+        vault_path = vault_path.strip()
+
+        if vault_path:
+            vp = Path(vault_path)
+            if not vp.is_absolute():
+                logger.error(f"Obsidian vault path must be absolute: {vault_path}")
+                return False
+            # Ensure the target exists; on failure keep existing config unchanged.
+            try:
+                vp.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to initialize Obsidian vault path {vault_path}: {e}")
+                return False
+
+        self._config["obsidian_vault_path"] = vault_path
         return self._save()
 
     def get_silence_auto_stop_enabled(self) -> bool:
@@ -1102,6 +1366,33 @@ class Config:
         # transcript's language instead of silently defaulting to English (#281).
         return self._config.get("language", "auto")
 
+    def get_whisper_language(self) -> str:
+        """Map the UI language code to the code the ASR engine understands.
+
+        whisper.cpp (and Parakeet's language hint) only know ``"zh"`` for
+        Chinese — the Simplified/Traditional distinction is a post-transcription
+        conversion, not an ASR mode — so both ``zh-Hans`` and ``zh-Hant`` fold
+        to ``zh`` here. Every other code passes through unchanged.
+        """
+        code = self.get_language()
+        if code in ("zh-Hans", "zh-Hant"):
+            return "zh"
+        return code
+
+    def get_chinese_variant(self) -> Optional[str]:
+        """Return the target Chinese script for output conversion.
+
+        ``"traditional"`` for ``zh-Hant``, ``"simplified"`` for ``zh-Hans``,
+        and ``None`` for any non-Chinese language (no conversion needed).
+        Consumed by ``src.chinese.apply_variant``.
+        """
+        code = self.get_language()
+        if code == "zh-Hant":
+            return "traditional"
+        if code == "zh-Hans":
+            return "simplified"
+        return None
+
     def set_language(self, language_code: str) -> bool:
         """
         Set the language for transcription and summarization.
@@ -1112,6 +1403,11 @@ class Config:
         Returns:
             True if saved successfully, False otherwise
         """
+        # Legacy "zh" (pre Simplified/Traditional split) is still accepted and
+        # normalised to Simplified, matching the on-load migration.
+        if language_code == "zh":
+            language_code = "zh-Hans"
+
         if language_code not in self.SUPPORTED_LANGUAGES:
             logger.error(f"Unsupported language code: {language_code}")
             return False

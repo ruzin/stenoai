@@ -64,6 +64,62 @@ class ConfigLanguageTests(unittest.TestCase):
             self.assertEqual(config.get_language(), "auto")
             self.assertEqual(config.get_language_name("auto"), "Auto (detect)")
 
+    def test_legacy_zh_migrates_to_simplified_on_load(self):
+        # Chinese used to be a single "zh" entry; it's now split into
+        # zh-Hans / zh-Hant. An existing "zh" config must migrate to
+        # Simplified (what whisper.cpp emitted for "zh" anyway) on load and
+        # persist so the Settings dropdown shows a valid selection.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(json.dumps({"language": "zh"}))
+
+            config = Config(config_path=config_path)
+            self.assertEqual(config.get_language(), "zh-Hans")
+            # Migration is persisted to disk, not just in memory.
+            on_disk = json.loads(config_path.read_text())
+            self.assertEqual(on_disk["language"], "zh-Hans")
+
+    def test_set_language_accepts_both_chinese_variants(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+
+            self.assertTrue(config.set_language("zh-Hant"))
+            self.assertEqual(config.get_language(), "zh-Hant")
+            self.assertEqual(config.get_language_name("zh-Hant"), "Chinese (Traditional)")
+
+            self.assertTrue(config.set_language("zh-Hans"))
+            self.assertEqual(config.get_language(), "zh-Hans")
+            self.assertEqual(config.get_language_name("zh-Hans"), "Chinese (Simplified)")
+
+    def test_set_language_legacy_zh_normalises_to_simplified(self):
+        # Back-compat: a caller (or old deep link) passing bare "zh" is still
+        # accepted and normalised to Simplified rather than rejected.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.set_language("zh"))
+            self.assertEqual(config.get_language(), "zh-Hans")
+
+    def test_chinese_variants_map_to_zh_for_asr(self):
+        # whisper.cpp only knows "zh"; both variants must fold to it for the
+        # ASR call while the variant drives post-transcription conversion.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+
+            config.set_language("zh-Hant")
+            self.assertEqual(config.get_whisper_language(), "zh")
+            self.assertEqual(config.get_chinese_variant(), "traditional")
+
+            config.set_language("zh-Hans")
+            self.assertEqual(config.get_whisper_language(), "zh")
+            self.assertEqual(config.get_chinese_variant(), "simplified")
+
+    def test_non_chinese_language_has_no_variant_and_passes_asr_code(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            config.set_language("de")
+            self.assertIsNone(config.get_chinese_variant())
+            self.assertEqual(config.get_whisper_language(), "de")
+
 
 class ConfigMicrophoneTests(unittest.TestCase):
     def test_default_microphone_is_system_default(self):
@@ -302,6 +358,113 @@ class ConfigLaunchOnLoginTests(unittest.TestCase):
             self.assertTrue(reloaded.get_launch_on_login())
 
 
+class ConfigRecordHotkeyTests(unittest.TestCase):
+    def test_default_record_hotkey_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_record_hotkey_enabled())
+
+    def test_legacy_config_without_key_defaults_true(self):
+        # Existing installs whose config predates this key must default ON
+        # (back-compat: the shortcut was unconditionally registered before).
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": "gemma3:4b"}))
+            config = Config(config_path=path)
+            self.assertTrue(config.get_record_hotkey_enabled())
+
+    def test_record_hotkey_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_record_hotkey_enabled(False))
+            self.assertFalse(config.get_record_hotkey_enabled())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_record_hotkey_enabled())
+            self.assertTrue(reloaded.set_record_hotkey_enabled(True))
+            self.assertTrue(reloaded.get_record_hotkey_enabled())
+
+
+class ConfigPrivacyNoticeTests(unittest.TestCase):
+    def test_fresh_install_seeds_notice_seen_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], True)
+
+    def test_existing_config_without_marker_seeds_false_and_persists(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": Config.DEFAULT_MODEL}))
+
+            config = Config(config_path=path)
+
+            self.assertFalse(config.get_privacy_notice_seen())
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], False)
+
+    def test_set_notice_seen_true_round_trips_and_persists(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"model": Config.DEFAULT_MODEL}))
+            config = Config(config_path=path)
+
+            self.assertTrue(config.set_privacy_notice_seen(True))
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], True)
+            self.assertTrue(Config(config_path=path).get_privacy_notice_seen())
+
+    def test_present_marker_prevents_retrigger(self):
+        for seen in (False, True):
+            with self.subTest(seen=seen):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    path = Path(tmp_dir) / "config.json"
+                    payload = {
+                        "model": Config.DEFAULT_MODEL,
+                        "privacy_notice_seen": seen,
+                    }
+                    path.write_text(json.dumps(payload))
+
+                    config = Config(config_path=path)
+
+                    self.assertIs(config.get_privacy_notice_seen(), seen)
+                    self.assertIs(
+                        json.loads(path.read_text())["privacy_notice_seen"], seen
+                    )
+
+    def test_corrupt_config_never_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text("{not json")
+
+            config = Config(config_path=path)
+
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertEqual(path.read_text(), "{not json")
+
+    def test_migration_cas_adopts_marker_that_lands_first(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "model": Config.DEFAULT_MODEL,
+                        "privacy_notice_seen": True,
+                    }
+                )
+            )
+            config = Config(config_path=path)
+            config._config["privacy_notice_seen"] = False
+            config._snapshot.pop("privacy_notice_seen", None)
+
+            config._persist_privacy_notice_migration()
+
+            self.assertIs(json.loads(path.read_text())["privacy_notice_seen"], True)
+            self.assertTrue(config.get_privacy_notice_seen())
+            self.assertIs(config._snapshot["privacy_notice_seen"], True)
+
+
 class ConfigOrgAutoBackupTests(unittest.TestCase):
     def test_default_auto_backup_is_true(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -328,6 +491,29 @@ class ConfigOrgAutoBackupTests(unittest.TestCase):
             self.assertTrue(config.seed_org_auto_backup_default(False))
             self.assertTrue(config.get_org_auto_backup_enabled())
 
+    def test_has_preference_distinguishes_unset_from_explicit_false(self):
+        """The gate skips the /policy fetch + seed once a preference exists, so
+        'unset' must be distinguishable from an explicit False (issue #192)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            # Fresh config: no stored preference (get still defaults to True).
+            self.assertFalse(config.has_org_auto_backup_preference())
+            self.assertTrue(config.get_org_auto_backup_enabled())
+            # An explicit False is a real preference, not "unset".
+            self.assertTrue(config.set_org_auto_backup_enabled(False))
+            self.assertTrue(config.has_org_auto_backup_preference())
+            self.assertTrue(Config(config_path=path).has_org_auto_backup_preference())
+
+    def test_has_preference_true_after_seed(self):
+        """Seeding the org default materialises a preference, so subsequent
+        backups can skip the seed."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertFalse(config.has_org_auto_backup_preference())
+            config.seed_org_auto_backup_default(True)
+            self.assertTrue(config.has_org_auto_backup_preference())
+
 
 class ConfigKeepRecordingsTests(unittest.TestCase):
     def test_default_keep_recordings_is_false(self):
@@ -348,10 +534,12 @@ class ConfigKeepRecordingsTests(unittest.TestCase):
 
 
 class ConfigAutoSummarizeTests(unittest.TestCase):
-    def test_default_auto_summarize_is_true(self):
+    def test_default_auto_summarize_is_false(self):
+        # Default OFF: a fresh install stops at a transcript-only note; notes are
+        # generated on demand (meeting-end "Summarise" prompt / in-note CTA).
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
-            self.assertTrue(config.get_auto_summarize_enabled())
+            self.assertFalse(config.get_auto_summarize_enabled())
 
     def test_auto_summarize_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -363,6 +551,24 @@ class ConfigAutoSummarizeTests(unittest.TestCase):
             self.assertFalse(reloaded.get_auto_summarize_enabled())
             self.assertTrue(reloaded.set_auto_summarize_enabled(True))
             self.assertTrue(reloaded.get_auto_summarize_enabled())
+
+
+class ConfigAutoInstallWhenIdleTests(unittest.TestCase):
+    def test_default_auto_install_when_idle_is_true(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            self.assertTrue(config.get_auto_install_when_idle())
+
+    def test_auto_install_when_idle_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            config = Config(config_path=path)
+            self.assertTrue(config.set_auto_install_when_idle(False))
+            self.assertFalse(config.get_auto_install_when_idle())
+            reloaded = Config(config_path=path)
+            self.assertFalse(reloaded.get_auto_install_when_idle())
+            self.assertTrue(reloaded.set_auto_install_when_idle(True))
+            self.assertTrue(reloaded.get_auto_install_when_idle())
 
 
 class ConfigBedrockSettingsTests(unittest.TestCase):

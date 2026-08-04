@@ -1,0 +1,75 @@
+import { test, expect } from '../fixtures/electron';
+
+/**
+ * T1 - renderer-only, mock IPC, no backend. Regression guard for #354: the
+ * onboarding wizard used to send model-download progress only to the collapsed
+ * debug console, so a fresh install showed a static "Downloading… (~2 GB)"
+ * string with no visible bar. Setup.tsx now subscribes to the setup-specific
+ * progress channels and renders progress on the step cards:
+ *   - transcription (Parakeet): an INDETERMINATE bar (stages only, no byte %).
+ *   - summarization (Ollama): a REAL bar + percent from setup-ollama-progress.
+ *
+ * The mock (app/e2e-mock-ipc.js, gated on STENOAI_E2E_SETUP_PROGRESS) emits the
+ * same renderer events the real main.js handlers do, then holds the step in its
+ * running state so the bar can be observed.
+ */
+
+test('summarization step renders a real progress bar + percent from setup-ollama-progress', async ({
+  launchApp,
+}) => {
+  // Parakeet pre-installed so the transcription step is skipped and the wizard
+  // goes straight to the Ollama download we want to observe.
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SETUP_PROGRESS: '1',
+      STENOAI_E2E_MOCK_PARAKEET_INSTALLED: '1',
+    },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/setup';
+  });
+
+  await page.getByRole('button', { name: 'Begin setup' }).click();
+
+  const ollamaStep = page.locator('[data-setup-step="ollama"]');
+  await expect(ollamaStep).toHaveAttribute('data-setup-status', 'running');
+
+  // A real bar with the streamed percent + the current status label.
+  const bar = ollamaStep.locator('[data-setup-ollama-progress]');
+  await expect(bar).toBeVisible();
+  await expect(bar.getByText('42%')).toBeVisible();
+  await expect(bar.getByText('pulling sha256:abcd')).toBeVisible();
+
+  const progressbar = ollamaStep.getByRole('progressbar');
+  await expect(progressbar).toHaveAttribute('aria-valuenow', '42');
+});
+
+test('transcription step renders an indeterminate "preparing" bar (no fabricated percent)', async ({
+  launchApp,
+}) => {
+  // Parakeet NOT installed → the transcription download runs. It only reports
+  // coarse stages, so the UI shows an indeterminate bar, never a percentage.
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SETUP_PROGRESS: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/setup';
+  });
+
+  await page.getByRole('button', { name: 'Begin setup' }).click();
+
+  const transcriptionStep = page.locator('[data-setup-step="transcription"]');
+  await expect(transcriptionStep).toHaveAttribute('data-setup-status', 'running');
+
+  const bar = transcriptionStep.locator('[data-setup-transcription-progress]');
+  await expect(bar).toBeVisible();
+  await expect(bar.getByText('Downloading and preparing model...')).toBeVisible();
+  await expect(transcriptionStep.getByRole('progressbar')).toBeVisible();
+
+  // No fabricated percentage on the indeterminate bar.
+  await expect(bar.getByText('%')).toHaveCount(0);
+});

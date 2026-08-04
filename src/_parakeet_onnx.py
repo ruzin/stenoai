@@ -106,8 +106,12 @@ def _load_model(model_id: str) -> tuple[Any, Any]:
         # (and thus huggingface_hub) is imported — HF_HUB_OFFLINE is read at
         # import time. Gated on is_installed inside, so a fresh download is
         # left online.
-        from src.parakeet_models import maybe_enable_offline
+        from src.parakeet_models import disable_implicit_hf_token, maybe_enable_offline
         maybe_enable_offline(model_id)
+        # Public model — never send an inherited HF token, which would 401 the
+        # anonymous fetch. Must precede the onnx-asr import (hub reads the flag
+        # at import time), same as maybe_enable_offline.
+        disable_implicit_hf_token()
         try:
             import onnx_asr
         except ImportError as e:

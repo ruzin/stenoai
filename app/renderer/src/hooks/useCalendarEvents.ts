@@ -67,7 +67,7 @@ export function useGoogleCalendarAuth() {
     queryFn: async () => {
       const res = await ipc().calendar.google.status();
       if (!res.success) throw new Error(res.error);
-      return { connected: res.connected };
+      return { connected: res.connected, email: res.email ?? null };
     },
   });
   const connect = useMutation({
@@ -94,7 +94,7 @@ export function useOutlookCalendarAuth() {
     queryFn: async () => {
       const res = await ipc().calendar.outlook.status();
       if (!res.success) throw new Error(res.error);
-      return { connected: res.connected };
+      return { connected: res.connected, email: res.email ?? null };
     },
   });
   const connect = useMutation({

@@ -50,8 +50,8 @@ model-free T2 spec that drives the `window.stenoai.<group>` preload bridge and
 asserts backend state on disk (config/files/JSON), using the existing specs +
 `e2e/fixtures/` helpers as templates — only reach for a UI/T1 spec when the
 interaction itself is the risk, and keep model/network-bearing assertions in the
-`@pipeline`/nightly lanes. This applies to luffy-built work too (CLAUDE.md
-overrides luffy's test-level defaults); the QA review lens checks for it.
+`@pipeline`/nightly lanes. This applies to agent-built work too: this file
+overrides an agent's own test-level defaults.
 
 - Run the whole suite: `cd app && npm run test:e2e` (needs the renderer built and,
   for T2, the backend bundle at `dist/stenoai/`).
@@ -69,7 +69,20 @@ overrides luffy's test-level defaults); the QA review lens checks for it.
     out: `--grep @pipeline` runs it (CI's `t2-pipeline-macos` job caches a whisper model),
     `--grep-invert @pipeline` keeps the other T2 specs model-free. A dev machine without the
     active engine's model **skips** it (loudly) rather than failing.
-  - **Current specs:** `org-lock.t1`, `shared-notes-policy.t1`, `org-lock-lifecycle.t2`,
+  - **`@perf` (a T1 spec)**: `live-transcript-perf.t1` is a measurement harness, not a
+    gate - it drives paced synthetic partials into the live transcript panel and reports
+    per-tick script/style/layout cost (CDP `Performance.getMetrics`), retained heap after a
+    forced GC, and DOM node count against a growing segment list. CI excludes it
+    (`--grep-invert @perf`) because wall-clock work on a shared runner is not something to
+    block a PR on. Run it before **and** after any change to live-transcript rendering:
+    `cd app && npm run test:e2e -- --project=t1 --grep @perf`. Pace matters - fired
+    back-to-back the ticks get batched into one React render and the measurement silently
+    collapses; the harness paces one per animation frame and counts DOM writes to prove it.
+  - **Current specs:** `org-lock.t1`, `shared-notes-policy.t1`, `live-transcript-lanes.t1`
+    (the live panel's rendering contract: a partial is replaced in place per speaker, a
+    final retires it, a late final sorts into place, and the Resumed divider - driven
+    through the real `live-transcript-chunk` channel via `e2e/fixtures/live-transcript.ts`),
+    `org-lock-lifecycle.t2`,
     `config-corruption.t2`, the core-loop trio `recording-lifecycle.t2` /
     `meetings-crud.t2` / `folders-crud.t2`, the config trio `settings-roundtrip.t2` /
     `ai-provider.t2` / `model-management.t2`, and the chat/org pair `chat-sessions.t2`
@@ -164,20 +177,28 @@ Tokens live in `app/renderer/src/globals.css` under `:root` (light) and
 - Before creating a PR, run a self-review of the full branch diff (`git diff main...HEAD`):
   - Review backend code for security issues, error handling gaps, edge cases, and best practices
   - Review frontend code for layout bugs, CSS consistency, accessibility, and polish
-  - Use the frontend-design skill for UI-related changes
+  - Put UI changes through a design pass too, not just a correctness one
   - Categorize findings by severity (critical/medium/low) and fix critical issues before merging
 
-### When to use `luffy` / `nami` (guideline, not a mandate)
+### How much process a change earns (guideline, not a mandate)
 Match the rigor to the change — don't run the heavyweight loop on a one-line edit.
-- **`luffy`** (autonomous build → multi-agent QA/Design/Eng review loop → `/verify` → PR):
-  use for **new features, risky changes, or wide-blast-radius refactors**. It's
-  token-heavy; reserve it for work that earns the review panel.
-- **Lighter self-review** (implement → test/typecheck → `/verify` if there's a runtime
-  surface → PR): use for **mechanical refactors, dead-code cleanup, copy/docs**.
-- **`nami`** (push → open/update PR → drive CI + review comments to green): effectively
-  **always**, regardless of change size — every PR should be taken to green-and-reviewed,
-  and bot/human comments evaluated critically (fix real issues, push back with reasons on
-  wrong ones). Stop at green; a human merges.
+- **New features, risky changes, wide-blast-radius refactors**: build it, then put the
+  full branch diff through a real review pass (a multi-agent panel, a second model, or
+  a human) before opening the PR. This is the work that earns the extra round.
+- **Mechanical refactors, dead-code cleanup, copy/docs**: implement, run
+  test/typecheck, exercise the runtime surface if there is one, then PR.
+- **Whoever wrote the code shouldn't be the one to sign it off.** When an agent wrote
+  it, have a different model or a human review the diff. Shared blind spots are exactly
+  the ones that survive self-review.
+- **Every PR, whatever its size**: take it to green-and-reviewed. Evaluate bot and human
+  comments critically: fix the real issues, push back with reasons on the wrong ones.
+  Stop at green; a human merges.
+- **Show the evidence.** Don't report a check as passing without having run it, and say
+  which failures are caused by the change versus pre-existing, environmental, or flaky.
+
+The maintainer drives this with a private agent crew (`luffy` for the build-and-review
+loop, `nami` for taking a PR to green). Those aren't part of this repo, so use whatever
+tooling you have. The workflow above is the portable part.
 
 ## Git Commit Guidelines
 - Do NOT include "Generated with Claude Code" attribution in commit messages
@@ -220,7 +241,8 @@ Releases are automated via `.github/workflows/build-release.yml`. Never create r
    - Builds signed + notarized DMGs for both arm64 and x64
    - Creates a GitHub Release with the tag message as the body
    - Uploads both DMGs as release assets
-10. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually.
+   - Posts a release announcement to Discord (summary + a few headline features + the contributor thank-you), via the `Announce release on Discord` step (`scripts/discord-release-announce.mjs`). This is automatic and requires no manual Discord post. It no-ops unless the `DISCORD_WEBHOOK_URL` repo secret is set (an incoming webhook for the announcements channel), and is `continue-on-error` so a Discord hiccup never fails the release.
+10. Do NOT build DMGs locally for releases, do NOT use `gh release create` manually. Do NOT post the Discord release announcement by hand — the workflow does it.
 
 ## Session Logging
 When the user says "log session" or similar (e.g., "update session log", "document this session"):

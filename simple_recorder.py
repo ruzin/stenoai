@@ -99,6 +99,29 @@ def resolve_output_language(
     return "en"
 
 
+def _apply_chinese_variant(text: Optional[str]) -> Optional[str]:
+    """Convert ``text`` to the user's selected Chinese script, if any.
+
+    whisper.cpp and Parakeet (and the summariser LLM) emit Simplified for
+    Chinese; a user who picked Traditional (``zh-Hant``) gets an s2t pass here.
+    A thin, never-throwing hook: non-Chinese languages, a missing OpenCC, or a
+    conversion error all fall through to the input unchanged so transcription
+    is never broken by variant conversion.
+    """
+    if not text:
+        return text
+    try:
+        from src.config import get_config
+        from src.chinese import apply_variant
+
+        variant = get_config().get_chinese_variant()
+        if variant:
+            return apply_variant(text, variant)
+    except Exception as e:
+        logger.warning(f"Chinese variant conversion skipped: {e}")
+    return text
+
+
 def resolve_persisted_output_language(
     session_info: dict,
     transcript_text: Optional[str],
@@ -157,18 +180,22 @@ _AUTO_NAMED_PATTERN = re.compile(
 # tags specifically (not any HTML-like tag) so unrelated inline markup in the
 # model's output can't be mistaken for a reasoning block and get a spurious
 # section break inserted ahead of it.
+#   Mirrored in app/main.js as REASONING_TAG_HEADER_PATTERN /
+#   normalizeMarkdownForParsing (the detail-page parser). The two MUST stay
+#   equivalent — see #346. Any edit here has to land there too.
 _REASONING_TAG_HEADER_PATTERN = re.compile(r'(</(?:think|thought|thinking|reasoning)>)\s*(#{1,6}\s)', re.IGNORECASE)
 
 def _normalize_markdown_for_parsing(md_text: str) -> str:
     """Ensure headers immediately following a reasoning tag start on a new line."""
     return _REASONING_TAG_HEADER_PATTERN.sub(r'\1\n\2', md_text)
 
-# Shared atomic JSON writer (tempfile + os.replace + Windows PermissionError
+# Shared atomic writers (tempfile + os.replace + Windows PermissionError
 # retry). One implementation for the summary JSON and config.json (recorder_state.json
-# is no longer written — see MeetingPipeline.state_file) — re-exported here so
-# existing imports keep working. The canonical copy lives in src.config because
-# this module already imports from src (the reverse import would be circular).
-from src.config import _atomic_write_json  # noqa: E402
+# is no longer written — see MeetingPipeline.state_file) and one for the summary
+# Markdown — re-exported here so existing imports keep working. The canonical
+# copies live in src.config because this module already imports from src (the
+# reverse import would be circular).
+from src.config import _atomic_write_json, _atomic_write_text  # noqa: E402
 
 
 def _start_summary_heartbeat(label: str = "summarize", interval_s: int = 60, max_beats: int = 30):
@@ -209,6 +236,45 @@ def _emit_progress(step: int, total: int) -> None:
         label = f"{step}/{total}"
     sys.stdout.write(f"PROGRESS:summarize:{label}\n")
     sys.stdout.flush()
+
+
+def _find_recording_for_stem(recordings_dir, stem: str):
+    """Return the source recording whose filename stem matches ``stem``, else None.
+
+    The recording filename stem equals the note stem (``<stem>_summary.md`` →
+    ``<stem>``), with an arbitrary extension (native ``.wav``, system-audio
+    ``.webm``, imported ``.m4a`` / ``.mp3``). Iterating and comparing stems keeps
+    the match extension-agnostic and avoids treating ``stem`` as a glob pattern.
+    Used by re-transcribe (#266) to locate the audio to re-run ASR on; returns
+    None when keep-recordings was off and the source is gone (the MVP audio-gate).
+
+    Deterministic + safe when the stem is not unique: collect ALL stem-matching
+    regular files and return one only when there is EXACTLY ONE. If several files
+    share the stem (e.g. a retained ``.wav`` next to an imported ``.m4a``),
+    decline (return None) rather than guess the wrong source — the caller already
+    surfaces ``RETRANSCRIBE_NO_AUDIO``. Symlinks are rejected (``is_symlink()``)
+    to match the JS ``recording-available`` handler's ``Dirent.isFile()`` posture
+    and to never re-transcribe through a symlinked recording. The app enforces
+    stem uniqueness, so the ambiguity guard is defensive.
+    """
+    from pathlib import Path
+    matches = []
+    try:
+        for entry in Path(recordings_dir).iterdir():
+            # is_file() follows symlinks; also reject symlinks so both sides agree
+            # (the JS handler's Dirent.isFile() does not follow symlinks).
+            if entry.is_file() and not entry.is_symlink() and Path(entry.name).stem == stem:
+                matches.append(entry)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        logger.warning(
+            "Re-transcribe: %d recordings share stem %r in %s; declining as ambiguous",
+            len(matches), stem, recordings_dir,
+        )
+    return None
 
 
 def _render_frontmatter(meta: dict) -> list[str]:
@@ -346,7 +412,7 @@ Summary output language: {config.get_language_name(output_language)}
                     if text:
                         logger.info(f"Loaded user notes ({len(text)} chars)")
                         return text
-                except Exception:
+                except (OSError, UnicodeDecodeError):
                     pass
                 break
         return None
@@ -422,9 +488,12 @@ Summary output language: {config.get_language_name(output_language)}
 
         # Get configured language
         configured_language = config.get_language()
+        # ASR only knows "zh" for Chinese; the Simplified/Traditional choice is
+        # applied as a post-transcription conversion, not an ASR mode.
+        asr_language = config.get_whisper_language()
 
         # Transcribe with diarisation support (stereo → [You]/[Others])
-        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=configured_language)
+        transcript_result = self.transcriber.transcribe_diarised(audio_path, language=asr_language)
 
         # A transcription crash (e.g. an OOM on a long file) is not silence:
         # propagate the flag and skip writing a normal transcript file so the
@@ -460,6 +529,10 @@ Summary output language: {config.get_language_name(output_language)}
         if isinstance(transcript_result, dict):
             is_diarised = transcript_result.get("is_diarised", False)
             diarised_text = transcript_result.get("diarised_text")
+
+        # Convert the transcript to the selected Chinese script (no-op otherwise).
+        transcript_text = _apply_chinese_variant(transcript_text)
+        diarised_text = _apply_chinese_variant(diarised_text)
 
         output_language = self._resolve_output_language(
             configured_language, detected_language, transcript_text=diarised_text or transcript_text
@@ -551,7 +624,7 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _atomic_write_text(summary_path, '\n'.join(md_lines))
 
         print(f"⚠️ Transcription failed; preserved audio: {audio_path}")
         print(f"TRANSCRIPTION_FAILED:{short_error}", flush=True)
@@ -563,7 +636,7 @@ Summary output language: {config.get_language_name(output_language)}
         if state_file.exists():
             try:
                 state_file.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         return {
@@ -645,11 +718,11 @@ Summary output language: {config.get_language_name(output_language)}
                 md_lines.append('## User Notes')
                 md_lines.append('')
                 md_lines.append(notes_text)
-            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            _atomic_write_text(summary_path, '\n'.join(md_lines))
             if not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
-                except Exception:
+                except OSError:
                     pass
             print("SUMMARY_SKIPPED", flush=True)
             print(f"SAVED:{summary_path}", flush=True)
@@ -694,22 +767,23 @@ Summary output language: {config.get_language_name(output_language)}
             err_msg = str(e).replace('\n', ' ').replace('\r', ' ')
             print(f"STREAM_ERROR:{err_msg}", flush=True)
             raise
-        streamed_md = ''.join(streamed_chunks)
+        streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
-        # Step 3: Generate title
+        # Step 3: Generate title. generate_title logs its own failure detail
+        # (provider/model/response length on an empty result, or a traceback)
+        # and returns None rather than raising, so a failure simply leaves the
+        # placeholder name standing — no extra logging needed here.
         if _AUTO_NAMED_PATTERN.match(session_name):
-            try:
-                generated_title = self.summarizer.generate_title(
-                    streamed_md, transcript_text, language=output_language
-                )
-                if generated_title:
-                    session_name = generated_title
-                    print(f"TITLE:{session_name}", flush=True)
-                    print(f"Auto-generated title: {session_name}")
-            except Exception as e:
-                logger.warning(f"Title generation failed: {e}")
+            generated_title = self.summarizer.generate_title(
+                streamed_md, transcript_text, language=output_language
+            )
+            generated_title = _apply_chinese_variant(generated_title)
+            if generated_title:
+                session_name = generated_title
+                print(f"TITLE:{session_name}", flush=True)
+                print(f"Auto-generated title: {session_name}")
 
         # Step 4: Parse streamed markdown into structured JSON
         parsed = self._parse_streamed_markdown(streamed_md)
@@ -738,7 +812,7 @@ Summary output language: {config.get_language_name(output_language)}
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _atomic_write_text(summary_path, '\n'.join(md_lines))
 
         # Clean up
         from src.config import get_config
@@ -746,14 +820,14 @@ Summary output language: {config.get_language_name(output_language)}
             try:
                 audio_path.unlink()
                 print(f"🗑️ Cleaned up audio file: {audio_path}")
-            except Exception:
+            except OSError:
                 pass
 
         state_file = Path("recorder_state.json")
         if state_file.exists():
             try:
                 state_file.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         print(f"✅ Complete processing saved: {summary_path}")
@@ -877,7 +951,7 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
             content = content[:notes_idx] + segment + '\n' + content[notes_idx:]
         else:
             content = content.rstrip('\n') + segment + '\n'
-        target.write_text(content, encoding='utf-8')
+        _atomic_write_text(target, content)
     else:
         with open(target, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -911,7 +985,7 @@ def _read_existing_user_notes(summary_path: Path):
         if not summary_path.exists():
             return None
         content = summary_path.read_text(encoding='utf-8')
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return None
     idx = content.find('\n## User Notes')
     if idx == -1:
@@ -1135,7 +1209,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             if not is_live_transcript and not _get_config().get_keep_recordings():
                 try:
                     audio_path.unlink()
-                except Exception:
+                except OSError:
                     pass
             print("SUMMARY_SKIPPED", flush=True)
             print(f"SAVED:{append_to}", flush=True)
@@ -1183,12 +1257,12 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                 md_lines.append('## User Notes')
                 md_lines.append('')
                 md_lines.append(notes_text)
-            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            _atomic_write_text(summary_path, '\n'.join(md_lines))
 
             if not is_live_transcript and not gate_config.get_keep_recordings():
                 try:
                     audio_path.unlink()
-                except Exception:
+                except OSError:
                     pass
 
             print("SUMMARY_SKIPPED", flush=True)
@@ -1240,7 +1314,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             print(f"STREAM_ERROR:{err_msg}", flush=True)
             sys.exit(1)
 
-        streamed_md = ''.join(streamed_chunks)
+        streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
         print("STREAM_COMPLETE", flush=True)
 
@@ -1251,6 +1325,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                 generated_title = recorder.summarizer.generate_title(
                     streamed_md, transcript_text, language=output_language
                 )
+                generated_title = _apply_chinese_variant(generated_title)
                 if generated_title:
                     session_name = generated_title
                     print(f"TITLE:{session_name}", flush=True)
@@ -1296,7 +1371,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             md_lines.append('## User Notes')
             md_lines.append('')
             md_lines.append(notes_text)
-        summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+        _atomic_write_text(summary_path, '\n'.join(md_lines))
 
         # Clean up audio. When we fell back to the live transcript the batch
         # transcription was empty/failed, so KEEP the audio regardless of the
@@ -1306,7 +1381,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         if not is_live_transcript and not get_config().get_keep_recordings():
             try:
                 audio_path.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         print(f"SAVED:{summary_path}", flush=True)
@@ -1651,6 +1726,26 @@ def set_keep_recordings_cmd(enabled: bool):
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
 
 
+@cli.command(name='get-auto-install-when-idle')
+def get_auto_install_when_idle_cmd():
+    """Get whether updates auto-install when the app is idle."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"auto_install_when_idle": config.get_auto_install_when_idle()}))
+
+
+@cli.command(name='set-auto-install-when-idle')
+@click.argument('enabled', type=bool)
+def set_auto_install_when_idle_cmd(enabled: bool):
+    """Set whether updates auto-install when the app is idle."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_auto_install_when_idle(enabled):
+        print(json.dumps({"success": True, "auto_install_when_idle": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
 @cli.command(name='get-auto-summarize')
 def get_auto_summarize_cmd():
     """Get whether notes are generated automatically after transcription."""
@@ -1669,6 +1764,46 @@ def set_auto_summarize_cmd(enabled: bool):
         print(json.dumps({"success": True, "auto_summarize_enabled": enabled}))
     else:
         print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
+@cli.command(name='get-obsidian-sync')
+def get_obsidian_sync_cmd():
+    """Get whether notes are mirrored to an Obsidian vault (#413)."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"obsidian_sync_enabled": config.get_obsidian_sync_enabled()}))
+
+
+@cli.command(name='set-obsidian-sync')
+@click.argument('enabled', type=bool)
+def set_obsidian_sync_cmd(enabled: bool):
+    """Enable/disable mirroring notes to an Obsidian vault."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_obsidian_sync_enabled(enabled):
+        print(json.dumps({"success": True, "obsidian_sync_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to persist setting"}))
+
+
+@cli.command(name='get-obsidian-vault-path')
+def get_obsidian_vault_path_cmd():
+    """Get the configured Obsidian vault folder (empty = not configured)."""
+    from src.config import get_config
+    config = get_config()
+    print(json.dumps({"obsidian_vault_path": config.get_obsidian_vault_path()}))
+
+
+@cli.command(name='set-obsidian-vault-path')
+@click.argument('vault_path', default='')
+def set_obsidian_vault_path_cmd(vault_path):
+    """Set the Obsidian vault folder (empty to clear)."""
+    from src.config import get_config
+    config = get_config()
+    if config.set_obsidian_vault_path(vault_path):
+        print(json.dumps({"success": True, "obsidian_vault_path": vault_path}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to set vault path"}))
 
 
 @cli.command(name='get-silence-auto-stop')
@@ -1985,6 +2120,37 @@ class _LiveVadPipeline:
     MAX_UTTERANCE_S = 30.0
     PREROLL_CHUNKS = 2  # ≈ 512 ms at 256 ms per callback
 
+    # Keep-pace guard (issue #357). Read + VAD + partial/final decode run
+    # synchronously on the single stdin-consumer thread, so a partial decode
+    # that takes longer than the audio it represents back-pressures the stdin
+    # pipe and the sidecar drifts behind real time (measured ~670 ms partial
+    # decode on a fanless M1 Air vs the 400 ms interval → ~94 % of partials
+    # over budget, audio backing up across the recording). Partials are
+    # best-effort display only — finals accumulate every sample regardless —
+    # so when decode is slow we stretch the *effective* partial cadence to an
+    # EWMA of measured decode time, dropping the partials that would otherwise
+    # queue up while always draining stdin. On fast machines (decode ≪ the
+    # interval) the effective cadence is the base interval, unchanged.
+    #
+    # Scope + known limits (kept deliberately per-channel; the shared decode
+    # coordinator belongs with the strategic ANE/threading rework):
+    #   * Cadence is tracked per channel, so two channels in *sustained*
+    #     simultaneous speech each keep their own pace but their decodes still
+    #     run serially on the one consumer thread — combined load can exceed
+    #     real time. The dominant single-speaker case (and the issue's own
+    #     measurements) is fully covered; continuous cross-talk on a fanless
+    #     Air is the residual gap, bounded by the stdin queue on the JS side.
+    #   * The EWMA only samples when a partial actually decodes, and its ALPHA
+    #     smoothing means a one-off spike inflates the interval only partly and
+    #     decays back over the next few partials of sustained speech.
+    KEEP_PACE_SAFETY = 1.15         # headroom over measured decode time
+    KEEP_PACE_ALPHA = 0.3           # EWMA weight for the newest decode sample
+    # Ceiling on the stretched cadence. High enough that a genuinely slow
+    # decoder (e.g. onnx-asr on a Windows CPU, several seconds per 15 s window)
+    # can still stretch far enough to keep pace, while ALPHA smoothing keeps a
+    # spurious spike from pinning partials at the ceiling.
+    KEEP_PACE_MAX_INTERVAL_S = 8.0
+
     @classmethod
     def _load_shared(cls, source_rate, source_label):
         """Load Parakeet config shared by both channel pipelines. Returns
@@ -2170,6 +2336,12 @@ class _LiveVadPipeline:
         self.last_partial_text = ""
         self.preroll: list = []
         self.cursor = 0
+        # Keep-pace guard state (issue #357): EWMA of measured partial-decode
+        # wall-time, used to stretch the effective partial cadence so a slow
+        # decode can't back-pressure stdin. 0.0 until the first partial has
+        # been timed (until then the fast path uses the base interval).
+        self._partial_decode_ewma_s = 0.0
+        self._keep_pace_max_interval_samples = int(sr * self.KEEP_PACE_MAX_INTERVAL_S)
 
     def parse_float32_bytes(self, raw_bytes):
         """Parse raw little-endian float32 bytes into a 1-D float32 array.
@@ -2281,23 +2453,62 @@ class _LiveVadPipeline:
         self.last_partial_count = 0
         self.last_partial_text = ""
 
+    def _effective_partial_interval_samples(self):
+        """Adaptive partial cadence in samples (issue #357 keep-pace guard).
+
+        Base cadence is ``partial_interval_samples`` (0.4 s of audio). Once a
+        partial decode has been timed and its EWMA exceeds that budget, the
+        sidecar would fall behind real time, so we require at least as much
+        *audio* between partials as the decode takes wall-clock (× a safety
+        margin), capped at ``KEEP_PACE_MAX_INTERVAL_S`` so a one-off spike
+        can't starve partials entirely. On fast machines (decode ≪ budget)
+        this returns the base cadence unchanged.
+        """
+        if self._partial_decode_ewma_s <= 0.0:
+            return self.partial_interval_samples
+        pace_samples = int(self._partial_decode_ewma_s * self.KEEP_PACE_SAFETY * self.sr)
+        effective = max(self.partial_interval_samples, pace_samples)
+        return min(effective, self._keep_pace_max_interval_samples)
+
+    def _record_partial_decode_time(self, dt_s):
+        """Fold a measured partial-decode wall-time into the keep-pace EWMA."""
+        if dt_s < 0:
+            return
+        if self._partial_decode_ewma_s <= 0.0:
+            self._partial_decode_ewma_s = dt_s
+        else:
+            self._partial_decode_ewma_s = (
+                (1.0 - self.KEEP_PACE_ALPHA) * self._partial_decode_ewma_s
+                + self.KEEP_PACE_ALPHA * dt_s
+            )
+
     def _maybe_emit_partial(self):
         delta = len(self.speech_samples) - self.last_partial_count
-        if delta < self.partial_interval_samples:
+        if delta < self._effective_partial_interval_samples():
             return
         if len(self.speech_samples) < self.min_utterance_samples:
             return
         # Only the trailing window — re-transcribing the full utterance
-        # every PARTIAL_INTERVAL_S would scale O(n²) with utterance length.
+        # every partial would scale O(n²) with utterance length.
         tail = self.speech_samples[-self.partial_window_samples:]
+        decode_started = time.monotonic()
         try:
             result = self.transcribe_samples(tail, language=self.language)
         except Exception as e:
             # Partials are best-effort. Don't tear down the consumer over
             # a transient decode hiccup; the next partial/final retries.
+            # Still fold the wall-time spent into the keep-pace EWMA — a
+            # decode that burns 700 ms before throwing is exactly the kind of
+            # cost that must widen the cadence, or a failing decoder would
+            # rebuild the backlog at the tight interval it was meant to relieve.
+            self._record_partial_decode_time(time.monotonic() - decode_started)
             logger.debug("partial transcribe failed: %s", e)
             self.last_partial_count = len(self.speech_samples)
             return
+        # Fold real decode wall-time into the keep-pace EWMA before anything
+        # can early-return, so a slow machine widens the next interval even
+        # when the text is empty or unchanged.
+        self._record_partial_decode_time(time.monotonic() - decode_started)
         text = (result.get("text") or "").strip() if result else ""
         self.last_partial_count = len(self.speech_samples)
         if text and text != self.last_partial_text:
@@ -2463,7 +2674,14 @@ def test():
 
 
 def _parse_meeting_markdown(md_path):
-    """Parse a .md meeting file into the standard meeting dict."""
+    """Parse a .md meeting file into the standard meeting dict.
+
+    Mirrored by parseMeetingMarkdown in app/main.js (the detail-page /
+    get-meeting parser, which reads the .md directly to avoid a Python
+    round-trip). The two MUST surface the same session_info / meeting-dict
+    contract — they drift silently otherwise (see #346, and #313 for a prior
+    drift). Any change here has to land there too.
+    """
     content = md_path.read_text(encoding='utf-8')
 
     # Split frontmatter
@@ -2707,7 +2925,10 @@ def list_meetings():
 @cli.command()
 @click.argument('summary_file', required=True)
 @click.option('--regenerate-title', is_flag=True, default=False, help='Also regenerate the meeting title')
-def reprocess(summary_file, regenerate_title):
+@click.option('--retranscribe', is_flag=True, default=False,
+              help='Re-run transcription on the source recording (requires the audio to '
+                   'still exist) with the current settings before re-summarising')
+def reprocess(summary_file, regenerate_title, retranscribe):
     """Reprocess a failed summary by re-running Ollama analysis on existing transcript"""
     import json
     from pathlib import Path
@@ -2728,6 +2949,82 @@ def reprocess(summary_file, regenerate_title):
         else:
             with open(summary_path, 'r') as f:
                 existing_data = json.load(f)
+
+        # Re-transcribe (#266): re-run ASR on the ORIGINAL recording with the
+        # CURRENT global engine/model/language settings, then fall through into
+        # the normal summarise+rewrite path below so the rewritten note carries a
+        # fresh transcript AND a fresh summary (the #249 standard-backup still
+        # runs). MVP gate: only possible when the source audio still exists on
+        # disk (keep-recordings was on); if it's gone, fail cleanly and touch
+        # nothing. The non-retranscribe path is unchanged (flag defaults false).
+        if retranscribe:
+            import asyncio
+            session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+            stem = summary_path.stem
+            if stem.endswith('_summary'):
+                stem = stem[:-len('_summary')]
+            recording = _find_recording_for_stem(recorder.recordings_dir, stem)
+            if recording is None:
+                # Distinct marker so the renderer surfaces "recording no longer
+                # available" rather than a generic failure — nothing is written.
+                print("STREAM_ERROR:RETRANSCRIBE_NO_AUDIO", flush=True)
+                sys.exit(1)
+
+            print(f"Re-transcribing recording: {recording.name}", flush=True)
+            # Keep the Electron inactivity watchdog alive across ASR using the
+            # backend's REAL per-chunk progress signal — the same mechanism
+            # process-streaming uses (not the capped summary heartbeat, which
+            # stops after ~30 beats and could let the 8-min watchdog kill a
+            # genuinely long transcription, e.g. a multi-hour meeting on CPU).
+            # A heartbeat must never break transcription — if the registry can't
+            # even import, transcribe without one.
+            try:
+                from src.parakeet import set_chunk_heartbeat
+            except Exception:
+                def set_chunk_heartbeat(_cb):
+                    pass
+
+            def _transcribe_heartbeat(done, total):
+                sys.stdout.write(f"HEARTBEAT:transcribe:{done}/{total}\n")
+                sys.stdout.flush()
+
+            print("HEARTBEAT:transcribe:start", flush=True)
+            set_chunk_heartbeat(_transcribe_heartbeat)
+            try:
+                transcribe_result = asyncio.run(
+                    recorder.transcribe_audio(str(recording), session_name)
+                )
+            finally:
+                set_chunk_heartbeat(None)
+
+            if transcribe_result.get("transcription_failed"):
+                err_msg = str(
+                    transcribe_result.get("error") or "transcription failed"
+                ).replace('\n', ' ').replace('\r', ' ')
+                print(f"STREAM_ERROR:{err_msg}", flush=True)
+                sys.exit(1)
+
+            # Mirror process_streaming's `## Transcript` content exactly:
+            # diarised text when diarisation ran, else the flat transcript.
+            fresh_transcript = (
+                transcribe_result.get("diarised_text")
+                or transcribe_result.get("transcript_text")
+                or ""
+            )
+            existing_data['transcript'] = fresh_transcript
+            existing_data['is_diarised'] = transcribe_result.get("is_diarised", False)
+            existing_data['diarised_text'] = transcribe_result.get("diarised_text")
+            # Refresh language provenance from the NEW transcribe result — the
+            # transcript changed, so the persisted configured/detected/output
+            # values no longer describe it. resolve_persisted_output_language
+            # (below) then trusts this fresh, pin/engine-backed output_language.
+            _si = existing_data.setdefault('session_info', {})
+            _si['configured_language'] = transcribe_result.get("configured_language")
+            _si['detected_language'] = transcribe_result.get("detected_language")
+            _si['output_language'] = transcribe_result.get("output_language")
+            # A full re-transcribe replaces any live-sourced transcript, so the
+            # live-transcript flag (#207) no longer applies to this note.
+            _si.pop('is_live_transcript', None)
 
         # Get transcript from the data
         transcript = existing_data.get('transcript', '')
@@ -2794,21 +3091,32 @@ def reprocess(summary_file, regenerate_title):
             print(f"STREAM_ERROR:{err_msg}", flush=True)
             sys.exit(1)
 
-        streamed_md = ''.join(streamed_chunks)
+        streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
-        # Regenerate title if requested
-        if regenerate_title:
-            try:
-                generated_title = recorder.summarizer.generate_title(
-                    streamed_md, transcript, language=output_language
-                )
-                if generated_title:
-                    session_name = generated_title
-                    existing_data["session_info"]["name"] = generated_title
-                    print(f"TITLE:{session_name}", flush=True)
-                    print(f"Auto-generated title: {session_name}")
-            except Exception as e:
-                print(f"Title regeneration skipped: {e}")
+        # Regenerate the title when explicitly forced OR when the note still has
+        # an auto/placeholder name. The latter is the common case now that the
+        # pipeline is transcript-first (#276): with auto-summarize off, a fresh
+        # recording is saved transcript-only as "Note", and the user fills it in
+        # later via "Generate notes" — which reprocesses with regenerate_title
+        # False. Without this, that path produced a summary but left the title
+        # stuck at "Note" forever. Gating on _AUTO_NAMED_PATTERN mirrors
+        # process_streaming's title step and protects a user-renamed note from
+        # being overwritten.
+        # `not session_name` guards a note whose title is null/empty: it should
+        # be named (treat as auto), and it must short-circuit before the regex
+        # since re.match(None) raises.
+        if regenerate_title or not session_name or _AUTO_NAMED_PATTERN.match(session_name):
+            # generate_title logs its own failure detail and returns None rather
+            # than raising, so a failure just leaves the current name standing.
+            generated_title = recorder.summarizer.generate_title(
+                streamed_md, transcript, language=output_language
+            )
+            generated_title = _apply_chinese_variant(generated_title)
+            if generated_title:
+                session_name = generated_title
+                existing_data["session_info"]["name"] = generated_title
+                print(f"TITLE:{session_name}", flush=True)
+                print(f"Auto-generated title: {session_name}")
 
         # Add reprocess timestamp
         existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
@@ -2887,7 +3195,7 @@ def reprocess(summary_file, regenerate_title):
                 md_lines.append('## User Notes')
                 md_lines.append('')
                 md_lines.append(notes_text)
-            summary_path.write_text('\n'.join(md_lines), encoding='utf-8')
+            _atomic_write_text(summary_path, '\n'.join(md_lines))
         else:
             # JSON format: parse streamed markdown into structured fields
             parsed = recorder._parse_streamed_markdown(streamed_md)
@@ -3043,7 +3351,7 @@ def generate_report(summary_file, template_id):
         print(f"STREAM_ERROR:{err_msg}", flush=True)
         sys.exit(1)
 
-    streamed_md = ''.join(streamed_chunks)
+    streamed_md = _apply_chinese_variant(''.join(streamed_chunks)) or ''
 
     # Do NOT persist an empty report — surface a stream error instead.
     if not streamed_md.strip():
@@ -3105,6 +3413,7 @@ def regen_title(summary_file):
             recorder.summarizer = OllamaSummarizer()
 
         generated_title = recorder.summarizer.generate_title(summary, transcript, language=output_language)
+        generated_title = _apply_chinese_variant(generated_title)
         if not generated_title:
             print("ERROR: Title generation returned empty result")
             sys.exit(1)
@@ -3117,7 +3426,7 @@ def regen_title(summary_file):
             import re
             escaped = generated_title.replace('\\', '\\\\').replace('"', '\\"')
             text = re.sub(r'^title:.*$', f'title: "{escaped}"', text, flags=re.MULTILINE)
-            summary_path.write_text(text, encoding='utf-8')
+            _atomic_write_text(summary_path, text)
         else:
             with open(summary_path, 'w') as f:
                 json.dump(existing_data, f, indent=2)
@@ -3369,6 +3678,8 @@ def chat_global_streaming(question, folder):
             summaries.append((f, data))
             seen.add(f.stem.replace('_summary', ''))
         except Exception:
+            # Best-effort listing: a single malformed/legacy note must never
+            # break the whole meeting list — skip it and keep scanning.
             continue
     for f in sorted(output_dir.glob("*_summary.json")):
         if f.stem.replace('_summary', '') in seen:
@@ -3376,7 +3687,7 @@ def chat_global_streaming(question, folder):
         try:
             with open(f, 'r', encoding='utf-8') as fh:
                 summaries.append((f, json.load(fh)))
-        except Exception:
+        except (OSError, ValueError):
             continue
 
     # Folder scoping. Each meeting record carries a 'folders' array of IDs;
@@ -3824,6 +4135,9 @@ def list_models():
             import ollama as ollama_pkg
             installed_names = {getattr(m, 'model', '') for m in (getattr(ollama_pkg.list(), 'models', []) or [])}
         except Exception:
+            # Best-effort: Ollama may be absent, not running, or unreachable
+            # (import or HTTP/connection errors) — treat nothing as installed
+            # rather than failing the model-status listing.
             installed_names = set()
         from src.config import is_apple_silicon, Config
         apple_silicon = provider == "local" and is_apple_silicon()
@@ -4012,6 +4326,38 @@ def set_notifications(enabled):
 
 
 @cli.command()
+def get_record_hotkey():
+    """Get the current global record shortcut preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_record_hotkey_enabled()
+
+    result = {
+        "record_hotkey_enabled": enabled
+    }
+
+    print(json.dumps(result, indent=2))
+
+
+@cli.command()
+@click.argument('enabled', type=bool)
+def set_record_hotkey(enabled):
+    """Set global record shortcut preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_record_hotkey_enabled(enabled)
+
+    if success:
+        print(f"SUCCESS: Record shortcut {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "record_hotkey_enabled": enabled}))
+    else:
+        print("ERROR: Failed to save record shortcut preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_dock_icon():
     """Get the current hide-dock-icon preference"""
     from src.config import get_config
@@ -4028,7 +4374,10 @@ def get_org_auto_backup():
     from src.config import get_config
 
     config = get_config()
-    print(json.dumps({"org_auto_backup_enabled": config.get_org_auto_backup_enabled()}))
+    print(json.dumps({
+        "org_auto_backup_enabled": config.get_org_auto_backup_enabled(),
+        "org_auto_backup_preference_set": config.has_org_auto_backup_preference(),
+    }))
 
 
 @cli.command()
@@ -4075,6 +4424,34 @@ def set_dock_icon(enabled):
 
 
 @cli.command()
+def get_menu_bar_icon():
+    """Get the current show-menu-bar-icon preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_show_menu_bar_icon()
+
+    print(json.dumps({"show_menu_bar_icon": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_menu_bar_icon(enabled):
+    """Set show-menu-bar-icon preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_show_menu_bar_icon(enabled)
+
+    if success:
+        print(f"SUCCESS: Show menu bar icon {'enabled' if enabled else 'disabled'}")
+        print(json.dumps({"success": True, "show_menu_bar_icon": enabled}))
+    else:
+        print(f"ERROR: Failed to save show menu bar icon preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
 def get_telemetry():
     """Get the current telemetry preference and anonymous ID"""
     from src.config import get_config
@@ -4105,6 +4482,28 @@ def set_telemetry(enabled):
         print(json.dumps({"success": True, "telemetry_enabled": enabled}))
     else:
         print(f"ERROR: Failed to save telemetry preference")
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_privacy_notice_seen():
+    """Get whether the one-time privacy notice has been acknowledged."""
+    from src.config import get_config
+
+    config = get_config()
+    print(json.dumps({"privacy_notice_seen": config.get_privacy_notice_seen()}))
+
+
+@cli.command()
+def set_privacy_notice_seen():
+    """Mark the one-time privacy notice as acknowledged."""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_privacy_notice_seen(True)
+    if success:
+        print(json.dumps({"success": True, "privacy_notice_seen": True}))
+    else:
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 
 
@@ -4158,6 +4557,32 @@ def set_auto_detect_meetings(enabled):
 
     if success:
         print(json.dumps({"success": True, "auto_detect_meetings_enabled": enabled}))
+    else:
+        print(json.dumps({"success": False, "error": "Failed to save config"}))
+
+
+@cli.command()
+def get_premeeting_notifications():
+    """Get the current pre-meeting (calendar) notification preference"""
+    from src.config import get_config
+
+    config = get_config()
+    enabled = config.get_premeeting_notifications_enabled()
+
+    print(json.dumps({"premeeting_notifications_enabled": enabled}))
+
+
+@cli.command()
+@click.argument('enabled', callback=lambda ctx, param, v: v.lower() == 'true')
+def set_premeeting_notifications(enabled):
+    """Set pre-meeting (calendar) notification preference (True/False)"""
+    from src.config import get_config
+
+    config = get_config()
+    success = config.set_premeeting_notifications_enabled(enabled)
+
+    if success:
+        print(json.dumps({"success": True, "premeeting_notifications_enabled": enabled}))
     else:
         print(json.dumps({"success": False, "error": "Failed to save config"}))
 
@@ -4625,6 +5050,8 @@ def test_cloud_api():
                 try:
                     detail = he.read().decode("utf-8", errors="replace")[:300]
                 except Exception:
+                    # Best-effort error-detail extraction; must never mask the
+                    # HTTPError we're about to report to the user.
                     pass
                 print(json.dumps({
                     "success": False,
