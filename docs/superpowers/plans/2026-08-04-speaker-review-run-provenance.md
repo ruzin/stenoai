@@ -182,11 +182,11 @@
 - Consumes: Task 6's key.
 - Produces: no new public surface; a counted, logged report on both paths.
 
-- [ ] **Step 1: Write the failing tests.** `backfill-speaker-embeddings --force` over a sidecar carrying `review_state` markings reports their count alongside the existing `lost_multi_speaker_markings`. The `reprocess --retranscribe` path emits a warning naming both counts where today it emits nothing - this is the pre-existing silent loss, so assert on the current silence first to prove the test bites.
-- [ ] **Step 2: Run and watch them fail.**
-- [ ] **Step 3: Implement.** The backfill already reads the previous sidecar before overwriting; extend its accounting. Give `_persist_speaker_sidecar` the same read-before-overwrite accounting, reported as a `logger.warning` plus one greppable stdout line mirroring the backfill's wording, because `reprocess` streams lines rather than one JSON document. Do not surface it in the renderer; that is out of scope.
-- [ ] **Step 4: Run green.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 1: Write the failing tests.** `backfill-speaker-embeddings --force` over a sidecar carrying `review_state` markings reports their count alongside the existing `lost_multi_speaker_markings`. The `reprocess --retranscribe` path emits a warning naming both counts where today it emits nothing - this is the pre-existing silent loss, so assert on the current silence first to prove the test bites.
+- [x] **Step 2: Run and watch them fail.**
+- [x] **Step 3: Implement.** The backfill already reads the previous sidecar before overwriting; extend its accounting. Give `_persist_speaker_sidecar` the same read-before-overwrite accounting, reported as a `logger.warning` plus one greppable stdout line mirroring the backfill's wording, because `reprocess` streams lines rather than one JSON document. Do not surface it in the renderer; that is out of scope.
+- [x] **Step 4: Run green.**
+- [x] **Step 5: Commit.**
 
 ---
 
