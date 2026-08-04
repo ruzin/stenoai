@@ -46,6 +46,7 @@ import re
 import subprocess
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -582,11 +583,25 @@ def write_speakers_sidecar(
     "which line belongs to this cluster" via fuzzy timestamp matching
     after the fact -- see the plan doc's Phase 8. Omitted (not written as
     an empty list) when not given, so older sidecars and this key's
-    absence both read the same way via `.get("transcript_lines")`."""
+    absence both read the same way via `.get("transcript_lines")`.
+
+    Mints a fresh `diarization_run` (`run_id` + `created_at`) every call,
+    minted HERE rather than by each caller: every producer of a new run --
+    the live pipeline, the Phase 3 backfill command, and a future
+    re-diarize -- funnels through this one function, so stamping it here
+    needs no new plumbing at any call site and cannot be forgotten by one.
+    The read-modify-write helpers (`write_sidecar_document`,
+    `set_cluster_multi_speaker`) rewrite the whole document instead of
+    calling back in here, so they carry the existing run id forward
+    unchanged -- a rewrite of the same diarization output is not a new
+    run, and re-minting on every write would make a stale review-state
+    key (added in a later slice) look current when the clusters it was
+    reviewed against never changed."""
     payload = {
         "meeting_id": meeting_stem,
         "created_at": time.time(),
         "channels": channels,
+        "diarization_run": {"run_id": str(uuid.uuid4()), "created_at": time.time()},
     }
     if turn_manifest:
         payload["transcript_lines"] = turn_manifest

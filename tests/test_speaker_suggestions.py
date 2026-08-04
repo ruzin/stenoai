@@ -27,6 +27,7 @@ from src.speaker_suggestions import (
     relabel_transcript_multi,
     relabel_transcript_speaker,
     score_candidates,
+    set_cluster_multi_speaker,
     suggest_speaker,
     suggest_speakers_for_meeting,
     write_speakers_sidecar,
@@ -571,6 +572,78 @@ class SpeakersSidecarTests(unittest.TestCase):
             output_dir = Path(tmp_dir)
             (output_dir / "mtg001_speakers.json").write_text("{not json")
             self.assertIsNone(read_speakers_sidecar(output_dir, "mtg001"))
+
+    def test_write_stamps_a_diarization_run(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            channels = {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            loaded = read_speakers_sidecar(output_dir, "mtg001")
+            run = loaded["diarization_run"]
+            self.assertIsInstance(run["run_id"], str)
+            self.assertTrue(run["run_id"])
+            self.assertIsInstance(run["created_at"], float)
+
+    def test_successive_writes_mint_different_run_ids(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            channels = {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            first_run_id = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            second_run_id = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            self.assertNotEqual(first_run_id, second_run_id)
+
+    def test_legacy_sidecar_without_diarization_run_round_trips_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            legacy = {
+                "meeting_id": "mtg001",
+                "created_at": 100.0,
+                "channels": {
+                    "mic": {
+                        "recording_type": "in_person",
+                        "clusters": {
+                            "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                        },
+                    },
+                },
+            }
+            (output_dir / "mtg001_speakers.json").write_text(json.dumps(legacy))
+            loaded = read_speakers_sidecar(output_dir, "mtg001")
+            self.assertEqual(loaded, legacy)
+            self.assertIsNone(loaded.get("diarization_run"))
+
+    def test_rewrite_via_set_cluster_multi_speaker_preserves_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            channels = {
+                "system": {
+                    "recording_type": "remote",
+                    "clusters": {
+                        "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            run_id_before = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            set_cluster_multi_speaker(output_dir, "mtg001", "system", "SPEAKER_0", True)
+            run_id_after = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            self.assertEqual(run_id_before, run_id_after)
 
     def test_clusters_from_sidecar_channel_builds_expected_shape(self):
         channel = {
