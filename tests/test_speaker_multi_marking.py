@@ -1522,6 +1522,9 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
         })
         return output_dir
 
+    def _run_id(self, tmp):
+        return read_speakers_sidecar(Path(tmp) / "output", "mtg001")["diarization_run"]["run_id"]
+
     def test_counts_unnamed_clusters(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
@@ -1540,10 +1543,36 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
                 speech_duration_seconds=60.0, segment_count=10,
                 created_from="user_confirmed", channel="system",
+                # Stamped with the sidecar's own run, the way a real confirm
+                # against it does -- an unstamped prototype here would
+                # describe a state the app cannot reach.
+                diarization_run_id=self._run_id(tmp),
             )
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
             self.assertEqual(data["named_clusters"], 1)
             self.assertEqual(data["unnamed_clusters"], 1)
+
+    def test_a_name_from_a_superseded_run_does_not_count_as_named(self):
+        # This feeds the sentence shown before a delete, and the cost of
+        # getting it wrong is one-directional: an unnamed cluster is gone
+        # for good once the audio is deleted, and a stale prototype claiming
+        # its id is exactly how a cluster nobody has ever heard gets counted
+        # as already taken care of.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = cfg.create_person_profile("Julian")
+            cfg.add_speaker_prototype(
+                person["person_id"], [1.0, 0.0], recording_type="remote",
+                meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
+                speech_duration_seconds=60.0, segment_count=10,
+                created_from="user_confirmed", channel="system",
+                diarization_run_id=self._run_id(tmp),
+            )
+            self._seed(tmp)  # re-diarized: same ids, new run, other voices
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            self.assertEqual(data["named_clusters"], 0)
+            self.assertEqual(data["unnamed_clusters"], 2)
 
     def test_a_marked_cluster_is_not_counted_as_waiting_to_be_named(self):
         # It has already been reviewed and ruled out. Counting it would nag

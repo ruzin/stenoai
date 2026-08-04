@@ -1350,6 +1350,17 @@ def confirmed_participant_names(meeting_stem: str, profiles: list) -> list:
     already carry the `meeting_id` they were confirmed from. A person
     counts once even with multiple prototypes from this meeting (e.g.
     merged same-channel fragments, or confirmed on both channels).
+
+    Meeting-scoped and NOT run-scoped, deliberately -- do not "fix" this
+    into running prototype_run_matches the way the cluster-level readers
+    do. Attendance is a property of the meeting, not of a diarization run:
+    a prototype from a superseded run no longer says WHICH cluster this
+    person is, but it still says they were confirmed as present here, and
+    that stays true however often the audio is re-diarized. Run-filtering
+    it would empty the Participants section on every reprocess (the
+    `full-reprocess` restore reads exactly this), deleting correct
+    information to enforce a scope that answers a question nobody asked
+    here.
     """
     names = []
     for person in profiles:

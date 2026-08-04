@@ -336,6 +336,78 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(len(sarah_profile["prototypes"]), 1)
             self.assertNotIn("diarization_run_id", sarah_profile["prototypes"][0])
 
+    def test_a_superseded_prototype_does_not_keep_someone_present_in_this_channel(self):
+        # The `still_present` read that guards the negative cleanup. When a
+        # person loses their only cluster of THIS run, the negatives they
+        # earned by being here go with it -- but a leftover prototype from a
+        # superseded run reads as "they still own a cluster here" and
+        # suppresses that cleanup, leaving evidence behind that nothing in
+        # this meeting justifies any more.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            max_id = cfg.create_person_profile("Max")["person_id"]
+            # His run-1 cluster, on the id he does NOT hold in run 2.
+            cfg.add_speaker_prototype(
+                max_id, [0.0, 1.0], recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_01", speech_duration_seconds=25.0,
+                segment_count=4, created_from="user_confirmed", channel="mic",
+                diarization_run_id=run1,
+            )
+
+            self._rediarize(tmp)
+            # Earned, not hand-built: confirming him and then Sarah is what
+            # mints his run-2 negative in the first place.
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--person-id", max_id], tmp, cfg=cfg)
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            self.assertEqual(len(cfg.get_person_profile(max_id)["hard_negatives"]), 1)
+
+            # He loses his one run-2 cluster to Ida, so he is no longer
+            # present in this channel in this run at all.
+            r, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Ida"], tmp, cfg=cfg)
+            self.assertEqual(_last_json(r.output)["reassigned_from"], ["Max"])
+
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual(
+                max_profile["hard_negatives"], [],
+                "his run-2 negatives rest on a presence he no longer has",
+            )
+            self.assertEqual(
+                [p["diarization_run_id"] for p in max_profile["prototypes"]], [run1],
+                "and his run-1 prototype is still not this confirm's to touch",
+            )
+
+    def test_a_superseded_prototype_does_not_seed_negatives_from_this_runs_voices(self):
+        # The mutual-negative source selection. It picks a person by
+        # meeting+cluster id and then mints a negative from the CURRENT run's
+        # embedding for that id -- so an unscoped match records "Sarah is not
+        # this voice" about a voice Max was never confirmed next to, and
+        # hands Max the same about Sarah. Hard negatives are permanent
+        # suppression, so a wrong one is not noise: it refuses a real match
+        # for either of them in meetings that have nothing to do with this.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            max_id = cfg.create_person_profile("Max")["person_id"]
+            cfg.add_speaker_prototype(
+                max_id, [0.0, 1.0], recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_01", speech_duration_seconds=25.0,
+                segment_count=4, created_from="user_confirmed", channel="mic",
+                diarization_run_id=run1,
+            )
+
+            self._rediarize(tmp)
+            result, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Sarah"], tmp, cfg=cfg)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["hard_negatives_added_against"], [])
+            self.assertEqual(cfg.get_person_profile(data["person_id"])["hard_negatives"], [])
+            self.assertEqual(cfg.get_person_profile(max_id)["hard_negatives"], [])
+
     def _seed_legacy_sidecar(self, tmp, meeting_stem="mtg001"):
         # A sidecar written before diarization_run existed -- no top-level
         # "diarization_run" key at all, not one holding None. Written by
@@ -497,8 +569,13 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
     def test_legacy_prototype_without_channel_still_matches_via_recording_type(self):
         # A prototype confirmed before the channel field existed must still
         # count as a same-channel confirmation via the recording_type proxy.
+        # On a legacy sidecar, because that is where such a prototype
+        # actually lives: a build old enough to write no `channel` wrote no
+        # run block either, and pairing it with a freshly stamped sidecar
+        # would describe a meeting re-diarized since that confirm -- which
+        # the run scope correctly refuses, testing something else entirely.
         with tempfile.TemporaryDirectory() as tmp:
-            self._seed_sidecar(tmp)
+            self._seed_legacy_sidecar(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
             alice = cfg.create_person_profile("Alice")
             cfg.add_speaker_prototype(

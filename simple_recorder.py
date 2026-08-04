@@ -4922,6 +4922,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         confirmed_participant_names,
         merge_same_channel_fragments,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
         record_original_labels,
         relabel_transcript_exact,
@@ -5048,15 +5049,16 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         # and the rebuild below only restores negatives for the person being
         # confirmed now, so that evidence was simply lost.
         #
-        # This read stays unscoped while the removal it guards is scoped, so
-        # a leftover prototype from a superseded run reads as "still owns a
-        # cluster here" and suppresses the cleanup. Left as is deliberately:
-        # the failure direction is keeping evidence rather than destroying
-        # it. Whether the two should agree is the read path's decision (the
-        # next task), not something to settle from one side here.
+        # Run-scoped like the removal it guards, and it has to be: a
+        # leftover prototype from a superseded run would otherwise read as
+        # "still owns a cluster here" and suppress the cleanup for good,
+        # since nothing ever deletes that prototype. "Present" here means
+        # present in the meeting as it is diarized NOW, which is the only
+        # sense in which the negatives below are still justified.
         still_present = any(
             p.get("meeting_id") == meeting_stem
             and prototype_channel_matches(p, channel, channel_recording_type)
+            and prototype_run_matches(p, run_id)
             for p in (config.get_person_profile(existing_person["person_id"]) or {}).get(
                 "prototypes",
             ) or []
@@ -5139,22 +5141,20 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         # with no negative evidence at all, so a later meeting could still
         # match this speaker to it.
         #
-        # NOT run-scoped, and the run scoping added to the removals above
-        # made that worse rather than neutral. This selects a prototype by
-        # meeting+sid+channel and then mints a negative from the CURRENT
-        # run's embedding for that id -- so a prototype confirmed against a
-        # superseded run produces a negative about a voice that person was
-        # never confirmed next to. Before the scoping the damage window was
-        # bounded: the next confirm of that id deleted the stale prototype,
-        # because it matched unscoped. Now stale prototypes persist
-        # indefinitely, so this read can fire arbitrarily far in the future.
-        # Closing it is the read path's job (the next task) -- this selection
-        # has to run the same prototype_run_matches predicate.
+        # Run-scoped, because this selects a prototype by meeting+sid+channel
+        # and then mints a negative from the CURRENT run's embedding for that
+        # id. Unscoped, a prototype confirmed against a superseded run would
+        # produce a negative about a voice that person was never confirmed
+        # next to -- permanent suppression evidence built from a coincidence
+        # of cluster numbering, in both directions, and it would keep firing
+        # for as long as the meeting exists since the superseded prototype is
+        # deliberately never deleted.
         matches = [
             p for p in (other_person.get("prototypes") or [])
             if p.get("meeting_id") == meeting_stem
             and p.get("diarization_speaker_id") in other_sids
             and prototype_channel_matches(p, channel, channel_recording_type)
+            and prototype_run_matches(p, run_id)
         ]
         if not matches:
             continue
@@ -5470,6 +5470,7 @@ def speaker_naming_status(meeting_stem):
         merge_same_channel_fragments,
         clusters_from_sidecar_channel,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
     )
 
@@ -5482,6 +5483,13 @@ def speaker_naming_status(meeting_stem):
         }))
         return
 
+    # A name from a superseded diarization run does not name anything here:
+    # the run this sidecar describes renumbered its clusters, so that
+    # prototype's id now belongs to whichever voice inherited it. Counting
+    # it as named is the one error direction that costs data -- it hides an
+    # unnamed cluster from the delete warning, and an unnamed cluster cannot
+    # be named again once the audio is gone.
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
     profiles = get_config().get_person_profiles()
     total = 0
     named = 0
@@ -5508,6 +5516,7 @@ def speaker_naming_status(meeting_stem):
                     p.get("meeting_id") == meeting_stem
                     and p.get("diarization_speaker_id") in fragment_ids
                     and prototype_channel_matches(p, channel_name, recording_type)
+                    and prototype_run_matches(p, run_id)
                     for p in (person.get("prototypes") or [])
                 )
                 for person in profiles
@@ -5545,6 +5554,7 @@ def suggest_speakers(meeting_stem):
         merge_same_channel_fragments,
         minimum_speaker_count,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
         sample_text_from_samples,
         suggest_speakers_for_meeting,
@@ -5580,6 +5590,14 @@ def suggest_speakers(meeting_stem):
     # unaffected; they cut audio at this run's own segments.
     turn_manifest = sidecar.get("transcript_lines")
 
+    # Which diarization run the clusters below belong to. A prototype
+    # confirmed against a DIFFERENT run describes a voice this run may have
+    # given to somebody else -- the diarizer numbers from SPEAKER_0 every
+    # time with no memory of who held that id -- so it may not speak for
+    # any row here. `None` on a legacy sidecar, where the predicate's
+    # both-absent rule keeps every existing confirmation current.
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
+
     profiles = get_config().get_person_profiles()
     # Merge fragments per channel first, then suggest for ALL channels in
     # one call -- used-person exclusivity is meeting-wide (a person can't
@@ -5595,6 +5613,11 @@ def suggest_speakers(meeting_stem):
     results_by_channel = suggest_speakers_for_meeting(merged_by_channel, profiles)
 
     channels_out = {}
+    # People whose confirmation in this meeting was made against a run that
+    # no longer describes anything on screen, keyed by person id so someone
+    # who lost several clusters is reported once. Insertion-ordered, so the
+    # notice reads in the order the clusters appear.
+    stale_assignments = {}
     for channel_name, channel in (sidecar.get("channels") or {}).items():
         clusters = merged_by_channel[channel_name]
         results = results_by_channel[channel_name]
@@ -5628,22 +5651,43 @@ def suggest_speakers(meeting_stem):
             # not yet met), and any client-side "just confirmed" feedback
             # is gone the moment the panel unmounts (e.g. navigating away
             # and back). This survives both.
+            #
+            # Only evidence from THIS run counts. A prototype confirmed
+            # against a superseded run would otherwise show up as a
+            # confirmation the user appears to have made themselves, on a
+            # row that may be a different person entirely -- and unlike a
+            # wrong suggestion, nothing about it invites a second look.
             confirmed_by_user = None
             confirmed_person_id = None
+            superseded_owners = []
             for person in profiles:
-                if any(
-                    p.get("meeting_id") == meeting_stem
+                owned = [
+                    p for p in (person.get("prototypes") or [])
+                    if p.get("meeting_id") == meeting_stem
                     and p.get("diarization_speaker_id") in fragment_ids
                     and prototype_channel_matches(p, channel_name, recording_type)
-                    for p in (person.get("prototypes") or [])
-                ):
-                    confirmed_by_user = person["display_name"]
-                    # The id as well as the name: display names are not a
-                    # stable identity (a rename can make two profiles read
-                    # alike), and the panel uses this to tell which people
-                    # already hold a cluster of THIS meeting.
-                    confirmed_person_id = person["person_id"]
-                    break
+                ]
+                if not owned:
+                    continue
+                if any(prototype_run_matches(p, run_id) for p in owned):
+                    if confirmed_by_user is None:
+                        confirmed_by_user = person["display_name"]
+                        # The id as well as the name: display names are not a
+                        # stable identity (a rename can make two profiles read
+                        # alike), and the panel uses this to tell which people
+                        # already hold a cluster of THIS meeting.
+                        confirmed_person_id = person["person_id"]
+                else:
+                    superseded_owners.append(person)
+            # Reported per cluster and only while the cluster is still
+            # unclaimed, so the notice this feeds can actually go away.
+            # Nothing ever deletes a superseded prototype -- that is the
+            # point of the run scoping -- so a notice derived from the
+            # prototypes alone would outlive every action the user could
+            # take to answer it.
+            if confirmed_by_user is None:
+                for person in superseded_owners:
+                    stale_assignments.setdefault(person["person_id"], person["display_name"])
             cluster_out[sid] = {
                 "status": r.status,
                 "suggested_person_id": r.suggested_person_id,
@@ -5718,6 +5762,17 @@ def suggest_speakers(meeting_stem):
         # as four clusters with nothing indicating anything was dropped.
         # No caller acts on this number today -- see minimum_speaker_count.
         "minimum_speaker_count": minimum_speaker_count(sidecar.get("channels") or {}),
+        # Confirmations this meeting's re-diarization orphaned. The panel
+        # renders one meeting-level notice from this: the clusters were
+        # renumbered, these people's assignments no longer point at anything
+        # on screen, and re-confirming them is the only thing that restores
+        # the link. Empty is the normal case, including on every legacy
+        # library, and their voice evidence is untouched either way -- it
+        # keeps scoring candidates in every meeting.
+        "stale_assignments": [
+            {"person_id": pid, "display_name": name}
+            for pid, name in stale_assignments.items()
+        ],
         "channels": channels_out,
     }))
 

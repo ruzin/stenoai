@@ -8,12 +8,21 @@ from click.testing import CliRunner
 
 import simple_recorder
 from src.config import Config
-from src.speaker_suggestions import write_speakers_sidecar
+from src.speaker_suggestions import (
+    read_speakers_sidecar,
+    write_sidecar_document,
+    write_speakers_sidecar,
+)
 
 
 def _last_json(output):
     line = [ln for ln in output.splitlines() if ln.strip().startswith("{")][-1]
     return json.loads(line)
+
+
+def _seeded_run_id(tmp, meeting_stem="mtg001"):
+    """The run id of the sidecar just written into `tmp`."""
+    return read_speakers_sidecar(Path(tmp) / "output", meeting_stem)["diarization_run"]["run_id"]
 
 
 class SuggestSpeakersCliTests(unittest.TestCase):
@@ -139,6 +148,11 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                 person["person_id"], [1.0, 0.0],
                 recording_type="remote", meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
                 speech_duration_seconds=10.0, segment_count=2, created_from="user_confirmed",
+                # Stamped with the run on disk, the way a real confirm
+                # against this sidecar stamps it. Unstamped it would describe
+                # a confirmation made before the meeting was re-diarized,
+                # which is a different test (see SuggestSpeakersRunScopeTests).
+                diarization_run_id=_seeded_run_id(tmp),
             )
             result = self._run(["mtg001"], tmp, cfg=cfg)
             data = _last_json(result.output)
@@ -184,6 +198,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                 person["person_id"], [1.0, 0.0],
                 recording_type="in_person", meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
                 speech_duration_seconds=10.0, segment_count=2, created_from="user_confirmed",
+                diarization_run_id=_seeded_run_id(tmp),
             )
             result = self._run(["mtg001"], tmp, cfg=cfg)
             data = _last_json(result.output)
@@ -215,6 +230,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                 person["person_id"], [0.995, 0.0999],
                 recording_type="remote", meeting_id="mtg001", diarization_speaker_id="SPEAKER_2",
                 speech_duration_seconds=1538.0, segment_count=552, created_from="user_confirmed",
+                diarization_run_id=_seeded_run_id(tmp),
             )
             result = self._run(["mtg001"], tmp, cfg=cfg)
             data = _last_json(result.output)
@@ -486,6 +502,150 @@ class GetSpeakerSampleAudioCliTests(unittest.TestCase):
             self.assertTrue(data["success"])
             self.assertIn("SPEAKER_0", str(captured["output_path"]))
             self.assertEqual(len(captured["segments"]), 2)
+
+
+class SuggestSpeakersRunScopeTests(unittest.TestCase):
+    """What the panel may still call "confirmed" after the meeting was
+    diarized a second time.
+
+    A re-diarization numbers its clusters from SPEAKER_0 again with no
+    memory of who held that id, so an older run's prototype describes a
+    voice this run may have given to somebody else. Reporting it as
+    `confirmed_by_user` puts a name the user never chose on a stranger's
+    row -- and it looks exactly like a confirmation they made themselves,
+    so nothing invites them to check it.
+    """
+
+    def _run(self, args, tmp, cfg=None):
+        cfg = cfg or Config(config_path=Path(tmp) / "config.json")
+        with mock.patch("src.config.get_config", return_value=cfg), \
+             mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
+            return CliRunner().invoke(simple_recorder.suggest_speakers, args)
+
+    def _seed(self, tmp, clusters=None):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "system": {
+                "recording_type": "remote",
+                "clusters": clusters or {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                                  "segment_count": 10, "segments": [{"start": 1.0, "end": 5.0}]},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 40.0,
+                                  "segment_count": 8, "segments": [{"start": 20.0, "end": 24.0}]},
+                },
+            },
+        })
+        return output_dir
+
+    def _run_id(self, tmp):
+        return read_speakers_sidecar(Path(tmp) / "output", "mtg001")["diarization_run"]["run_id"]
+
+    def _rediarize(self, tmp):
+        """A second diarization run over the same meeting: same cluster ids,
+        swapped voices. Returns the new run id."""
+        self._seed(tmp, clusters={
+            "SPEAKER_0": {"embedding": [0.0, 1.0], "speech_duration_seconds": 55.0,
+                          "segment_count": 9, "segments": [{"start": 2.0, "end": 6.0}]},
+            "SPEAKER_1": {"embedding": [1.0, 0.0], "speech_duration_seconds": 35.0,
+                          "segment_count": 7, "segments": [{"start": 21.0, "end": 25.0}]},
+        })
+        return self._run_id(tmp)
+
+    def _make_legacy(self, tmp):
+        """Strip the run block, leaving the pre-run-stamping sidecar shape
+        every already-processed meeting on disk still has."""
+        output_dir = Path(tmp) / "output"
+        sidecar = read_speakers_sidecar(output_dir, "mtg001")
+        sidecar.pop("diarization_run", None)
+        write_sidecar_document(output_dir, "mtg001", sidecar)
+
+    def _confirm_by_hand(self, cfg, name, sid, run_id, embedding=(1.0, 0.0)):
+        person = cfg.create_person_profile(name)
+        cfg.add_speaker_prototype(
+            person["person_id"], list(embedding), recording_type="remote",
+            meeting_id="mtg001", diarization_speaker_id=sid,
+            speech_duration_seconds=60.0, segment_count=10,
+            created_from="user_confirmed", channel="system",
+            diarization_run_id=run_id,
+        )
+        return person
+
+    def test_a_confirmation_from_a_superseded_run_is_not_reported_as_confirmed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            self._rediarize(tmp)
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            cluster = data["channels"]["system"]["SPEAKER_0"]
+            self.assertIsNone(cluster["confirmed_by_user"])
+            self.assertIsNone(cluster["confirmed_person_id"])
+            self.assertEqual(
+                data["stale_assignments"],
+                [{"person_id": person["person_id"], "display_name": "Julian"}],
+            )
+
+    def test_a_confirmation_from_this_run_is_reported_and_is_not_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            cluster = data["channels"]["system"]["SPEAKER_0"]
+            self.assertEqual(cluster["confirmed_by_user"], "Julian")
+            self.assertEqual(cluster["confirmed_person_id"], person["person_id"])
+            self.assertEqual(data["stale_assignments"], [])
+
+    def test_a_legacy_pair_with_no_run_ids_anywhere_still_reports_the_confirmation(self):
+        # The whole installed base: sidecars written before run stamping,
+        # prototypes confirmed against them. Nothing here was ever
+        # re-diarized, so nothing may be reported as superseded.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            self._make_legacy(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", None)
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            self.assertEqual(
+                data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"], "Julian",
+            )
+            self.assertEqual(data["stale_assignments"], [])
+
+    def test_a_person_who_lost_two_clusters_is_reported_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            cfg.add_speaker_prototype(
+                person["person_id"], [0.0, 1.0], recording_type="remote",
+                meeting_id="mtg001", diarization_speaker_id="SPEAKER_1",
+                speech_duration_seconds=40.0, segment_count=8,
+                created_from="user_confirmed", channel="system",
+                diarization_run_id=self._run_id(tmp),
+            )
+            self._rediarize(tmp)
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            self.assertEqual(len(data["stale_assignments"]), 1)
+            self.assertEqual(data["stale_assignments"][0]["display_name"], "Julian")
+
+    def test_a_cluster_someone_has_since_confirmed_reports_no_stale_owner(self):
+        # The notice has to be able to go away. Nothing deletes a
+        # superseded prototype -- that is the point of the run scoping -- so
+        # if a re-confirmed cluster kept reporting its previous owner, the
+        # panel would carry the notice for the rest of the meeting's life
+        # with no action left that could clear it.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            new_run = self._rediarize(tmp)
+            self._confirm_by_hand(cfg, "Sarah", "SPEAKER_0", new_run, embedding=(0.0, 1.0))
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            self.assertEqual(
+                data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"], "Sarah",
+            )
+            self.assertEqual(data["stale_assignments"], [])
 
 
 if __name__ == "__main__":
