@@ -5769,6 +5769,14 @@ def suggest_speakers(meeting_stem):
         # the link. Empty is the normal case, including on every legacy
         # library, and their voice evidence is untouched either way -- it
         # keeps scoring candidates in every meeting.
+        #
+        # Known gap, accepted: someone whose only superseded prototype names
+        # a cluster id the new run does not produce at all is never listed,
+        # because the collection walks this run's clusters. Their assignment
+        # really is orphaned, but no row here can carry them and the notice
+        # says "re-confirm them", which they cannot. It only goes unnoticed
+        # once every surviving cluster is confirmed -- until then the notice
+        # is up anyway for the others.
         "stale_assignments": [
             {"person_id": pid, "display_name": name}
             for pid, name in stale_assignments.items()
@@ -6495,7 +6503,7 @@ def repair_speaker_profiles(apply_changes):
        prototype_channel_matches shrinks to entries whose sidecar is gone.
     """
     from src.config import get_config, get_data_dirs
-    from src.speaker_suggestions import read_speakers_sidecar
+    from src.speaker_suggestions import prototype_run_matches, read_speakers_sidecar
 
     config = get_config()
     profiles = config.get_person_profiles()
@@ -6520,11 +6528,18 @@ def repair_speaker_profiles(apply_changes):
             n_rt = negative.get("recording_type")
             if not negative.get("prototype_id") or not n_meeting or not n_sid or n_rt in (None, "unknown"):
                 continue
+            # Same run only. "This negative cites a cluster its owner holds
+            # on the other channel" is evidence of a collision only if both
+            # entries describe the same diarization run; across runs the id
+            # was simply handed to a different voice, and reading that as a
+            # collision would delete a negative that is exactly right for
+            # the run it came from.
             owner_rts = {
                 p.get("recording_type")
                 for other in profiles if other["person_id"] != person["person_id"]
                 for p in (other.get("prototypes") or [])
                 if p.get("meeting_id") == n_meeting and p.get("diarization_speaker_id") == n_sid
+                and prototype_run_matches(p, negative.get("diarization_run_id"))
             }
             owner_rts.discard(None)
             owner_rts.discard("unknown")
@@ -6539,6 +6554,11 @@ def repair_speaker_profiles(apply_changes):
     # Pass B -- duplicates within one person's list (oldest kept). The key
     # includes channel (recording_type for legacy entries): the same
     # SPEAKER_N on mic and system are different clusters, not duplicates.
+    # It includes the diarization run for the same reason one step further
+    # out: since confirmations are run-scoped, one person legitimately holds
+    # the same meeting+channel+id twice, once per run. Without the run in
+    # the key this pass drops the NEWER of the two -- keeping the superseded
+    # entry and deleting the one that describes the meeting as it is now.
     for person in profiles:
         for negative_flag, key_name in ((False, "prototypes"), (True, "hard_negatives")):
             seen = set()
@@ -6553,7 +6573,11 @@ def repair_speaker_profiles(apply_changes):
                 sid = entry.get("diarization_speaker_id")
                 if not meeting_id or not sid:
                     continue
-                dedupe_key = (meeting_id, sid, entry.get("channel") or entry.get("recording_type"))
+                dedupe_key = (
+                    meeting_id, sid,
+                    entry.get("channel") or entry.get("recording_type"),
+                    entry.get("diarization_run_id"),
+                )
                 if dedupe_key in seen:
                     drops.setdefault((person["person_id"], negative_flag), set()).add(entry.get("prototype_id"))
                     _stats(person)["duplicates_removed"] += 1
@@ -6584,6 +6608,17 @@ def repair_speaker_profiles(apply_changes):
                     sidecar_cache[meeting_id] = read_speakers_sidecar(output_dir, meeting_id)
                 sidecar = sidecar_cache[meeting_id]
                 if sidecar is None:
+                    continue
+                if not prototype_run_matches(
+                    entry, (sidecar.get("diarization_run") or {}).get("run_id"),
+                ):
+                    # The sidecar describes a different run, so the cluster
+                    # this id resolves to is whatever the diarizer numbered
+                    # that way this time. Writing its channel onto the entry
+                    # would turn a guess into recorded fact, and every later
+                    # prototype_channel_matches would trust it. Left legacy,
+                    # it keeps the recording_type proxy, which at least
+                    # admits to being one.
                     continue
                 owners = [
                     name for name, ch in (sidecar.get("channels") or {}).items()
