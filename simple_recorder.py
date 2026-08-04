@@ -5078,6 +5078,25 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         sid for sid in clusters
         if sid != resolved_id and not clusters[sid][1].contains_multiple_speakers
     ]
+    # Rebuild rather than append. Confirming the same cluster as the same
+    # person again -- the review UI's Approve on an already-confirmed row, or
+    # simply redoing an assignment -- used to run the loop below a second
+    # time and stack a duplicate of every negative in both directions, once
+    # more on each repeat. Dropping the evidence this cluster produced first
+    # makes the whole step idempotent: the loop then writes exactly the set
+    # the current assignments justify.
+    for existing_person in config.get_person_profiles():
+        config.remove_speaker_evidence(
+            existing_person["person_id"], meeting_id=meeting_stem,
+            channel=channel, channel_recording_type=channel_recording_type,
+            sids=fragment_ids, negative=True,
+        )
+    config.remove_speaker_evidence(
+        person["person_id"], meeting_id=meeting_stem,
+        channel=channel, channel_recording_type=channel_recording_type,
+        negative=True,
+    )
+
     hard_negatives_added = []
     for other_person in config.get_person_profiles():
         if other_person["person_id"] == person["person_id"]:
@@ -5096,6 +5115,8 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         ]
         if not matches:
             continue
+        # One negative per THEIR cluster, in this direction only: "the person
+        # I am confirming is none of those clusters".
         for match in matches:
             other_sid = match["diarization_speaker_id"]
             other_embedding, other_context = clusters[other_sid]
@@ -5108,15 +5129,19 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
                 created_from="user_confirmed", negative=True,
                 channel=channel,
             )
-            config.add_speaker_prototype(
-                other_person["person_id"], embedding,
-                recording_type=context.recording_type, meeting_id=meeting_stem,
-                diarization_speaker_id=resolved_id,
-                speech_duration_seconds=context.speech_duration_seconds,
-                segment_count=context.segment_count,
-                created_from="user_confirmed", negative=True,
-                channel=channel,
-            )
+        # And exactly ONE the other way: THIS cluster is a single piece of
+        # evidence about them, however many clusters they own. Adding it per
+        # match duplicated it, and every copy is another reason the matcher
+        # refuses a real match for them later.
+        config.add_speaker_prototype(
+            other_person["person_id"], embedding,
+            recording_type=context.recording_type, meeting_id=meeting_stem,
+            diarization_speaker_id=resolved_id,
+            speech_duration_seconds=context.speech_duration_seconds,
+            segment_count=context.segment_count,
+            created_from="user_confirmed", negative=True,
+            channel=channel,
+        )
         hard_negatives_added.append(other_person["display_name"])
 
     relabeled_lines = 0
@@ -5554,6 +5579,7 @@ def suggest_speakers(meeting_stem):
             # is gone the moment the panel unmounts (e.g. navigating away
             # and back). This survives both.
             confirmed_by_user = None
+            confirmed_person_id = None
             for person in profiles:
                 if any(
                     p.get("meeting_id") == meeting_stem
@@ -5562,6 +5588,11 @@ def suggest_speakers(meeting_stem):
                     for p in (person.get("prototypes") or [])
                 ):
                     confirmed_by_user = person["display_name"]
+                    # The id as well as the name: display names are not a
+                    # stable identity (a rename can make two profiles read
+                    # alike), and the panel uses this to tell which people
+                    # already hold a cluster of THIS meeting.
+                    confirmed_person_id = person["person_id"]
                     break
             cluster_out[sid] = {
                 "status": r.status,
@@ -5623,6 +5654,7 @@ def suggest_speakers(meeting_stem):
                 # sidecar or from confirm-speaker -- purely a UI hint.
                 "is_likely_artifact": avg_turn < SUGGESTION_MIN_AVG_TURN_SECONDS,
                 "confirmed_by_user": confirmed_by_user,
+                "confirmed_person_id": confirmed_person_id,
             }
         channels_out[channel_name] = cluster_out
 

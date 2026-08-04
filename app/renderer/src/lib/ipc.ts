@@ -496,6 +496,11 @@ export interface SpeakerSuggestion {
    *  confirmed. Persists across navigation/reload unlike the panel's
    *  transient post-click feedback, which is plain component state. */
   confirmed_by_user: string | null;
+  /** The same confirmation's person_id. Display names are not identity -- a
+   *  rename can leave two profiles reading alike -- so anything deciding
+   *  WHICH person a cluster went to compares this, not the name. Optional:
+   *  a payload predating this field simply carries no id. */
+  confirmed_person_id?: string | null;
 }
 export type SuggestSpeakersResponse = Result<{
   meeting_id: string;

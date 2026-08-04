@@ -837,6 +837,7 @@ function install({ ipcMain }) {
           suggested_name: cluster.suggested_name,
           candidates: cluster.candidates,
           confirmed_by_user: cluster.confirmed_by_user,
+          confirmed_person_id: cluster.confirmed_person_id,
         };
         cluster.status = 'none';
         cluster.suggested_person_id = null;
@@ -849,6 +850,7 @@ function install({ ipcMain }) {
         if (cluster.confirmed_by_user) {
           clearedFrom.push(cluster.confirmed_by_user);
           cluster.confirmed_by_user = null;
+          cluster.confirmed_person_id = null;
         }
       } else if (cluster.prevSuggestion) {
         Object.assign(cluster, cluster.prevSuggestion);
@@ -937,6 +939,7 @@ function install({ ipcMain }) {
       const previous = channelSuggestions[diarizationSpeakerId] || {
         speech_duration_seconds: 0, segment_count: 0, first_timestamp: null,
         sample_text: null, is_likely_artifact: false, confirmed_by_user: null,
+        confirmed_person_id: null,
       };
       channelSuggestions[diarizationSpeakerId] = {
         ...previous,
@@ -949,6 +952,10 @@ function install({ ipcMain }) {
         // SpeakerPrototype), so it survives a simulated navigate-away-and-back
         // (a fresh suggest-speakers refetch) even after this panel unmounts.
         confirmed_by_user: person.display_name,
+        // The id travels with the name: the panel decides which people
+        // already hold a cluster of this meeting by id, never by display
+        // name (a rename can leave two profiles reading alike).
+        confirmed_person_id: person.person_id,
       };
 
       return {
@@ -1002,6 +1009,7 @@ function install({ ipcMain }) {
               suggestion.suggested_person_id = null;
               suggestion.suggested_name = null;
               suggestion.confirmed_by_user = null;
+              suggestion.confirmed_person_id = null;
               suggestion.candidates = suggestion.candidates.filter((c) => c.person_id !== id);
             }
           }

@@ -72,13 +72,13 @@ function namesCollide(a: string, b: string): boolean {
  *  someone I already named here", and that answer gets commoner the more the
  *  diarizer splits a voice -- burying it in a global list of everyone ever
  *  named is what pushes a hurried reviewer towards "New person" instead. */
-export function orderProfilesForRow<T extends { display_name: string }>(
+export function orderProfilesForRow<T extends { display_name: string; person_id: string }>(
   profiles: T[],
   alreadyInMeeting: Set<string>,
 ): T[] {
   return [...profiles].sort((a, b) => {
-    const aHere = alreadyInMeeting.has(a.display_name);
-    const bHere = alreadyInMeeting.has(b.display_name);
+    const aHere = alreadyInMeeting.has(a.person_id);
+    const bHere = alreadyInMeeting.has(b.person_id);
     if (aHere !== bHere) return aHere ? -1 : 1;
     return a.display_name.localeCompare(b.display_name);
   });
@@ -279,9 +279,16 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   // couple of decisions actually cover -- and the more the diarizer splits a
   // recording, the further that diverges from channel/cluster-id order,
   // which is only an artifact of how the diarizer numbered its slots.
+  // Number.isFinite, not `?? 0`: a non-numeric duration would make the
+  // subtraction NaN, and `||` treats NaN as falsy, so a single bad value
+  // would silently drop the whole list back to cluster-id order.
+  const speechSeconds = (row: Row) =>
+    Number.isFinite(row.suggestion.speech_duration_seconds)
+      ? row.suggestion.speech_duration_seconds
+      : 0;
   rows.sort(
     (a, b) =>
-      (b.suggestion.speech_duration_seconds ?? 0) - (a.suggestion.speech_duration_seconds ?? 0)
+      speechSeconds(b) - speechSeconds(a)
       || a.channel.localeCompare(b.channel)
       || a.diarizationSpeakerId.localeCompare(b.diarizationSpeakerId),
   );
@@ -289,8 +296,11 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   // over-segmenting diarizer one person owns several clusters, so this is
   // the set the reviewer reaches for most, not the long tail of everyone
   // they have ever named.
+  // By person_id, never by display name: a rename can leave two profiles
+  // reading alike, and marking the wrong one as present here would invite
+  // exactly the misassignment this is meant to prevent.
   const alreadyInMeeting = new Set(
-    rows.map((row) => row.suggestion.confirmed_by_user).filter((name): name is string => !!name),
+    rows.map((row) => row.suggestion.confirmed_person_id).filter((id): id is string => !!id),
   );
   const notDismissed = rows.filter((row) => !dismissed.has(rowKey(row)));
   // A row a human has explicitly marked stays in the main list even if its
@@ -544,7 +554,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                             data-testid={`speaker-pick-person-${profile.person_id}`}
                           >
                             <span className="truncate">{profile.display_name}</span>
-                            {alreadyInMeeting.has(profile.display_name) && (
+                            {alreadyInMeeting.has(profile.person_id) && (
                               // The diarizer splits one voice across several
                               // clusters routinely, so "this is the person I
                               // already named above" is a frequent, correct

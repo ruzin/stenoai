@@ -636,3 +636,43 @@ class ConfirmSpeakerUpdatesParticipantsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfirmSpeakerEvidenceHygieneTests(ConfirmSpeakerCliTests):
+    """Hard negatives are permanent suppression evidence, so a duplicate is
+    not merely untidy: every copy is another reason the matcher will refuse a
+    real match later."""
+
+    def test_a_person_with_two_clusters_does_not_collect_duplicate_negatives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_three_cluster_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            r1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(r1.output)["person_id"]
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_02", "--person-id", max_id], tmp, cfg=cfg)
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+
+            max_negatives = [
+                h.get("diarization_speaker_id")
+                for h in cfg.get_person_profile(max_id)["hard_negatives"]
+            ]
+            self.assertEqual(
+                max_negatives, ["SPEAKER_01"],
+                "Sarah's one cluster is one piece of evidence, however many clusters Max owns",
+            )
+
+    def test_reconfirming_the_same_person_does_not_stack_negatives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            r1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(r1.output)["person_id"]
+            r2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(r2.output)["person_id"]
+
+            # The UI's Approve on an already-confirmed row, or a user simply
+            # redoing the same assignment.
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--person-id", max_id], tmp, cfg=cfg)
+
+            self.assertEqual(len(cfg.get_person_profile(max_id)["hard_negatives"]), 1)
+            self.assertEqual(len(cfg.get_person_profile(sarah_id)["hard_negatives"]), 1)
