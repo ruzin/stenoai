@@ -1470,17 +1470,39 @@ def cluster_transcript_lines(
     # (`if turns and turns[-1][1] == speaker: turns[-1][2].append(text)`).
     # The next line's start is therefore the only available upper bound on
     # where this turn's speech stops.
+    #
+    # Take that start from the MANIFEST wherever it offers one, not from the
+    # rendered marker. `[MM:SS]` is truncated with int(), so the marker loses
+    # up to a second and two turns inside one second become indistinguishable
+    # -- measured on real meetings, 18 of 264 and 34 of 643 lines share a
+    # displayed second, and only the manifest can tell them apart. The
+    # manifest keeps each turn's real start (251 of those 264 entries carry a
+    # fractional value), from the same run as the segments, and
+    # _manifest_describes_lines has already confirmed the two agree position
+    # by position. With the exact values 88.6 % of lines fall straight inside
+    # one of their own cluster's segments; with the markers far fewer do, and
+    # the difference is what _turn_audio_range then has to guess at.
+    starts = []
+    for (marker_ts, _text), entry in zip(parsed, turn_manifest):
+        manifest_ts = entry.get("start") if isinstance(entry, dict) else None
+        if isinstance(manifest_ts, (int, float)) and math.isfinite(manifest_ts):
+            starts.append(float(manifest_ts))
+        else:
+            starts.append(marker_ts)
+
     next_starts = []
-    for index in range(len(parsed)):
+    for index in range(len(starts)):
         following = next(
-            (parsed[j][0] for j in range(index + 1, len(parsed)) if parsed[j][0] is not None),
+            (starts[j] for j in range(index + 1, len(starts)) if starts[j] is not None),
             None,
         )
         next_starts.append(following)
 
     return [
         (ts, next_start, text)
-        for (ts, text), next_start, entry in zip(parsed, next_starts, turn_manifest)
+        for ts, (_marker, text), next_start, entry in zip(
+            starts, parsed, next_starts, turn_manifest,
+        )
         if (entry.get("channel"), entry.get("diarization_speaker_id")) in target_ids
         and ts is not None
     ]
@@ -1500,6 +1522,12 @@ def _join_texts(texts: list, max_chars: int) -> Optional[str]:
 # uninterrupted). Nobody listens to five minutes to recognise a voice, and
 # an unbounded clip would also mean an unbounded ffmpeg extraction.
 SAMPLE_MAX_SECONDS = 20.0
+
+# src.transcriber's _format_timestamp renders a turn's start with int(), so
+# a transcript marker is truncated to the whole second below it: the speech
+# it labels begins somewhere in [marker, marker + 1). Only relevant where the
+# manifest carried no exact start to use instead.
+TRANSCRIPT_MARKER_TRUNCATION_SECONDS = 1.0
 
 # How far a line's own speech may start AFTER the line before the moment
 # counts as unplaceable. Transcript markers render as [MM:SS], truncated to
@@ -1543,7 +1571,18 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
     next speaker under this speaker's name, the exact failure this whole
     function exists to prevent. Audio we cannot place is not played.
     """
-    upper = next_start if next_start is not None else float("inf")
+    # An upper bound at or before the line itself bounds nothing. Where the
+    # manifest supplied no exact start, `start` falls back to the truncated
+    # marker, and two turns inside one second then carry the same value.
+    # Bounding at `start` would admit only segments overlapping the marker --
+    # the previous line's tail -- and exclude this line's own speech a
+    # fraction of a second later. Found by review, with segments 9.9-10.2 and
+    # 10.8-10.9 at two lines both marked 10.0.
+    upper = (
+        next_start
+        if next_start is not None and next_start > start
+        else float("inf")
+    )
     # A segment that is ALREADY RUNNING when the line starts counts. One
     # diarization segment routinely spans several transcript lines, so the
     # segment a line belongs to usually began before it: measured on a real
@@ -1551,20 +1590,23 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
     # Requiring `seg.start >= line.start` skipped exactly the segment the
     # line sits in and walked the clip forward to the next one -- 35.3 s
     # away in the worst case, off by 0.22 s of tolerance in the mildest.
+    #
+    # Strictly `end > start`, with no backward tolerance: a segment that has
+    # already finished by the line's start is the tail of the PREVIOUS turn.
+    # Admitting one cost the line its own audio -- it sorted first, and the
+    # gap rule then stopped the range before the real speech began, reporting
+    # the moment unplayable. Found by review, with segments 9.0-9.8 and
+    # 10.9-11.5 at a line starting 10.0.
     own = [
         seg for seg in segments
-        if seg.get("end", 0) > start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        and seg.get("start", 0) < upper
+        if seg.get("end", 0) > start and seg.get("start", 0) < upper
     ]
     if not own:
         # Bounds hold none of this cluster's segments: same displayed
         # second as the next line, or a manifest that disagrees with the
         # segments. Use this cluster's nearest segment at or after the line
         # instead -- still its own audio, unlike a blind window.
-        following = [
-            seg for seg in segments
-            if seg.get("end", 0) > start - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        ]
+        following = [seg for seg in segments if seg.get("end", 0) > start]
         if not following:
             return start, start
         own = [min(following, key=lambda seg: seg.get("start", 0))]
@@ -1591,7 +1633,25 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
     # src.transcriber's turn merging), separated by that speaker's own
     # breathing, and cutting at every one of those would leave clips too
     # short to recognise a voice from -- the one thing the panel is for.
+    # A segment spanning the line is ambiguous: usually it is the one the
+    # line sits in, but it can also be the previous turn's tail reaching past
+    # it. Where `start` came from a truncated marker rather than the
+    # manifest, this line's real speech begins within one second of it, so a
+    # segment STARTING in that window is the better opening, and only when
+    # none does is the spanning segment the right answer -- the common case,
+    # a line well inside a long segment. Found by review, with segments
+    # 9.5-10.2 and 10.9-11.5 at a line marked 10.0.
+    #
+    # This picks only where the range OPENS. Everything from there on stays
+    # in play, so a turn made of several segments is still bridged below.
+    starting_in_window = [
+        seg for seg in own
+        if start <= seg.get("start", 0) < min(upper, start + TRANSCRIPT_MARKER_TRUNCATION_SECONDS)
+    ]
     ordered = sorted(own, key=lambda seg: seg.get("start", 0))
+    if starting_in_window:
+        opening = min(seg.get("start", 0) for seg in starting_in_window)
+        ordered = [seg for seg in ordered if seg.get("start", 0) >= opening]
     # Never earlier than the line itself: the segment it sits in may have
     # begun long before, and that earlier speech belongs to the PREVIOUS
     # line, which is quoted elsewhere in this same list.

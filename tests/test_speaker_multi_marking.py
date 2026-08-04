@@ -438,6 +438,115 @@ class SampleSegmentsTests(unittest.TestCase):
             )
             self.assertGreater(first["end"], first["start"])
 
+    def test_the_tail_of_the_previous_turn_does_not_swallow_this_line(self):
+        # From the review of the fix above. Admitting a segment that has
+        # already ENDED by the line's marker (it fell inside the 0.5s
+        # tolerance) made it sort first; the 1.0s gap rule then stopped the
+        # range before the line's real speech began, and the moment came back
+        # unplayable. _format_timestamp truncates with int(), so a marker is
+        # never later than the speech it labels and a finished segment is
+        # always the previous turn's tail.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] the line whose own speech starts at 10.9\n"
+                "[00:12] [Others] the next line\n",
+                encoding="utf-8",
+            )
+            manifest = [
+                {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 12.0, "channel": "system", "diarization_speaker_id": "SPEAKER_1"},
+            ]
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 9.0, "end": 9.8}, {"start": 10.9, "end": 11.5}],
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(len(samples), 1)
+            self.assertAlmostEqual(samples[0]["start"], 10.9, places=2)
+            self.assertAlmostEqual(samples[0]["end"], 11.5, places=2)
+
+    def test_two_lines_in_the_same_displayed_second_still_reach_their_own_speech(self):
+        # Also from review. Markers are truncated to whole seconds, so two
+        # turns inside one second carry the same value and next_start ==
+        # start. Bounding the search at that value admitted only segments
+        # overlapping the marker -- the previous line's tail -- and excluded
+        # this line's own speech a fraction of a second later, playing 0.2s
+        # of the wrong person.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] the earlier line in this second\n"
+                "[00:10] [You] the later line in the same second\n",
+                encoding="utf-8",
+            )
+            manifest = [
+                {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 10.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 10.8, "end": 10.9}],
+                turn_manifest=manifest, target_ids={("mic", "SPEAKER_0")},
+            )
+            self.assertEqual(len(samples), 1)
+            self.assertGreater(
+                samples[0]["end"], samples[0]["start"],
+                "the later line's own segment must still be reachable",
+            )
+            self.assertAlmostEqual(samples[0]["end"], 10.9, places=2)
+
+    def test_a_segment_starting_in_the_marker_second_beats_the_previous_tail(self):
+        # Third review finding. A segment spanning the marker is ambiguous:
+        # usually it is the one the line sits in, but it can be the previous
+        # line's tail reaching past it. Since markers truncate, this line's
+        # speech starts within one second of its marker, so a segment
+        # STARTING in that window wins over a spanning one. Without this the
+        # clip opened on 0.2s of the previous line.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] the quoted line, speaking from 10.9\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 9.5, "end": 10.2}, {"start": 10.9, "end": 11.5}],
+                turn_manifest=[{"start": 10.0, "channel": "system",
+                                "diarization_speaker_id": "SPEAKER_0"}],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertAlmostEqual(samples[0]["start"], 10.9, places=2)
+            self.assertAlmostEqual(samples[0]["end"], 11.5, places=2)
+
+    def test_the_manifests_exact_start_beats_the_truncated_marker(self):
+        # [MM:SS] is rendered with int(), so two turns inside one second
+        # carry the same marker and cannot be told apart by it -- measured on
+        # real meetings, 18 of 264 and 34 of 643 lines share a displayed
+        # second. The manifest keeps each turn's real start, from the same
+        # run as the segments, so the pairing uses that. Here both lines are
+        # marked [00:10]; only the manifest says the second one starts at
+        # 10.8.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] the earlier turn in this second\n"
+                "[00:10] [Others] the later turn in the same second\n",
+                encoding="utf-8",
+            )
+            manifest = [
+                {"start": 10.1, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"start": 10.8, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 10.1, "end": 10.2}, {"start": 10.8, "end": 11.5}],
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+            later = next(s for s in samples if s["text"].startswith("the later turn"))
+            self.assertAlmostEqual(later["start"], 10.8, places=2)
+            self.assertAlmostEqual(later["end"], 11.5, places=2)
+
     def test_a_line_with_no_own_speech_anywhere_near_it_is_not_offered(self):
         # The other half of the same defect. When the cluster genuinely has
         # no segment covering or closely following the line, there is no
