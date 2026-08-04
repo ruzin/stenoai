@@ -649,6 +649,26 @@ def set_cluster_multi_speaker(
     if cluster is None:
         return None
 
+    # Re-read immediately before writing and apply this ONE change to the
+    # freshest copy, rather than writing back the whole document as it
+    # looked on entry. The write is atomic, the read-modify-write was not:
+    # two overlapping marks both started from the same sidecar, and whoever
+    # replaced the file second discarded the other's marking silently --
+    # along with any confirmation cleanup its caller had already performed
+    # against it. This narrows the window to re-read-until-rename instead of
+    # entry-until-rename; it does not make the sequence a transaction, and a
+    # mark landing inside that remaining window would still be lost. Closing
+    # it fully needs a lock that works on macOS and Windows alike, which is
+    # a bigger change than this defect warrants.
+    freshest = read_speakers_sidecar(output_dir, meeting_stem)
+    if freshest is not None:
+        fresh_cluster = (
+            ((freshest.get("channels") or {}).get(channel) or {}).get("clusters") or {}
+        ).get(diarization_speaker_id)
+        if fresh_cluster is not None:
+            sidecar = freshest
+            cluster = fresh_cluster
+
     if marked:
         cluster[MULTI_SPEAKER_KEY] = True
     else:
@@ -1494,10 +1514,24 @@ def extract_sample_text(
     raises, when there is nothing attributable -- a best-effort aid, not a
     requirement for the row to render.
     """
-    samples = extract_segment_samples(
+    return sample_text_from_samples(extract_segment_samples(
         transcript_path, segments, max_chars=max_chars,
         turn_manifest=turn_manifest, target_ids=target_ids,
-    )
+    ))
+
+
+def sample_text_from_samples(samples: list) -> Optional[str]:
+    """The collapsed row's quote, taken from an ALREADY BUILT excerpt list.
+
+    Split out from extract_sample_text so a caller that needs both -- the
+    suggest-speakers CLI builds `samples` for every cluster anyway -- pays
+    for the transcript parse and the manifest check once instead of twice
+    per cluster. The selection itself is unchanged, and deliberately still
+    reads out of the same list the expanded rows show: two independent
+    derivations of "the most representative thing this speaker said" drift
+    apart, and the visible symptom is a collapsed row quoting a moment that
+    expanding never offers.
+    """
     longest = max(
         (s for s in samples if s["text"]),
         key=lambda s: s["end"] - s["start"], default=None,

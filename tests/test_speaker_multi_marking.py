@@ -124,6 +124,49 @@ class MarkingPersistenceTests(unittest.TestCase):
             self.assertEqual(after["transcript_lines"], before["transcript_lines"])
             self.assertEqual(after["created_at"], before["created_at"])
 
+    def test_a_mark_landing_between_read_and_write_is_not_erased(self):
+        # From the review: the write is atomic, the read-modify-write is
+        # not. Two marks that overlap both start from the same sidecar, and
+        # the one that replaces the file second silently discards the
+        # other's marking -- along with whatever confirmation cleanup its
+        # caller already performed against it.
+        #
+        # Interleaved deterministically rather than with threads: a
+        # COMPLETE second marking lands after the first has read and before
+        # it writes, which is exactly the order that loses data.
+        import src.speaker_suggestions as ss
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                              "segment_count": 10, "segments": []},
+                "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 40.0,
+                              "segment_count": 8, "segments": []},
+            })
+            real_read = ss.read_speakers_sidecar
+            interleaved = {"done": False}
+
+            def read_then_let_someone_else_write(*args, **kwargs):
+                data = real_read(*args, **kwargs)
+                if not interleaved["done"]:
+                    interleaved["done"] = True
+                    ss.set_cluster_multi_speaker(
+                        output_dir, "mtg001", "system", "SPEAKER_1", True,
+                    )
+                return data
+
+            with mock.patch.object(
+                ss, "read_speakers_sidecar", side_effect=read_then_let_someone_else_write,
+            ):
+                ss.set_cluster_multi_speaker(output_dir, "mtg001", "system", "SPEAKER_0", True)
+
+            clusters = read_speakers_sidecar(output_dir, "mtg001")["channels"]["system"]["clusters"]
+            self.assertTrue(clusters["SPEAKER_0"].get(MULTI_SPEAKER_KEY))
+            self.assertTrue(
+                clusters["SPEAKER_1"].get(MULTI_SPEAKER_KEY),
+                "the marking that landed in between must survive",
+            )
+
     def test_unknown_cluster_channel_or_meeting_returns_none(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = self._seed(tmp)

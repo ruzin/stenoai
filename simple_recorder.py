@@ -5328,12 +5328,12 @@ def suggest_speakers(meeting_stem):
     from src.speaker_suggestions import (
         SUGGESTION_MIN_AVG_TURN_SECONDS,
         clusters_from_sidecar_channel,
-        extract_sample_text,
         extract_segment_samples,
         merge_same_channel_fragments,
         minimum_speaker_count,
         prototype_channel_matches,
         read_speakers_sidecar,
+        sample_text_from_samples,
         suggest_speakers_for_meeting,
     )
     from src.config import get_data_dirs
@@ -5401,6 +5401,13 @@ def suggest_speakers(meeting_stem):
                 if context.segment_count else 0.0
             )
             target_ids = {(channel_name, fid) for fid in fragment_ids}
+            # Built once per cluster: the collapsed row's quote is derived
+            # from this same list below, and asking for it separately meant
+            # a second transcript parse and manifest check per cluster.
+            cluster_samples = extract_segment_samples(
+                transcript_path, pooled_segments,
+                turn_manifest=turn_manifest, target_ids=target_ids,
+            )
             # Whether a human has ALREADY confirmed this exact cluster,
             # derived from real persisted state (an existing prototype),
             # not transient UI state -- a suggestion's status/tier can stay
@@ -5447,10 +5454,11 @@ def suggest_speakers(meeting_stem):
                     _format_timestamp(min(seg["start"] for seg in pooled_segments))
                     if pooled_segments else None
                 ),
-                "sample_text": extract_sample_text(
-                    transcript_path, pooled_segments,
-                    turn_manifest=turn_manifest, target_ids=target_ids,
-                ),
+                # Derived from `samples` below rather than recomputed: both
+                # come from the same excerpt list by construction, and
+                # asking twice meant parsing the transcript and re-checking
+                # the manifest a second time for every cluster.
+                "sample_text": sample_text_from_samples(cluster_samples),
                 # Several excerpts, chronological, each independently
                 # playable (see extract_segment_samples / sample_segments --
                 # `samples[i]` is what `get-speaker-sample-audio
@@ -5461,10 +5469,7 @@ def suggest_speakers(meeting_stem):
                 # two different voices under one cluster is the only way the
                 # contamination behind `contains_multiple_speakers` becomes
                 # visible at all.
-                "samples": extract_segment_samples(
-                    transcript_path, pooled_segments,
-                    turn_manifest=turn_manifest, target_ids=target_ids,
-                ),
+                "samples": cluster_samples,
                 # Set by `mark-speaker-cluster`, never derived: no measurable
                 # property of a centroid distinguishes one voice from two
                 # blended ones (0.8270 to the contaminating speaker in the
