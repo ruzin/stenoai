@@ -320,8 +320,7 @@ export function Sidebar({
 
         {/* Nav */}
         <nav className="scrollbar-clean flex min-h-0 flex-1 flex-col gap-px overflow-auto px-2 pb-2 pt-2">
-          <>
-              <button
+          <button
                 type="button"
                 className={cn('sb-row', isHomeActive && 'active')}
                 onClick={() => navigate('/')}
@@ -466,7 +465,6 @@ export function Sidebar({
                     );
                   })}
               </div>
-            </>
         </nav>
 
         {/* Profile chip + Settings cog */}

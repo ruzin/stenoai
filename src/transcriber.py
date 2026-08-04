@@ -789,9 +789,19 @@ class WhisperTranscriber:
                 )
         opener = urllib.request.build_opener(NoRedirectHandler)
 
-        def _transcribe_file_chunk(target_path: Path, offset_sec: float) -> dict:
+        def _transcribe_single_chunk(chunk_path: Path, offset_sec: float) -> dict:
+            chunk_dur = 0.0
+            try:
+                with wave.open(str(chunk_path), "rb") as wf:
+                    frames = wf.getnframes()
+                    rate = wf.getframerate()
+                    if rate > 0:
+                        chunk_dur = float(frames) / float(rate)
+            except Exception:
+                pass
+
             boundary = uuid.uuid4().hex
-            mime_type = mimetypes.guess_type(str(target_path))[0] or "audio/wav"
+            mime_type = mimetypes.guess_type(str(chunk_path))[0] or "audio/wav"
 
             def _field(name: str, value: str) -> bytes:
                 return (
