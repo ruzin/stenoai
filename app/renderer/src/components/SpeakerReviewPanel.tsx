@@ -473,7 +473,13 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
             clickable while a confirm was still in progress. */}
         {visibleRows.map((row) => {
           const key = rowKey(row);
-          const anyConfirmPending = confirmSpeaker.isPending || markCluster.isPending;
+          // setReviewState belongs in this gate even though it writes only a
+          // marker: it is a read-modify-write of the same sidecar a confirm
+          // rewrites, and that pair is exactly the overlap the backend can
+          // narrow but not close (see _freshest_channel). Serialising the
+          // clicks is the half of it the UI can actually guarantee.
+          const anyConfirmPending =
+            confirmSpeaker.isPending || markCluster.isPending || setReviewState.isPending;
           const isMarked = row.suggestion.contains_multiple_speakers;
           const isKept = isKeptGeneric(row.suggestion);
           const samples = row.suggestion.samples ?? [];
