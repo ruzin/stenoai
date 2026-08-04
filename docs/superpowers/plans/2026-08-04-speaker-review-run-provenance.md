@@ -143,12 +143,12 @@
 - Consumes: the sidecar document helpers.
 - Produces: per-cluster optional key `review_state` with the single value `"generic"`; CLI `set-cluster-review-state <meeting_stem> <channel> <diarization_speaker_id> --generic|--clear`; `suggest-speakers` echoes `review_state` per cluster so the renderer can read it.
 
-- [ ] **Step 1: Write the failing tests.** The helper sets and clears the key on the exact raw id it was handed. A merged row reads as generic when **any** raw member carries it, mirroring how `merge_same_channel_fragments` already computes `contains_multiple_speakers` with `any()`. `confirm-speaker` clears it from **every fragment id** of the confirmed cluster, and `mark-speaker-cluster --multiple` does the same - so no orphaned key on a non-primary fragment can keep a row generic after a confirm. The CLI's never-raises contract: missing sidecar, missing channel, and missing cluster each produce `success: false` JSON and exit 1, with no traceback.
-- [ ] **Step 2: Run and watch them fail.**
-- [ ] **Step 3: Implement the helper and the CLI.** The write helper mirrors `set_cluster_multi_speaker`: re-read the freshest sidecar immediately before writing, apply the one change, replace atomically via `write_sidecar_document`. The CLI mirrors `mark-speaker-cluster`'s argument shape and reports the merged reach (resolved id plus fragment set) in its JSON.
-- [ ] **Step 4: Wire the transitions and the echo.** Clear on confirm and on mark; echo `review_state` per cluster from `suggest-speakers`.
-- [ ] **Step 5: Run green, then the whole suite.**
-- [ ] **Step 6: Commit.**
+- [x] **Step 1: Write the failing tests.** The helper sets and clears the key on the exact raw id it was handed. A merged row reads as generic when **any** raw member carries it, mirroring how `merge_same_channel_fragments` already computes `contains_multiple_speakers` with `any()`. `confirm-speaker` clears it from **every fragment id** of the confirmed cluster, and `mark-speaker-cluster --multiple` does the same - so no orphaned key on a non-primary fragment can keep a row generic after a confirm. The CLI's never-raises contract: missing sidecar, missing channel, and missing cluster each produce `success: false` JSON and exit 1, with no traceback.
+- [x] **Step 2: Run and watch them fail.**
+- [x] **Step 3: Implement the helper and the CLI.** The write helper mirrors `set_cluster_multi_speaker`: re-read the freshest sidecar immediately before writing, apply the one change, replace atomically via `write_sidecar_document`. The CLI mirrors `mark-speaker-cluster`'s argument shape and reports the merged reach (resolved id plus fragment set) in its JSON.
+- [x] **Step 4: Wire the transitions and the echo.** Clear on confirm and on mark; echo `review_state` per cluster from `suggest-speakers`.
+- [x] **Step 5: Run green, then the whole suite.**
+- [x] **Step 6: Commit.**
 
 ---
 
