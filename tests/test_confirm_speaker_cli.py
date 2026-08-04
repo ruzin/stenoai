@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -8,7 +9,7 @@ from click.testing import CliRunner
 
 import simple_recorder
 from src.config import Config
-from src.speaker_suggestions import write_speakers_sidecar
+from src.speaker_suggestions import read_speakers_sidecar, write_speakers_sidecar
 
 
 def _last_json(output):
@@ -146,6 +147,68 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(sarah_profile["prototypes"][0]["embedding_mean"], [0.0, 1.0])
             self.assertEqual(len(sarah_profile["hard_negatives"]), 1)
             self.assertEqual(sarah_profile["hard_negatives"][0]["embedding_mean"], [1.0, 0.0])
+
+    def test_confirm_stamps_prototypes_and_hard_negatives_with_the_sidecars_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run_id = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(result2.output)["person_id"]
+
+            max_profile = cfg.get_person_profile(max_id)
+            sarah_profile = cfg.get_person_profile(sarah_id)
+            # Positive prototype and mutual hard negative both carry it, on
+            # both sides -- every add_speaker_prototype call this command
+            # makes is expected to thread the same id.
+            self.assertEqual(max_profile["prototypes"][0]["diarization_run_id"], run_id)
+            self.assertEqual(max_profile["hard_negatives"][0]["diarization_run_id"], run_id)
+            self.assertEqual(sarah_profile["prototypes"][0]["diarization_run_id"], run_id)
+            self.assertEqual(sarah_profile["hard_negatives"][0]["diarization_run_id"], run_id)
+
+    def test_confirm_against_legacy_sidecar_produces_prototypes_without_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_legacy_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(result2.output)["person_id"]
+
+            max_profile = cfg.get_person_profile(max_id)
+            sarah_profile = cfg.get_person_profile(sarah_id)
+            self.assertNotIn("diarization_run_id", max_profile["prototypes"][0])
+            self.assertNotIn("diarization_run_id", max_profile["hard_negatives"][0])
+            self.assertNotIn("diarization_run_id", sarah_profile["prototypes"][0])
+            self.assertNotIn("diarization_run_id", sarah_profile["hard_negatives"][0])
+
+    def _seed_legacy_sidecar(self, tmp, meeting_stem="mtg001"):
+        # A sidecar written before diarization_run existed -- no top-level
+        # "diarization_run" key at all, not one holding None. Written by
+        # hand rather than through write_speakers_sidecar, which always
+        # stamps a run now.
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "meeting_id": meeting_stem,
+            "created_at": time.time(),
+            "channels": {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_00": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                        "SPEAKER_01": {"embedding": [0.0, 1.0], "speech_duration_seconds": 25.0, "segment_count": 4},
+                    },
+                },
+            },
+        }
+        (output_dir / f"{meeting_stem}_speakers.json").write_text(json.dumps(payload))
+        return output_dir
 
     def _seed_three_cluster_sidecar(self, tmp, meeting_stem="mtg001"):
         """One channel, three clusters -- the shape that appears as soon as the

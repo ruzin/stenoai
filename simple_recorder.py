@@ -4942,6 +4942,13 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         print(json.dumps({"success": False, "error": f"No {channel!r} channel in sidecar for {meeting_stem!r}"}))
         sys.exit(1)
 
+    # Read once from the loaded sidecar rather than re-reading per call --
+    # every prototype and hard negative this command writes below describes
+    # a cluster from THIS sidecar, so they all carry the same run id. `None`
+    # on a legacy sidecar with no diarization_run block, which every
+    # add_speaker_prototype call already treats as "no run to record".
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
+
     raw_clusters = clusters_from_sidecar_channel(meeting_stem, channel_data)
     if diarization_speaker_id not in raw_clusters:
         print(json.dumps({
@@ -5052,7 +5059,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         speech_duration_seconds=context.speech_duration_seconds,
         segment_count=context.segment_count,
         created_from="user_corrected" if reassigned_from else "user_confirmed",
-        channel=channel,
+        channel=channel, diarization_run_id=run_id,
     )
 
     # Mutual hard negatives against any OTHER speaker already confirmed in
@@ -5127,7 +5134,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
                 speech_duration_seconds=other_context.speech_duration_seconds,
                 segment_count=other_context.segment_count,
                 created_from="user_confirmed", negative=True,
-                channel=channel,
+                channel=channel, diarization_run_id=run_id,
             )
         # And exactly ONE the other way: THIS cluster is a single piece of
         # evidence about them, however many clusters they own. Adding it per
@@ -5140,7 +5147,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             speech_duration_seconds=context.speech_duration_seconds,
             segment_count=context.segment_count,
             created_from="user_confirmed", negative=True,
-            channel=channel,
+            channel=channel, diarization_run_id=run_id,
         )
         hard_negatives_added.append(other_person["display_name"])
 

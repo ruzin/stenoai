@@ -1218,6 +1218,7 @@ class Config:
         created_from: str,
         channel: Optional[str] = None,
         negative: bool = False,
+        diarization_run_id: Optional[str] = None,
     ) -> Optional[dict]:
         """Append a `SpeakerPrototype` to a person's positive `prototypes`
         (default) or `hard_negatives` (`negative=True`) list. Returns None
@@ -1236,7 +1237,15 @@ class Config:
         from the wrong channel's clusters. `None` is allowed only for
         legacy/enrollment paths with no channel to record — matchers fall
         back to `recording_type` as a channel proxy for those (see
-        src.speaker_suggestions.prototype_channel_matches)."""
+        src.speaker_suggestions.prototype_channel_matches).
+
+        `diarization_run_id` is the sidecar's `diarization_run.run_id` the
+        embedding was confirmed from. Same absent-means-legacy convention as
+        `channel`: it must be stored so a later run can tell "this evidence
+        is from the diarization output currently on disk" from "the
+        clusters have since been re-diarized and this entry's ids may not
+        mean what they used to" (src.speaker_suggestions.prototype_run_matches).
+        `None` for callers with no run to report, e.g. enrollment."""
         profile = self.get_person_profile(person_id)
         if profile is None:
             return None
@@ -1263,6 +1272,8 @@ class Config:
         }
         if channel is not None:
             prototype["channel"] = channel
+        if diarization_run_id is not None:
+            prototype["diarization_run_id"] = diarization_run_id
         key = "hard_negatives" if negative else "prototypes"
         profile.setdefault(key, []).append(prototype)
         profile["updated_at"] = time.time()

@@ -1002,6 +1002,36 @@ class ConfigPersonProfileTests(unittest.TestCase):
             )
             self.assertNotIn("channel", prototype)
 
+    def test_add_speaker_prototype_stores_diarization_run_id_when_given(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            person = config.create_person_profile("Max")
+            prototype = config.add_speaker_prototype(
+                person["person_id"], [0.1, 0.2],
+                recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=25.0, segment_count=4,
+                created_from="user_confirmed", diarization_run_id="r1",
+            )
+            self.assertEqual(prototype["diarization_run_id"], "r1")
+
+    def test_add_speaker_prototype_omits_diarization_run_id_when_none(self):
+        # Same absent-means-legacy convention as `channel`: a prototype
+        # written before this field existed, or from a caller that has no
+        # run to report, must read exactly like one written today with no
+        # run id -- not like one that carries an explicit `None`.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            person = config.create_person_profile("Max")
+            prototype = config.add_speaker_prototype(
+                person["person_id"], [0.1, 0.2],
+                recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=25.0, segment_count=4,
+                created_from="user_confirmed",
+            )
+            self.assertNotIn("diarization_run_id", prototype)
+
     def test_add_speaker_prototype_rejects_invalid_channel(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
