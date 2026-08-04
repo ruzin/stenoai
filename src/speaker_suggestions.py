@@ -1648,8 +1648,16 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
         seg for seg in own
         if start <= seg.get("start", 0) < min(upper, start + TRANSCRIPT_MARKER_TRUNCATION_SECONDS)
     ]
+    #
+    # Unless a sibling line shares this displayed second, which only happens
+    # on the marker fallback. Then the segment starting later in the window
+    # is most likely the SIBLING'S, and the spanning one is ours -- the
+    # opposite of the single-line case, and the one piece of evidence that
+    # tells the two apart. Found by review, with segments 9.9-10.2 and
+    # 10.8-10.9 at two lines both falling back to marker 10.0.
+    shares_second_with_next = next_start is not None and next_start <= start
     ordered = sorted(own, key=lambda seg: seg.get("start", 0))
-    if starting_in_window:
+    if starting_in_window and not shares_second_with_next:
         opening = min(seg.get("start", 0) for seg in starting_in_window)
         ordered = [seg for seg in ordered if seg.get("start", 0) >= opening]
     # Never earlier than the line itself: the segment it sits in may have

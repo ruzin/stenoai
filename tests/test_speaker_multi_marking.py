@@ -547,6 +547,36 @@ class SampleSegmentsTests(unittest.TestCase):
             self.assertAlmostEqual(later["start"], 10.8, places=2)
             self.assertAlmostEqual(later["end"], 11.5, places=2)
 
+    def test_without_manifest_starts_a_shared_second_keeps_its_spanning_segment(self):
+        # Fifth review finding, reachable only on the marker fallback:
+        # _manifest_describes_lines skips entries with no usable start rather
+        # than refusing the manifest, so both lines here fall back to their
+        # rendered marker and share it. Preferring the segment that starts
+        # later in the truncation window then handed this line the SIBLING's
+        # speech. A shared second is itself the evidence that the later
+        # segment belongs to the sibling.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Others] the earlier turn in this second\n"
+                "[00:10] [Others] the later turn in the same second\n",
+                encoding="utf-8",
+            )
+            manifest = [
+                {"channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                {"channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+            ]
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 9.9, "end": 10.2}, {"start": 10.8, "end": 10.9}],
+                turn_manifest=manifest, target_ids={("system", "SPEAKER_0")},
+            )
+            earlier = next(s for s in samples if s["text"].startswith("the earlier turn"))
+            self.assertAlmostEqual(
+                earlier["start"], 10.0, places=2,
+                msg="the earlier line opens on the segment spanning its marker, not the sibling's",
+            )
+
     def test_a_line_with_no_own_speech_anywhere_near_it_is_not_offered(self):
         # The other half of the same defect. When the cluster genuinely has
         # no segment covering or closely following the line, there is no
