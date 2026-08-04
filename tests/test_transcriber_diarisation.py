@@ -1477,10 +1477,19 @@ class HeartbeatWhileWaitingTests(unittest.TestCase):
         import io
         from src.transcriber import _heartbeat_while_waiting
 
+        # Waits for the beats instead of sleeping a fixed 0.09s and hoping
+        # four 0.02s ticks fit inside it. On a loaded CI runner they did
+        # not, and the job failed on timing rather than on behaviour -- seen
+        # on this branch, green on the same commit locally. The wait exits
+        # as soon as the second beat lands, so the fast path stays fast.
         buf = io.StringIO()
+        deadline = time.monotonic() + 5.0
         with patch("sys.stdout", buf):
             with _heartbeat_while_waiting("diarize:You", interval_s=0.02):
-                time.sleep(0.09)
+                while time.monotonic() < deadline:
+                    if buf.getvalue().count("HEARTBEAT:diarize:You") >= 2:
+                        break
+                    time.sleep(0.01)
         lines = [l for l in buf.getvalue().splitlines() if l == "HEARTBEAT:diarize:You"]
         self.assertGreaterEqual(len(lines), 2)
 
