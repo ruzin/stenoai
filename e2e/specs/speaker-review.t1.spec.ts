@@ -396,3 +396,54 @@ test('the panel says how many people spoke when a cluster is known to hold more 
   await expect(note).toBeVisible();
   await expect(note).toContainText('At least 6 people spoke, but only 5 could be told apart');
 });
+
+test('rows are ordered by speaking time, so the first decisions cover the most transcript', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  // The seed's durations are 245 / 80 / 30 s (plus two filtered rows), and
+  // the cluster ids run the other way for SPEAKER_2, so channel+id order --
+  // what the panel used before -- would be a different sequence. Reviewing
+  // is voluntary and abandonable, so whoever stops after one row should
+  // have covered the biggest speaker, not the lowest-numbered slot.
+  const keys = await page
+    .getByTestId('speaker-review-panel')
+    .locator('[data-testid^="speaker-row-"]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')));
+
+  expect(keys).toEqual([
+    'speaker-row-mic:SPEAKER_0',
+    'speaker-row-mic:SPEAKER_1',
+    'speaker-row-mic:SPEAKER_2',
+  ]);
+});
+
+test('the Change picker offers people already assigned in this meeting first', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  // One person owning several clusters is the normal case once the diarizer
+  // splits a voice, and it has to be at least as easy to say as "New
+  // person" -- naming the same voice twice makes it a hard negative against
+  // itself, which suppresses that speaker's future suggestions for good.
+  await page.getByTestId('speaker-approve-mic:SPEAKER_0').click();
+  await expect(page.getByTestId('speaker-row-mic:SPEAKER_0')).toContainText('Confirmed as Julian');
+
+  await page.getByTestId('speaker-change-mic:SPEAKER_1').click();
+  const names = await page
+    .locator('[data-testid^="speaker-pick-person-"]')
+    .evaluateAll((els) => els.map((el) => el.textContent?.trim() ?? ''));
+
+  expect(names[0]).toContain('Julian');
+  expect(names[0]).toContain('here');
+});

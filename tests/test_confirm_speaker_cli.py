@@ -147,6 +147,85 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(len(sarah_profile["hard_negatives"]), 1)
             self.assertEqual(sarah_profile["hard_negatives"][0]["embedding_mean"], [1.0, 0.0])
 
+    def _seed_three_cluster_sidecar(self, tmp, meeting_stem="mtg001"):
+        """One channel, three clusters -- the shape that appears as soon as the
+        diarizer splits one person across two clusters, which is the normal
+        case under deliberate over-segmentation."""
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, meeting_stem, {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    # Two clusters of ONE voice, deliberately far enough apart
+                    # that merge_same_channel_fragments leaves them separate.
+                    "SPEAKER_00": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    "SPEAKER_02": {"embedding": [0.0, 0.0, 1.0], "speech_duration_seconds": 20.0, "segment_count": 4},
+                    "SPEAKER_01": {"embedding": [0.0, 1.0], "speech_duration_seconds": 25.0, "segment_count": 4},
+                },
+            },
+        })
+
+    def test_one_person_owning_two_clusters_keeps_both_hard_negatives(self):
+        # Many-to-one: the user assigns SPEAKER_00 and SPEAKER_02 to Max, and
+        # SPEAKER_01 to Sarah. Sarah must be a hard negative against BOTH of
+        # Max's clusters -- the loop matched only the FIRST prototype per
+        # person (`next(...)`), so the second cluster of a person silently
+        # produced no negative evidence at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_three_cluster_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            r1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(r1.output)["person_id"]
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_02", "--person-id", max_id], tmp, cfg=cfg)
+            r3, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(r3.output)["person_id"]
+
+            max_profile = cfg.get_person_profile(max_id)
+            sarah_profile = cfg.get_person_profile(sarah_id)
+
+            self.assertEqual(
+                len(max_profile["prototypes"]), 2,
+                "one person may own several clusters of the same meeting",
+            )
+            negative_sids = sorted(
+                h.get("diarization_speaker_id") for h in sarah_profile["hard_negatives"]
+            )
+            self.assertEqual(
+                negative_sids, ["SPEAKER_00", "SPEAKER_02"],
+                "Sarah is demonstrably not either of Max's clusters",
+            )
+
+    def test_reassigning_one_cluster_keeps_the_persons_other_negatives(self):
+        # The displaced person's negatives were removed for the WHOLE
+        # meeting+channel rather than only those citing the cluster being
+        # taken away. With one person owning two clusters that silently
+        # stripped the evidence belonging to the cluster they keep.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_three_cluster_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            r1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(r1.output)["person_id"]
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_02", "--person-id", max_id], tmp, cfg=cfg)
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+
+            # Max loses SPEAKER_02 to a third person; SPEAKER_00 stays his.
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_02", "--new-person", "Tom"], tmp, cfg=cfg)
+
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual(
+                [p["diarization_speaker_id"] for p in max_profile["prototypes"]], ["SPEAKER_00"],
+            )
+            negative_sids = sorted(
+                h.get("diarization_speaker_id") for h in max_profile["hard_negatives"]
+            )
+            self.assertIn(
+                "SPEAKER_01", negative_sids,
+                "the evidence that Max is not Sarah belongs to the cluster he kept",
+            )
+
     def test_hard_negatives_scoped_to_same_channel_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "output"

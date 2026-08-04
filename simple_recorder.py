@@ -5016,11 +5016,26 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         if not removed or existing_person["person_id"] == person["person_id"]:
             continue
         reassigned_from.append(existing_person["display_name"])
-        config.remove_speaker_evidence(
-            existing_person["person_id"], meeting_id=meeting_stem,
-            channel=channel, channel_recording_type=channel_recording_type,
-            negative=True,
+        # Their negatives here rest on them having been present in this
+        # channel at all, not on this one cluster -- so drop them only once
+        # they own NO cluster here any more. Under many-to-one one person
+        # legitimately owns several clusters of a meeting; taking one away
+        # used to strip the negatives the clusters they KEEP still justify,
+        # and the rebuild below only restores negatives for the person being
+        # confirmed now, so that evidence was simply lost.
+        still_present = any(
+            p.get("meeting_id") == meeting_stem
+            and prototype_channel_matches(p, channel, channel_recording_type)
+            for p in (config.get_person_profile(existing_person["person_id"]) or {}).get(
+                "prototypes",
+            ) or []
         )
+        if not still_present:
+            config.remove_speaker_evidence(
+                existing_person["person_id"], meeting_id=meeting_stem,
+                channel=channel, channel_recording_type=channel_recording_type,
+                negative=True,
+            )
         for other in config.get_person_profiles():
             if other["person_id"] == existing_person["person_id"]:
                 continue
@@ -5067,35 +5082,41 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     for other_person in config.get_person_profiles():
         if other_person["person_id"] == person["person_id"]:
             continue
-        match = next(
-            (p for p in (other_person.get("prototypes") or [])
-             if p.get("meeting_id") == meeting_stem
-             and p.get("diarization_speaker_id") in other_sids
-             and prototype_channel_matches(p, channel, channel_recording_type)),
-            None,
-        )
-        if match is None:
+        # EVERY cluster that person owns here, not just the first one. One
+        # person legitimately owns several clusters of a meeting -- the
+        # diarizer splits a voice, and the reviewer assigns both halves to
+        # them. Matching only the first prototype left the second cluster
+        # with no negative evidence at all, so a later meeting could still
+        # match this speaker to it.
+        matches = [
+            p for p in (other_person.get("prototypes") or [])
+            if p.get("meeting_id") == meeting_stem
+            and p.get("diarization_speaker_id") in other_sids
+            and prototype_channel_matches(p, channel, channel_recording_type)
+        ]
+        if not matches:
             continue
-        other_sid = match["diarization_speaker_id"]
-        other_embedding, other_context = clusters[other_sid]
-        config.add_speaker_prototype(
-            person["person_id"], other_embedding,
-            recording_type=other_context.recording_type, meeting_id=meeting_stem,
-            diarization_speaker_id=other_sid,
-            speech_duration_seconds=other_context.speech_duration_seconds,
-            segment_count=other_context.segment_count,
-            created_from="user_confirmed", negative=True,
-            channel=channel,
-        )
-        config.add_speaker_prototype(
-            other_person["person_id"], embedding,
-            recording_type=context.recording_type, meeting_id=meeting_stem,
-            diarization_speaker_id=resolved_id,
-            speech_duration_seconds=context.speech_duration_seconds,
-            segment_count=context.segment_count,
-            created_from="user_confirmed", negative=True,
-            channel=channel,
-        )
+        for match in matches:
+            other_sid = match["diarization_speaker_id"]
+            other_embedding, other_context = clusters[other_sid]
+            config.add_speaker_prototype(
+                person["person_id"], other_embedding,
+                recording_type=other_context.recording_type, meeting_id=meeting_stem,
+                diarization_speaker_id=other_sid,
+                speech_duration_seconds=other_context.speech_duration_seconds,
+                segment_count=other_context.segment_count,
+                created_from="user_confirmed", negative=True,
+                channel=channel,
+            )
+            config.add_speaker_prototype(
+                other_person["person_id"], embedding,
+                recording_type=context.recording_type, meeting_id=meeting_stem,
+                diarization_speaker_id=resolved_id,
+                speech_duration_seconds=context.speech_duration_seconds,
+                segment_count=context.segment_count,
+                created_from="user_confirmed", negative=True,
+                channel=channel,
+            )
         hard_negatives_added.append(other_person["display_name"])
 
     relabeled_lines = 0
