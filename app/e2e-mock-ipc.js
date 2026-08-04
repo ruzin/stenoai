@@ -883,6 +883,9 @@ function install({ ipcMain }) {
           cluster.confirmed_by_user = null;
           cluster.confirmed_person_id = null;
         }
+        // "A human kept this generic" is superseded by "a human says it is
+        // several people" -- same transition the real CLI performs.
+        cluster.review_state = null;
       } else if (cluster.prevSuggestion) {
         Object.assign(cluster, cluster.prevSuggestion);
         delete cluster.prevSuggestion;
@@ -893,6 +896,27 @@ function install({ ipcMain }) {
         contains_multiple_speakers: cluster.contains_multiple_speakers,
         cleared_confirmation_from: clearedFrom,
         minimum_speaker_count: 0,
+      };
+    },
+
+    // Mutates the same speakerState the suggestions echo is built from, so
+    // a spec sees the marking the way the real backend delivers it: written
+    // to the sidecar, read back on the next suggest-speakers. The real CLI
+    // also clears it on a confirm and on a mixed marking (both are stronger
+    // statements about the same cluster); those transitions live in the two
+    // handlers above so the mock cannot drift from that contract.
+    'set-cluster-review-state': async (_event, params) => {
+      const { channel, diarizationSpeakerId, generic } = params || {};
+      const cluster = (speakerState.suggestions[channel] || {})[diarizationSpeakerId];
+      if (!cluster) {
+        return { success: false, error: `No cluster ${diarizationSpeakerId} in ${channel}` };
+      }
+      cluster.review_state = generic ? 'generic' : null;
+      return {
+        success: true,
+        resolved_diarization_speaker_id: diarizationSpeakerId,
+        fragment_ids: [diarizationSpeakerId],
+        review_state: cluster.review_state,
       };
     },
 
@@ -987,6 +1011,9 @@ function install({ ipcMain }) {
         // already hold a cluster of this meeting by id, never by display
         // name (a rename can leave two profiles reading alike).
         confirmed_person_id: person.person_id,
+        // Naming the row supersedes "a human kept this generic" -- the real
+        // CLI clears it across the whole fragment set on every confirm.
+        review_state: null,
       };
 
       return {

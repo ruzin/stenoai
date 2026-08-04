@@ -140,7 +140,13 @@ test('a person profile can be deleted from the Change popover, unwinding any row
   await expect(page.getByRole('button', { name: 'Julian', exact: true })).toHaveCount(0);
 });
 
-test('Keep generic dismisses the row locally, no confirm call needed', async ({ launchApp }) => {
+// Replaces 'Keep generic dismisses the row locally, no confirm call needed',
+// which asserted the row reached toHaveCount(0). That was true and is now
+// deliberately false: the decision is persisted, and a persisted-but-hidden
+// row would put its own undo somewhere nobody can reach. Renamed rather than
+// edited in place -- quietly flipping the assertion would disguise a product
+// decision as test maintenance.
+test('Keep generic marks the row and leaves the undo one click away', async ({ launchApp }) => {
   const { page } = await launchApp({
     mockIpc: true,
     env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
@@ -150,7 +156,63 @@ test('Keep generic dismisses the row locally, no confirm call needed', async ({ 
   const row = page.getByTestId('speaker-row-mic:SPEAKER_2');
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: 'Keep generic label' }).click();
-  await expect(row).toHaveCount(0);
+
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('Kept generic');
+
+  const reopen = row.getByRole('button', { name: 'Reopen this speaker for naming' });
+  await expect(reopen).toBeVisible();
+  await reopen.click();
+  await expect(page.getByTestId('speaker-kept-generic-mic:SPEAKER_2')).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Keep generic label' })).toBeVisible();
+});
+
+test('the kept-generic marking survives leaving the meeting and coming back', async ({
+  launchApp,
+}) => {
+  // The defect this whole slice exists for. The decision used to live in a
+  // React state set, so it died with the panel, and every row the reviewer
+  // had already dealt with came back on the next visit -- the exact work
+  // the button was meant to save.
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  const row = page.getByTestId('speaker-row-mic:SPEAKER_2');
+  await row.getByRole('button', { name: 'Keep generic label' }).click();
+  await expect(row).toContainText('Kept generic');
+
+  await page.evaluate(() => {
+    window.location.hash = '#/';
+  });
+  await openDetail(page);
+
+  const rowAfter = page.getByTestId('speaker-row-mic:SPEAKER_2');
+  await expect(rowAfter).toContainText('Kept generic');
+  await expect(rowAfter.getByRole('button', { name: 'Reopen this speaker for naming' })).toBeVisible();
+});
+
+test('Keep generic is not offered on a row that is already decided', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+  await openDetail(page);
+
+  // Confirmed: naming the row settles it, so parking it would say two
+  // contradictory things about the same cluster.
+  const confirmed = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  await confirmed.getByRole('button', { name: 'Approve' }).click();
+  await expect(confirmed).toContainText('✓ Confirmed as Julian');
+  await expect(confirmed.getByRole('button', { name: 'Keep generic label' })).toHaveCount(0);
+
+  // Marked as several people: same reasoning from the other direction.
+  const marked = page.getByTestId('speaker-row-mic:SPEAKER_2');
+  await marked.getByRole('button', { name: 'This is more than one person' }).click();
+  await expect(marked).toContainText('More than one person');
+  await expect(marked.getByRole('button', { name: 'Keep generic label' })).toHaveCount(0);
 });
 
 test('a cluster with no suggestion and no candidates never renders', async ({ launchApp }) => {

@@ -14,9 +14,10 @@ import {
   useGetSpeakerSampleAudio,
   useDeletePersonProfile,
   useMarkSpeakerCluster,
+  useSetClusterReviewState,
   meetingStemFromSummaryFile,
 } from '@/hooks/useSpeakerSuggestions';
-import type { PersonProfile, SpeakerSuggestion } from '@/lib/ipc';
+import type { PersonProfile, SpeakerSuggestion, StaleAssignment } from '@/lib/ipc';
 
 interface SpeakerReviewPanelProps {
   summaryFile: string;
@@ -82,6 +83,55 @@ export function orderProfilesForRow<T extends { display_name: string; person_id:
     if (aHere !== bHere) return aHere ? -1 : 1;
     return a.display_name.localeCompare(b.display_name);
   });
+}
+
+/** Did a human look at this row and choose to leave it unnamed?
+ *
+ *  Read out of the query payload rather than component state, which is the
+ *  whole reason the backend records it: held in the component, the decision
+ *  died on the next remount and every row the reviewer had already dealt
+ *  with came back.
+ *
+ *  Compares against the one value this build knows. A newer build writing a
+ *  state this one has never heard of reads as "not reviewed" -- the safe
+ *  direction, because the alternative is presenting an undo for a decision
+ *  this build cannot describe. */
+export function isKeptGeneric(suggestion: SpeakerSuggestion): boolean {
+  return suggestion.review_state === 'generic';
+}
+
+/** Whether the "keep generic" button belongs on this row at all.
+ *
+ *  Not on a confirmed row and not on one marked as several people: both are
+ *  decided, and parking a decided row would say two contradictory things
+ *  about the same cluster. (Until this slice the button rendered on both,
+ *  because it sat outside the conditional that hides the naming actions.)
+ *  It stays on a row that is already kept generic -- that click is the undo,
+ *  and it is the only way back. */
+export function showsKeepGenericButton(suggestion: SpeakerSuggestion): boolean {
+  return !suggestion.confirmed_by_user && !suggestion.contains_multiple_speakers;
+}
+
+/** The one meeting-level sentence for confirmations a re-diarization
+ *  orphaned, or null when there are none.
+ *
+ *  Deliberately says the assignments are gone rather than the people: their
+ *  voice evidence is untouched and still scores candidates everywhere. And
+ *  deliberately does not promise completeness -- someone whose cluster id
+ *  the new run no longer produces cannot be listed here at all (see
+ *  suggest-speakers, where this list is built). */
+export function staleAssignmentNotice(stale: StaleAssignment[] | undefined): string | null {
+  if (!stale || stale.length === 0) return null;
+  const names = stale.map((s) => s.display_name);
+  const listed =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return (
+    `This meeting was analysed again, so the speakers were renumbered. `
+    + `${listed} ${names.length === 1 ? 'is' : 'are'} no longer linked to any speaker below. `
+    + `Nothing was deleted -- assign them again to restore the link.`
+  );
 }
 
 // "mic" is always the device owner's own recording side (in-person audio);
@@ -229,8 +279,8 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   const confirmSpeaker = useConfirmSpeaker();
   const deleteProfile = useDeletePersonProfile();
   const markCluster = useMarkSpeakerCluster();
+  const setReviewState = useSetClusterReviewState();
 
-  const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [changeOpenFor, setChangeOpenFor] = React.useState<string | null>(null);
   const [newPersonRow, setNewPersonRow] = React.useState<Row | null>(null);
@@ -302,19 +352,23 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   const alreadyInMeeting = new Set(
     rows.map((row) => row.suggestion.confirmed_person_id).filter((id): id is string => !!id),
   );
-  const notDismissed = rows.filter((row) => !dismissed.has(rowKey(row)));
   // A row a human has explicitly marked stays in the main list even if its
   // turn shape also matches the artifact heuristic -- hiding it behind
   // "Show N filtered rows" would bury the undo for a deliberate action
-  // behind a toggle the user has no reason to open.
+  // behind a toggle the user has no reason to open. Same for a row kept
+  // generic: the marking IS a deliberate action, and its undo lives on the
+  // row itself.
   const isFiltered = (row: Row) =>
-    row.suggestion.is_likely_artifact && !row.suggestion.contains_multiple_speakers;
-  const artifactRows = notDismissed.filter(isFiltered);
-  const primaryRows = notDismissed.filter((row) => !isFiltered(row));
-  const visibleRows = showFiltered ? notDismissed : primaryRows;
+    row.suggestion.is_likely_artifact
+    && !row.suggestion.contains_multiple_speakers
+    && !isKeptGeneric(row.suggestion);
+  const artifactRows = rows.filter(isFiltered);
+  const primaryRows = rows.filter((row) => !isFiltered(row));
+  const visibleRows = showFiltered ? rows : primaryRows;
   const recordingAvailable = suggestionsQuery.data?.recording_available ?? false;
+  const staleNotice = staleAssignmentNotice(suggestionsQuery.data?.stale_assignments);
 
-  if (!suggestionsQuery.data || notDismissed.length === 0) return null;
+  if (!suggestionsQuery.data || rows.length === 0) return null;
 
   const duplicateProfile = newPersonName.trim()
     ? (profilesQuery.data ?? []).find((p) => namesCollide(p.display_name, newPersonName))
@@ -383,6 +437,20 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
       >
         Speakers
       </h2>
+      {/* Above the rows and above the speaker-count note, because it
+          explains why the rows below look unfamiliar: without it, a
+          reviewer returning to a re-analysed meeting just finds the names
+          they entered gone, with nothing saying why or that re-entering
+          them is all it takes. */}
+      {staleNotice && (
+        <p
+          className="text-[11.5px]"
+          style={{ color: 'var(--fg-2)', margin: 0 }}
+          data-testid="speaker-stale-assignments"
+        >
+          {staleNotice}
+        </p>
+      )}
       {minimumSpeakers > totalClusters && (
         <p
           className="text-[11.5px]"
@@ -407,6 +475,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
           const key = rowKey(row);
           const anyConfirmPending = confirmSpeaker.isPending || markCluster.isPending;
           const isMarked = row.suggestion.contains_multiple_speakers;
+          const isKept = isKeptGeneric(row.suggestion);
           const samples = row.suggestion.samples ?? [];
           const isExpanded = expanded.has(key);
           // Expanding is only worth offering when there is more than the
@@ -433,6 +502,14 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                 {isMarked ? (
                   <span className="text-[11.5px]" style={{ color: 'var(--fg-2)' }}>
                     Left out of naming and voice recognition.
+                  </span>
+                ) : isKept ? (
+                  <span
+                    className="text-[11.5px]"
+                    style={{ color: 'var(--fg-2)' }}
+                    data-testid={`speaker-kept-generic-${key}`}
+                  >
+                    Kept generic — you decided not to name this speaker.
                   </span>
                 ) : (
                   row.suggestion.sample_text && (
@@ -638,17 +715,34 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   {isMarked ? <Undo2 className="size-[13px]" /> : <Users className="size-[13px]" />}
                   {isMarked ? 'One person' : null}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label="Keep generic label"
-                  title="Keep generic label"
-                  disabled={anyConfirmPending}
-                  onClick={() => setDismissed((prev) => new Set(prev).add(key))}
-                  data-testid={`speaker-keep-generic-${key}`}
-                >
-                  <X className="size-[13px]" />
-                </Button>
+                {/* The row stays put and reads as parked, rather than
+                    vanishing. Hiding it was fine while the decision lived
+                    for one session; now that it is written down, a hidden
+                    row would put its undo somewhere nobody can reach --
+                    and a reviewer coming back tomorrow would have no way to
+                    tell "I decided to leave this" from "this never
+                    appeared". */}
+                {showsKeepGenericButton(row.suggestion) && (
+                  <Button
+                    size="sm"
+                    variant={isKept ? 'outline' : 'ghost'}
+                    aria-label={isKept ? 'Reopen this speaker for naming' : 'Keep generic label'}
+                    title={isKept ? 'Reopen this speaker for naming' : 'Keep generic label'}
+                    disabled={anyConfirmPending}
+                    onClick={() =>
+                      setReviewState.mutate({
+                        meetingStem,
+                        channel: row.channel,
+                        diarizationSpeakerId: row.diarizationSpeakerId,
+                        generic: !isKept,
+                      })
+                    }
+                    data-testid={`speaker-keep-generic-${key}`}
+                  >
+                    {isKept ? <Undo2 className="size-[13px]" /> : <X className="size-[13px]" />}
+                    {isKept ? 'Reopen' : null}
+                  </Button>
+                )}
               </div>
               </div>
 
