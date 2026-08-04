@@ -1723,12 +1723,28 @@ def extract_segment_samples(
             "start": begin,
             "end": end,
             "text": _join_texts([text], max_chars),
+            # Whether this turn survives BOTH display caps whole. The quote
+            # is cut at max_chars and the clip at SAMPLE_MAX_SECONDS, and
+            # nothing related the two: measured on a real 9-minute call, a
+            # 40.5 s / 742-character turn showed 19 % of its text beside
+            # 20 s of audio. Reading one sentence while hearing twenty
+            # seconds reads as the wrong clip, even though both start at
+            # the same instant.
+            "fits": len(text) <= max_chars and (end - begin) < SAMPLE_MAX_SECONDS,
         })
 
-    # The longest turns, then chronological -- same reasoning as
-    # sample_segments (a long uninterrupted turn is the most likely to be
-    # genuine, unmixed speech), now applied to units that have text.
-    chosen = sorted(candidates, key=lambda c: c["end"] - c["start"], reverse=True)[:limit]
+    # Whole turns first, longest among them; overflowing ones only fill the
+    # remaining slots. Ranking by raw duration alone preferred precisely the
+    # turns that overflow, because overflowing is what being long means here
+    # -- the same amplification that made a drifted clip more likely to be
+    # shown before _turn_audio_range stopped drifting. A turn that fits is
+    # still chosen longest-first, so the clip stays long enough to
+    # recognise a voice from.
+    chosen = sorted(
+        candidates,
+        key=lambda c: (c["fits"], c["end"] - c["start"]),
+        reverse=True,
+    )[:limit]
     return sorted(chosen, key=lambda c: c["start"])
 
 
