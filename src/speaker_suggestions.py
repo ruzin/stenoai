@@ -699,13 +699,41 @@ def minimum_speaker_count(channels: dict) -> int:
     instead of silent, and so a future diarization path -- windowed
     inference with cross-window clustering, or an engine that does accept
     a count -- has ground truth to be measured against.
+
+    Counted on the MERGED view, and taken as the LARGEST channel rather
+    than the sum. Both corrections come from the same demand: a minimum
+    that overstates is simply wrong, while one that understates is merely
+    weak. Raw clusters overstate because the panel itself collapses
+    diarizer fragments of one voice into one row, so the number would
+    contradict the list beside it. Summing channels overstates because a
+    remote voice coming out of the speakers is picked up by the microphone
+    as well -- the module's own excerpt reasoning rests on that -- so a mic
+    cluster and a system cluster can be one person, and nothing in the
+    sidecar says whether they are.
     """
-    total = 0
+    largest = 0
     for channel_data in (channels or {}).values():
-        clusters = channel_data.get("clusters") or {}
-        total += len(clusters)
-        total += sum(1 for c in clusters.values() if c.get(MULTI_SPEAKER_KEY))
-    return total
+        raw = channel_data.get("clusters") or {}
+        if not raw:
+            continue
+        try:
+            merged, _id_resolution = merge_same_channel_fragments(
+                clusters_from_sidecar_channel("", channel_data)
+            )
+            groups = [[sid, *ctx.merged_from] for sid, (_emb, ctx) in merged.items()]
+        except (KeyError, TypeError, ValueError):
+            # A sidecar without usable embeddings cannot be merged; count
+            # the raw ids rather than reporting nothing at all.
+            groups = [[sid] for sid in raw]
+        # A group counts as mixed if ANY of its members was marked: the
+        # human said two people share that voice, and merging it with a
+        # fragment of itself does not make that untrue.
+        marked = sum(
+            1 for members in groups
+            if any(raw.get(member, {}).get(MULTI_SPEAKER_KEY) for member in members)
+        )
+        largest = max(largest, len(groups) + marked)
+    return largest
 
 
 def read_speakers_sidecar(output_dir: Path, meeting_stem: str) -> Optional[dict]:
@@ -1173,15 +1201,6 @@ def sample_segments(segments: list, limit: int = SAMPLE_SEGMENT_LIMIT) -> list:
         segments, key=lambda s: s.get("end", 0) - s.get("start", 0), reverse=True,
     )[:limit]
     return sorted(longest, key=lambda s: s.get("start", 0))
-
-
-def _covers(segments: list, timestamp_seconds: float) -> bool:
-    return any(
-        seg.get("start", 0) - RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        <= timestamp_seconds
-        <= seg.get("end", 0) + RELABEL_TIMESTAMP_TOLERANCE_SECONDS
-        for seg in segments
-    )
 
 
 def cluster_transcript_lines(

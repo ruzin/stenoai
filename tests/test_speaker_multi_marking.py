@@ -208,7 +208,7 @@ class MarkedClusterIsWithheldTests(unittest.TestCase):
 
 
 class MinimumSpeakerCountTests(unittest.TestCase):
-    def test_counts_clusters_plus_one_per_marked_cluster(self):
+    def test_counts_the_largest_channel_plus_one_per_marked_cluster(self):
         channels = {
             "system": {"clusters": {
                 "SPEAKER_0": {MULTI_SPEAKER_KEY: True},
@@ -219,13 +219,58 @@ class MinimumSpeakerCountTests(unittest.TestCase):
             "mic": {"clusters": {"SPEAKER_0": {}}},
         }
         # Four system clusters (Sortformer's hard ceiling) with one of them
-        # known-mixed, plus the owner's mic cluster: at least six people
-        # were in a meeting the diarizer described with five clusters.
-        self.assertEqual(minimum_speaker_count(channels), 6)
+        # known-mixed: at least five people were on that channel alone.
+        #
+        # This assertion used to read 6, adding the owner's mic cluster on
+        # top. That was a claim the data does not support: a remote voice
+        # coming out of the speakers lands in the microphone too, so the mic
+        # cluster may be one of the four already counted. Five is the
+        # smallest count consistent with the sidecar, and a minimum that
+        # overstates is wrong in a way that understating is not -- it would
+        # tell someone to go looking for a person who was never there.
+        self.assertEqual(minimum_speaker_count(channels), 5)
 
     def test_empty_and_absent_channels_are_zero(self):
         self.assertEqual(minimum_speaker_count({}), 0)
         self.assertEqual(minimum_speaker_count({"system": {}}), 0)
+
+    def test_two_fragments_of_one_voice_count_as_one_person(self):
+        # From the bot review. The panel collapses diarizer fragments of one
+        # voice into a single row (merge_same_channel_fragments), so counting
+        # raw sidecar clusters told the user "at least 2 people" while
+        # showing them one -- a number that contradicts the list beside it.
+        channels = {
+            "system": {
+                "recording_type": "remote",
+                "clusters": {
+                    # Pairwise distance far below the merge threshold: one voice.
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                                  "segment_count": 10, "segments": []},
+                    "SPEAKER_1": {"embedding": [0.999, 0.045], "speech_duration_seconds": 30.0,
+                                  "segment_count": 5, "segments": []},
+                },
+            },
+        }
+        self.assertEqual(minimum_speaker_count(channels), 1)
+
+    def test_channels_are_not_summed_because_one_voice_can_be_in_both(self):
+        # Also from the review, and the reason the old number could exceed
+        # the truth: a remote voice coming out of the speakers is picked up
+        # by the microphone too, so a mic cluster and a system cluster can be
+        # the SAME person. Nothing in the sidecar says whether they are, so
+        # the smallest count consistent with the data is the larger channel,
+        # not the sum. A minimum that overstates is simply wrong; one that
+        # understates is merely weak.
+        channels = {
+            "system": {"recording_type": "remote", "clusters": {
+                "SPEAKER_0": {"embedding": [1.0, 0.0]},
+                "SPEAKER_1": {"embedding": [0.0, 1.0]},
+            }},
+            "mic": {"recording_type": "local", "clusters": {
+                "SPEAKER_0": {"embedding": [1.0, 0.0]},
+            }},
+        }
+        self.assertEqual(minimum_speaker_count(channels), 2)
 
 
 class SampleSegmentsTests(unittest.TestCase):
@@ -759,6 +804,51 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             self.assertTrue(data["success"])
             self.assertTrue(data["contains_multiple_speakers"])
             self.assertEqual(data["minimum_speaker_count"], 3)
+
+    def test_marking_one_cluster_keeps_the_negatives_earned_by_the_others(self):
+        # From the bot review, and it destroys data. A person's hard
+        # negatives are created when OTHER clusters are confirmed as
+        # somebody else -- "this voice is not Julian" is evidence about
+        # THAT cluster. Marking cluster A as mixed cleared every negative
+        # the person had in this meeting and channel, including the ones
+        # earned by clusters B and C, which are untouched by the marking
+        # and stay true. The loss is silent and only shows up months later
+        # as a worse suggestion.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = cfg.create_person_profile("Julian")
+            pid = person["person_id"]
+            # Confirmed on SPEAKER_0 (the cluster about to be marked)...
+            cfg.add_speaker_prototype(
+                pid, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
+                segment_count=10, created_from="user_confirmed", channel="system",
+            )
+            # ...and ruled OUT for SPEAKER_1 by a different confirmation.
+            cfg.add_speaker_prototype(
+                pid, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_1", speech_duration_seconds=40.0,
+                segment_count=8, created_from="user_confirmed", channel="system",
+                negative=True,
+            )
+
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
+            )
+            self.assertTrue(_last_json(result.output)["success"])
+
+            profile = cfg.get_person_profile(pid)
+            self.assertEqual(
+                [p["diarization_speaker_id"] for p in profile["prototypes"]], [],
+                "the marked cluster's own prototype must go",
+            )
+            self.assertEqual(
+                [n["diarization_speaker_id"] for n in profile["hard_negatives"]],
+                ["SPEAKER_1"],
+                "a negative earned by a DIFFERENT cluster is not this marking's to delete",
+            )
 
     def test_unknown_cluster_fails_loudly_rather_than_marking_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

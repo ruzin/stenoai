@@ -5181,10 +5181,16 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
             if not removed:
                 continue
             cleared_from.append(person["display_name"])
+            # Restricted to THIS cluster's ids, same as the loop below. A
+            # person's negatives in this meeting are earned one cluster at a
+            # time -- "that voice over there is not Julian" is evidence about
+            # that other cluster, and marking this one does not touch it.
+            # Clearing them all destroyed evidence silently, and the only
+            # symptom would have been a worse suggestion months later.
             config.remove_speaker_evidence(
                 person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                negative=True,
+                sids=fragment_ids, negative=True,
             )
             for other in config.get_person_profiles():
                 if other["person_id"] == person["person_id"]:

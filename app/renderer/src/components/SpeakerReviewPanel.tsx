@@ -199,7 +199,11 @@ function PlaySampleButton({
  * dropped, since a human might legitimately want to review one (e.g. a
  * real quiet third participant).
  */
-type ConfirmFeedback = { message: string };
+/** `action` names what the person actually clicked. Without it every
+ * failure on this row read "Couldn't confirm", including a failed
+ * more-than-one-person marking, which describes an operation the user did
+ * not attempt. */
+type ConfirmFeedback = { message: string; action?: 'confirm' | 'mark' | 'unmark' };
 
 export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPanelProps) {
   const meetingStem = meetingStemFromSummaryFile(summaryFile);
@@ -311,10 +315,14 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
         channel: row.channel,
         diarizationSpeakerId: row.diarizationSpeakerId,
         containsMultipleSpeakers,
+        summaryFile,
       },
       {
         onError: (error) => {
-          setFeedback((prev) => new Map(prev).set(key, { message: error.message }));
+          setFeedback((prev) => new Map(prev).set(key, {
+            message: error.message,
+            action: containsMultipleSpeakers ? 'mark' : 'unmark',
+          }));
         },
       },
     );
@@ -425,7 +433,13 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     style={{ color: 'var(--danger)' }}
                     data-testid={`speaker-feedback-${key}`}
                   >
-                    {`Couldn't confirm: ${feedback.get(key)!.message}`}
+                    {`${
+                      feedback.get(key)!.action === 'mark'
+                        ? "Couldn't mark this as more than one person"
+                        : feedback.get(key)!.action === 'unmark'
+                          ? "Couldn't undo the marking"
+                          : "Couldn't confirm"
+                    }: ${feedback.get(key)!.message}`}
                   </span>
                 )}
               </div>

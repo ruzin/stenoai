@@ -796,7 +796,10 @@ function install({ ipcMain }) {
       cluster.contains_multiple_speakers = Boolean(containsMultipleSpeakers);
       const clearedFrom = [];
       if (cluster.contains_multiple_speakers) {
-        cluster.prevSuggestion = {
+        // Only on the FIRST mark. Marking an already-marked cluster would
+        // otherwise snapshot the already-cleared state over the real one,
+        // and the undo would restore nothing.
+        cluster.prevSuggestion = cluster.prevSuggestion ?? {
           status: cluster.status,
           suggested_person_id: cluster.suggested_person_id,
           suggested_name: cluster.suggested_name,

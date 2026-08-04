@@ -153,9 +153,22 @@ export function useMarkSpeakerCluster() {
       channel: string;
       diarizationSpeakerId: string;
       containsMultipleSpeakers: boolean;
-    }) => unwrap(await ipc().speakers.markCluster(args)),
-    onSuccess: async () => {
+      /** The meeting's summaryFile, carried for the same reason the confirm
+       * mutation carries it: marking a CONFIRMED cluster withdraws that
+       * person from the meeting's participants, and the open detail view
+       * reads those from its own cached query. Without invalidating it, the
+       * Participants line keeps showing the withdrawn name until an
+       * unrelated refetch or a navigation. */
+      summaryFile?: string | null;
+    }) => {
+      const { summaryFile: _ignored, ...call } = args;
+      return unwrap(await ipc().speakers.markCluster(call));
+    },
+    onSuccess: async (_data, args) => {
       await qc.invalidateQueries({ queryKey: speakersKeys.all });
+      if (args.summaryFile) {
+        await qc.invalidateQueries({ queryKey: meetingsKeys.detail(args.summaryFile) });
+      }
     },
   });
 }
