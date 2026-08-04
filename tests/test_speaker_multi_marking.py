@@ -363,6 +363,65 @@ class SampleSegmentsTests(unittest.TestCase):
             self.assertEqual(samples[0]["start"], 10.0)
             self.assertEqual(samples[0]["end"], 30.0)  # capped at SAMPLE_MAX_SECONDS
 
+    def test_a_gap_between_two_of_this_clusters_segments_is_not_spanned(self):
+        # Found by review. The range was min(start) to max(end) over every
+        # own segment inside the turn's bounds, so two segments with a hole
+        # between them produced ONE clip covering the hole as well. The hole
+        # is, by definition, time this cluster was NOT speaking; on a mic
+        # channel taken without headphones that is exactly where the remote
+        # voices sit. next_start and SAMPLE_MAX_SECONDS bound how far this
+        # can reach, they do not stop it.
+        #
+        # Here the cluster speaks 10-12 and again 20-22, and the next line
+        # is a minute away, so nothing else clips the range.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Speaker 2] first bit\n[01:00] [You] much later\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [{"start": 10.0, "end": 12.0}, {"start": 20.0, "end": 22.0}],
+                turn_manifest=[
+                    {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 60.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(samples[0]["text"], "first bit")
+            self.assertEqual(
+                (samples[0]["start"], samples[0]["end"]), (10.0, 12.0),
+                "the clip stops where this cluster stopped speaking",
+            )
+
+    def test_a_short_pause_inside_one_turn_is_still_one_clip(self):
+        # The counterweight to the test above: a turn IS several consecutive
+        # segments of one speaker (src.transcriber merges them), separated
+        # by that speaker's own breathing pauses. Cutting at every one of
+        # those would leave two-second clips nobody can recognise a voice
+        # from -- the point of the panel.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "t.txt"
+            transcript.write_text(
+                "[00:10] [Speaker 2] one continuous turn\n[01:00] [You] much later\n",
+                encoding="utf-8",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [
+                    {"start": 10.0, "end": 15.0},
+                    {"start": 15.4, "end": 19.0},   # 0.4s pause
+                    {"start": 20.0, "end": 24.0},   # 1.0s pause
+                ],
+                turn_manifest=[
+                    {"start": 10.0, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
+                    {"start": 60.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
+                ],
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual((samples[0]["start"], samples[0]["end"]), (10.0, 24.0))
+
     def test_two_turns_in_the_same_displayed_second_never_widen_the_clip(self):
         # Found by review, and it is the same failure class as the one
         # reported from real use. Transcript timestamps render as [MM:SS],

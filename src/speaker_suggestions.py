@@ -1235,10 +1235,18 @@ def _join_texts(texts: list, max_chars: int) -> Optional[str]:
 # an unbounded clip would also mean an unbounded ffmpeg extraction.
 SAMPLE_MAX_SECONDS = 20.0
 
+# How long a hole between two of one cluster's segments may be before the
+# clip stops there instead of playing across it. A speaker pausing mid-turn
+# leaves gaps of this order; a gap much longer than a second is where the
+# diarizer heard somebody, or something, else.
+SAMPLE_TURN_GAP_TOLERANCE_SECONDS = 1.0
+
 
 def _turn_audio_range(segments: list, start: float, next_start: Optional[float]) -> tuple:
-    """The time range of ONE turn's speech by this cluster: the span of its
-    own diarization segments between this line's start and the next line's.
+    """The time range of ONE turn's speech by this cluster: its own
+    diarization segments from this line's start onward, ending at the next
+    line, at SAMPLE_MAX_SECONDS, or at the first hole this cluster did not
+    fill -- whichever comes first.
 
     This is the piece that makes a clip and the text beside it describe the
     same thing. Selecting by SEGMENT and then hunting for a line inside it
@@ -1274,8 +1282,28 @@ def _turn_audio_range(segments: list, start: float, next_start: Optional[float])
             return start, start
         own = [min(following, key=lambda seg: seg.get("start", 0))]
 
-    begin = min(seg.get("start", 0) for seg in own)
-    end = max(seg.get("end", 0) for seg in own)
+    # From the turn's first own segment onward, and only for as long as this
+    # cluster keeps speaking. Taking min(start)/max(end) over the whole set
+    # spanned the holes between segments as well, and a hole is by
+    # definition time this cluster was NOT speaking -- on a mic channel
+    # taken without headphones, exactly where the remote voices sit.
+    # `next_start` and SAMPLE_MAX_SECONDS bound how far that can reach; they
+    # do not stop it.
+    #
+    # Pauses shorter than SAMPLE_TURN_GAP_TOLERANCE_SECONDS are still
+    # bridged: a turn IS several consecutive segments of one speaker (see
+    # src.transcriber's turn merging), separated by that speaker's own
+    # breathing, and cutting at every one of those would leave clips too
+    # short to recognise a voice from -- the one thing the panel is for.
+    ordered = sorted(own, key=lambda seg: seg.get("start", 0))
+    begin = ordered[0].get("start", 0)
+    end = ordered[0].get("end", 0)
+    for seg in ordered[1:]:
+        if seg.get("start", 0) - end > SAMPLE_TURN_GAP_TOLERANCE_SECONDS:
+            break
+        # max(), not the later end: a segment nested inside a longer one
+        # must not shorten the turn it sits in.
+        end = max(end, seg.get("end", 0))
 
     # Never run into the next speaker's line. Guarded on `next_start > begin`
     # so a next line sharing this one's displayed second cannot clip the
