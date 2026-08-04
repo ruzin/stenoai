@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { isKeptGeneric, showsKeepGenericButton, staleAssignmentNotice } from './SpeakerReviewPanel';
+import {
+  isKeptGeneric,
+  showsKeepGenericButton,
+  showsNamingActions,
+  staleAssignmentNotice,
+} from './SpeakerReviewPanel';
 
 const suggestion = (over: Record<string, unknown> = {}) =>
   ({
@@ -59,6 +64,28 @@ describe('showsKeepGenericButton', () => {
   it('keeps offering it on a row that is already kept generic', () => {
     // That is the undo, and it is the only way back.
     expect(showsKeepGenericButton(suggestion({ review_state: 'generic' }))).toBe(true);
+  });
+});
+
+describe('showsNamingActions', () => {
+  it('offers naming on an ordinary row', () => {
+    expect(showsNamingActions(suggestion())).toBe(true);
+  });
+
+  it('withholds it on a row marked as several people', () => {
+    expect(showsNamingActions(suggestion({ contains_multiple_speakers: true }))).toBe(false);
+  });
+
+  it('withholds it on a row kept generic', () => {
+    // Otherwise the row says "Kept generic - you decided not to name this
+    // speaker" while Approve, Change and New person sit beside it, and the
+    // button offers to "Reopen" something that was never closed. Parking a
+    // row has to mean the same thing here as marking one does.
+    expect(showsNamingActions(suggestion({ review_state: 'generic' }))).toBe(false);
+  });
+
+  it('comes back the moment the row is reopened', () => {
+    expect(showsNamingActions(suggestion({ review_state: null }))).toBe(true);
   });
 });
 

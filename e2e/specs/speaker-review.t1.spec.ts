@@ -159,12 +159,19 @@ test('Keep generic marks the row and leaves the undo one click away', async ({ l
 
   await expect(row).toBeVisible();
   await expect(row).toContainText('Kept generic');
+  // Parked means parked: the naming actions go with the decision, the same
+  // way they do on a row marked as several people. Otherwise the row says
+  // "you decided not to name this speaker" with three ways to name it
+  // beside the sentence, and offers to reopen what was never closed.
+  await expect(row.getByRole('button', { name: 'Change' })).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'New person' })).toHaveCount(0);
 
   const reopen = row.getByRole('button', { name: 'Reopen this speaker for naming' });
   await expect(reopen).toBeVisible();
   await reopen.click();
   await expect(page.getByTestId('speaker-kept-generic-mic:SPEAKER_2')).toHaveCount(0);
   await expect(row.getByRole('button', { name: 'Keep generic label' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Change' })).toBeVisible();
 });
 
 test('the kept-generic marking survives leaving the meeting and coming back', async ({

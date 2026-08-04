@@ -112,6 +112,19 @@ export function showsKeepGenericButton(suggestion: SpeakerSuggestion): boolean {
   return !suggestion.confirmed_by_user && !suggestion.contains_multiple_speakers;
 }
 
+/** Whether this row still offers Approve / Change / New person.
+ *
+ *  Withheld on a mixed row because the backend refuses to enroll it, and on
+ *  a row kept generic because parking a row has to mean the same thing here
+ *  as marking one does: the reviewer said they are done with it. Leaving the
+ *  naming actions there produced a row that said "you decided not to name
+ *  this speaker" with three ways to name it beside the sentence, and offered
+ *  to "Reopen" something that was never closed. Reopening is one click, and
+ *  it brings them all back. */
+export function showsNamingActions(suggestion: SpeakerSuggestion): boolean {
+  return !suggestion.contains_multiple_speakers && !isKeptGeneric(suggestion);
+}
+
 /** The one meeting-level sentence for confirmations a re-diarization
  *  orphaned, or null when there are none.
  *
@@ -498,7 +511,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span
                   className={`text-[13.5px] ${row.suggestion.confirmed_by_user || isMarked ? 'font-medium' : ''}`}
-                  style={{ color: isMarked ? 'var(--fg-2)' : 'var(--fg-1)' }}
+                  style={{ color: isMarked || isKept ? 'var(--fg-2)' : 'var(--fg-1)' }}
                 >
                   {suggestionLabel(row.suggestion)}
                 </span>
@@ -583,7 +596,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                     become available, and a "Change" picker would be an
                     invitation to do the one thing this marking exists to
                     prevent. The undo below is what stays reachable. */}
-                {!isMarked && (
+                {showsNamingActions(row.suggestion) && (
                   <>
                 {/* Hidden once confirmed_by_user is set -- re-approving an
                     already-confirmed cluster is a no-op that changes
