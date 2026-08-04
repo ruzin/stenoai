@@ -28,6 +28,8 @@ import simple_recorder
 from src.config import Config
 from src.speaker_suggestions import (
     MULTI_SPEAKER_KEY,
+    REVIEW_STATE_GENERIC,
+    REVIEW_STATE_KEY,
     extract_sample_text,
     ClusterContext,
     clusters_from_sidecar_channel,
@@ -37,6 +39,7 @@ from src.speaker_suggestions import (
     read_speakers_sidecar,
     sample_segments,
     set_cluster_multi_speaker,
+    set_cluster_review_state,
     suggest_speaker,
     suggest_speakers_for_meeting,
     write_speakers_sidecar,
@@ -1725,3 +1728,152 @@ class ExcerptFitBoundaryTests(unittest.TestCase):
                 target_ids={("system", "SPEAKER_0")},
             )
             self.assertAlmostEqual(samples[0]["start"], 10.0, places=1)
+
+
+class SetClusterReviewStateCliTests(unittest.TestCase):
+    """The CLI behind "Keep generic". It records that a human looked at a
+    row and chose to leave it unnamed -- the one review outcome that
+    produces no other trace, and therefore the one that a restart silently
+    undoes if it is not written down."""
+
+    def _run(self, command, args, tmp, cfg=None):
+        cfg = cfg or Config(config_path=Path(tmp) / "config.json")
+        with mock.patch("src.config.get_config", return_value=cfg), \
+             mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
+            return CliRunner().invoke(command, args)
+
+    def _seed(self, tmp, clusters=None):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "system": {
+                "recording_type": "remote",
+                "clusters": clusters or {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                                  "segment_count": 10, "segments": [{"start": 1.0, "end": 5.0}]},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 40.0,
+                                  "segment_count": 8, "segments": [{"start": 20.0, "end": 24.0}]},
+                },
+            },
+        })
+        return output_dir
+
+    def _stored(self, output_dir, sid):
+        return read_speakers_sidecar(output_dir, "mtg001")["channels"]["system"]["clusters"][sid]
+
+    def test_marking_generic_round_trips_and_clears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_0"], tmp)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["review_state"], REVIEW_STATE_GENERIC)
+            self.assertEqual(self._stored(output_dir, "SPEAKER_0")[REVIEW_STATE_KEY],
+                             REVIEW_STATE_GENERIC)
+
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_0", "--clear"], tmp)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertIsNone(data["review_state"])
+            self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_0"))
+
+    def test_reports_the_merged_reach_not_just_the_id_it_was_handed(self):
+        # The reviewer clicked one row; that row may be several raw
+        # clusters. Saying which ones it covers keeps the CLI honest about
+        # what just happened, the same way mark-speaker-cluster does.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_2"], tmp)
+            data = _last_json(result.output)
+            self.assertEqual(data["diarization_speaker_id"], "SPEAKER_2")
+            self.assertEqual(data["resolved_diarization_speaker_id"], "SPEAKER_0")
+            self.assertEqual(sorted(data["fragment_ids"]), ["SPEAKER_0", "SPEAKER_2"])
+
+    def test_a_missing_sidecar_fails_as_json_and_never_as_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "output").mkdir(parents=True, exist_ok=True)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["never-diarised", "system", "SPEAKER_0"], tmp)
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(_last_json(result.output)["success"])
+            self.assertNotIn("Traceback", result.output)
+
+    def test_a_missing_channel_fails_as_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "mic", "SPEAKER_0"], tmp)
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(_last_json(result.output)["success"])
+            self.assertNotIn("Traceback", result.output)
+
+    def test_a_missing_cluster_fails_as_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_99"], tmp)
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(_last_json(result.output)["success"])
+            self.assertNotIn("Traceback", result.output)
+
+    def test_confirming_a_cluster_clears_the_marking_from_every_fragment(self):
+        # "Generic" means a human chose to stop there. Naming the row is a
+        # stronger statement about the same cluster and supersedes it -- and
+        # a key left on a fragment would keep the merged row reading generic
+        # after the confirm, because the merged view is an any().
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                set_cluster_review_state(output_dir, "mtg001", "system", sid, REVIEW_STATE_GENERIC)
+
+            result = self._run(simple_recorder.confirm_speaker,
+                               ["mtg001", "system", "SPEAKER_2", "--new-person", "Julian"],
+                               tmp, cfg=cfg)
+            self.assertTrue(_last_json(result.output)["success"])
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, sid))
+
+    def test_marking_a_cluster_as_mixed_clears_it_from_every_fragment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                set_cluster_review_state(output_dir, "mtg001", "system", sid, REVIEW_STATE_GENERIC)
+
+            result = self._run(simple_recorder.mark_speaker_cluster,
+                               ["mtg001", "system", "SPEAKER_0"], tmp)
+            self.assertTrue(_last_json(result.output)["success"])
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, sid))
+
+    def test_clearing_a_mixed_marking_does_not_resurrect_a_review_marking(self):
+        # --single withdraws the "two people" statement; it says nothing
+        # about the reviewer having once kept the row generic, and inventing
+        # that back would put a mark on the row nobody set.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_0",
+                                     REVIEW_STATE_GENERIC)
+            self._run(simple_recorder.mark_speaker_cluster,
+                      ["mtg001", "system", "SPEAKER_0"], tmp)
+            self._run(simple_recorder.mark_speaker_cluster,
+                      ["mtg001", "system", "SPEAKER_0", "--single"], tmp)
+            self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_0"))

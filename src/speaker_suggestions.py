@@ -248,6 +248,11 @@ class ClusterContext:
     # enrolling it as anyone's voice evidence would poison the profile it
     # was filed under and every future suggestion scored against it.
     contains_multiple_speakers: bool = False
+    # How far a human got reviewing this cluster (see REVIEW_STATE_KEY), or
+    # None where they have not said. Carried here only so the panel can show
+    # it back: unlike contains_multiple_speakers it feeds no score and no
+    # gate, because it describes the reviewer's progress and not the voice.
+    review_state: Optional[str] = None
 
 
 @dataclass
@@ -577,6 +582,19 @@ def merge_same_channel_fragments(clusters: dict) -> tuple:
                 contains_multiple_speakers=any(
                     clusters[sid][1].contains_multiple_speakers for sid in members
                 ),
+                # Same any() as above, for a different reason: the reviewer
+                # marked the ROW they saw, and which raw fragment carried
+                # the mark is an implementation detail they never saw. One
+                # marked member therefore marks the merged row -- and the
+                # transitions clear the whole member set, so a mark cannot
+                # survive on a fragment nobody can reach.
+                review_state=next(
+                    (
+                        clusters[sid][1].review_state for sid in members
+                        if clusters[sid][1].review_state is not None
+                    ),
+                    None,
+                ),
             ),
         )
 
@@ -661,6 +679,26 @@ def write_speakers_sidecar(
 MULTI_SPEAKER_KEY = "contains_multiple_speakers"
 
 
+# How far a human got reviewing one cluster, for the decisions that produce
+# no other trace. Same placement rationale as MULTI_SPEAKER_KEY: written
+# into the cluster entry itself so it travels with exactly the cluster it
+# describes, only written when set, absent means "not marked".
+#
+# Exactly one value, deliberately. "Assigned" is already derivable from a
+# matching prototype and "mixed" is already MULTI_SPEAKER_KEY; recording
+# either here as a second copy would create a consistency obligation with
+# no information gain, and the copies would disagree the first time one
+# path updated without the other. "Unreviewed" is the absence of
+# everything.
+#
+# It changes no score and no suggestion status. A reviewer saying "leave
+# this one generic" is a statement about their own progress, not about the
+# voice -- treating it as evidence would let a shrug quietly suppress a
+# real match.
+REVIEW_STATE_KEY = "review_state"
+REVIEW_STATE_GENERIC = "generic"
+
+
 def cluster_ids_marked_multi_speaker(channel_data: dict) -> set:
     """Every raw diarization_speaker_id in one channel marked as holding
     more than one person."""
@@ -721,6 +759,84 @@ def set_cluster_multi_speaker(
 
     write_sidecar_document(output_dir, meeting_stem, sidecar)
     return sidecar
+
+
+def _freshest_channel(output_dir: Path, meeting_stem: str, channel: str) -> tuple:
+    """The sidecar as it is on disk RIGHT NOW plus its `channel` entry, for a
+    read-modify-write that must not overwrite a concurrent one.
+
+    Same reasoning as in set_cluster_multi_speaker, and the same limit: it
+    narrows the race to re-read-until-rename rather than eliminating it.
+    Returns `(None, None)` when the sidecar or the channel is gone.
+    """
+    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    if sidecar is None:
+        return None, None
+    channel_data = (sidecar.get("channels") or {}).get(channel)
+    if channel_data is None:
+        return None, None
+    return sidecar, channel_data
+
+
+def set_cluster_review_state(
+    output_dir: Path, meeting_stem: str, channel: str,
+    diarization_speaker_id: str, state: Optional[str],
+) -> Optional[dict]:
+    """Set/clear how far the review got on ONE raw cluster.
+
+    Writes to exactly the id it was handed, like set_cluster_multi_speaker:
+    the panel shows merged rows, but the sidecar records raw clusters, and
+    inventing a write to the merge primary would put the mark on an id the
+    caller never named. The merged view resolves it on the way out (see
+    merge_same_channel_fragments).
+
+    `state=None` clears. Returns the written sidecar, or None when the
+    sidecar, channel or cluster does not exist -- callers report that rather
+    than reporting a mark that never happened.
+    """
+    sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
+    if sidecar is None:
+        return None
+    cluster = (channel_data.get("clusters") or {}).get(diarization_speaker_id)
+    if cluster is None:
+        return None
+
+    if state is None:
+        cluster.pop(REVIEW_STATE_KEY, None)
+    else:
+        cluster[REVIEW_STATE_KEY] = state
+
+    write_sidecar_document(output_dir, meeting_stem, sidecar)
+    return sidecar
+
+
+def clear_cluster_review_state(
+    output_dir: Path, meeting_stem: str, channel: str, diarization_speaker_ids,
+) -> int:
+    """Drop the review marking from a whole set of raw cluster ids in one
+    write. Returns how many actually carried it.
+
+    Takes a set because the transitions that call it (a confirm, a mixed
+    marking) are about a MERGED row, and the merged view reads generic when
+    any member carries the key -- clearing only the primary would leave the
+    row marked by a fragment nobody can see or click.
+
+    Never raises and never reports a failure: it runs after the action it
+    follows has already succeeded, and a missing sidecar or channel there
+    means there is nothing to clear, not that the confirm went wrong.
+    """
+    sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
+    if sidecar is None:
+        return 0
+    clusters = channel_data.get("clusters") or {}
+    cleared = 0
+    for sid in diarization_speaker_ids:
+        cluster = clusters.get(sid)
+        if isinstance(cluster, dict) and cluster.pop(REVIEW_STATE_KEY, None) is not None:
+            cleared += 1
+    if cleared:
+        write_sidecar_document(output_dir, meeting_stem, sidecar)
+    return cleared
 
 
 def write_sidecar_document(output_dir: Path, meeting_stem: str, sidecar: dict) -> None:
@@ -835,6 +951,7 @@ def clusters_from_sidecar_channel(meeting_id: str, channel: dict) -> dict:
                 speech_duration_seconds=cluster.get("speech_duration_seconds", 0.0),
                 segment_count=cluster.get("segment_count", 0),
                 contains_multiple_speakers=bool(cluster.get(MULTI_SPEAKER_KEY)),
+                review_state=cluster.get(REVIEW_STATE_KEY),
             ),
         )
     return out

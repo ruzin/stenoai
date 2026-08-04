@@ -9,7 +9,9 @@ from click.testing import CliRunner
 import simple_recorder
 from src.config import Config
 from src.speaker_suggestions import (
+    REVIEW_STATE_GENERIC,
     read_speakers_sidecar,
+    set_cluster_review_state,
     write_sidecar_document,
     write_speakers_sidecar,
 )
@@ -502,6 +504,61 @@ class GetSpeakerSampleAudioCliTests(unittest.TestCase):
             self.assertTrue(data["success"])
             self.assertIn("SPEAKER_0", str(captured["output_path"]))
             self.assertEqual(len(captured["segments"]), 2)
+
+
+class SuggestSpeakersReviewStateTests(unittest.TestCase):
+    """The panel reads the "kept generic" marking from here rather than
+    holding it in component state, which is what makes it survive a remount
+    and a restart by construction."""
+
+    def _run(self, args, tmp, cfg=None):
+        cfg = cfg or Config(config_path=Path(tmp) / "config.json")
+        with mock.patch("src.config.get_config", return_value=cfg), \
+             mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
+            return CliRunner().invoke(simple_recorder.suggest_speakers, args)
+
+    def _seed(self, tmp, clusters=None):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "system": {
+                "recording_type": "remote",
+                "clusters": clusters or {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                                  "segment_count": 10},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 40.0,
+                                  "segment_count": 8},
+                },
+            },
+        })
+        return output_dir
+
+    def test_review_state_is_echoed_per_cluster(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_0",
+                                     REVIEW_STATE_GENERIC)
+            data = _last_json(self._run(["mtg001"], tmp).output)
+            self.assertEqual(
+                data["channels"]["system"]["SPEAKER_0"]["review_state"], REVIEW_STATE_GENERIC)
+            self.assertIsNone(data["channels"]["system"]["SPEAKER_1"]["review_state"])
+
+    def test_a_marking_on_a_fragment_marks_the_row_it_was_made_on(self):
+        # The reviewer clicked one row; the sidecar records raw clusters.
+        # Reading the marking back on the row they saw is the whole point.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_2",
+                                     REVIEW_STATE_GENERIC)
+            data = _last_json(self._run(["mtg001"], tmp).output)
+            row = data["channels"]["system"]["SPEAKER_0"]
+            self.assertEqual(row["merged_from"], ["SPEAKER_2"])
+            self.assertEqual(row["review_state"], REVIEW_STATE_GENERIC)
 
 
 class SuggestSpeakersRunScopeTests(unittest.TestCase):

@@ -4918,6 +4918,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     """
     from src.config import get_config, get_data_dirs
     from src.speaker_suggestions import (
+        clear_cluster_review_state,
         clusters_from_sidecar_channel,
         confirmed_participant_names,
         merge_same_channel_fragments,
@@ -5214,6 +5215,12 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
                 pooled_segments.extend(raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
             relabeled_lines = relabel_transcript_speaker(transcript_path, pooled_segments, person["display_name"])
 
+    # Naming the cluster supersedes "a human kept this generic": the row is
+    # now decided, and leaving the marking would have the panel report a
+    # confirmed row as still parked. Swept across every fragment, because
+    # the merged row reads generic when ANY member carries the key.
+    clear_cluster_review_state(output_dir, meeting_stem, channel, fragment_ids)
+
     # Cheap and always-safe (unlike transcript relabeling, no reason to
     # gate this behind a flag) -- keeps the meeting's Participants chip in
     # sync with every confirm, including plain CLI/backfill-validation use.
@@ -5273,6 +5280,78 @@ def speaker_timestamps(meeting_stem, channel, diarization_speaker_id):
         print(f"  [{_format_timestamp(seg['start'])} - {_format_timestamp(seg['end'])}]")
 
 
+@cli.command(name='set-cluster-review-state')
+@click.argument('meeting_stem')
+@click.argument('channel')
+@click.argument('diarization_speaker_id')
+@click.option(
+    '--generic/--clear', 'generic', default=True,
+    help="--generic (default) records that a human reviewed this cluster and "
+         "chose to leave it unnamed; --clear removes that marking.",
+)
+def set_cluster_review_state_command(meeting_stem, channel, diarization_speaker_id, generic):
+    """Record how far the review got on one diarized cluster.
+
+    "Keep generic" is the only review outcome that leaves no other trace. A
+    confirm writes a prototype, a mixed marking writes its own key, but
+    deciding to leave a row alone used to change nothing on disk -- so a
+    restart, or merely navigating away and back, re-presented every row the
+    reviewer had already dealt with. That is the work the button exists to
+    save, undone by the panel unmounting.
+
+    It changes no score and no suggestion: it says the reviewer stopped
+    here, not that the voice is unidentifiable. Naming the cluster or
+    marking it as holding several people supersedes it, and both clear it.
+    """
+    from src.config import get_data_dirs
+    from src.speaker_suggestions import (
+        REVIEW_STATE_GENERIC,
+        clusters_from_sidecar_channel,
+        merge_same_channel_fragments,
+        set_cluster_review_state,
+    )
+
+    output_dir = get_data_dirs()["output"]
+    state = REVIEW_STATE_GENERIC if generic else None
+    sidecar = set_cluster_review_state(
+        output_dir, meeting_stem, channel, diarization_speaker_id, state,
+    )
+    if sidecar is None:
+        print(json.dumps({
+            "success": False,
+            "error": f"No cluster {diarization_speaker_id!r} in {channel!r} channel of {meeting_stem!r}",
+        }))
+        sys.exit(1)
+
+    # The reach, not just the id: the panel shows merged rows, so a caller
+    # needs to know which raw clusters the row it just marked covers --
+    # same reporting mark-speaker-cluster does, and the same reason.
+    channel_data = (sidecar.get("channels") or {}).get(channel) or {}
+    resolved_id = diarization_speaker_id
+    fragment_ids = [diarization_speaker_id]
+    try:
+        clusters, id_resolution = merge_same_channel_fragments(
+            clusters_from_sidecar_channel(meeting_stem, channel_data)
+        )
+    except (KeyError, TypeError, ValueError):
+        # A sidecar whose embeddings cannot be merged still took the mark;
+        # report the raw id rather than failing an action that succeeded.
+        clusters, id_resolution = {}, {}
+    resolved_id = id_resolution.get(diarization_speaker_id, diarization_speaker_id)
+    if resolved_id in clusters:
+        fragment_ids = [resolved_id, *clusters[resolved_id][1].merged_from]
+
+    print(json.dumps({
+        "success": True,
+        "meeting_id": meeting_stem,
+        "channel": channel,
+        "diarization_speaker_id": diarization_speaker_id,
+        "resolved_diarization_speaker_id": resolved_id,
+        "fragment_ids": fragment_ids,
+        "review_state": state,
+    }))
+
+
 @cli.command(name='mark-speaker-cluster')
 @click.argument('meeting_stem')
 @click.argument('channel')
@@ -5306,6 +5385,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     """
     from src.config import get_config, get_data_dirs
     from src.speaker_suggestions import (
+        clear_cluster_review_state,
         confirmed_participant_names,
         merge_same_channel_fragments,
         clusters_from_sidecar_channel,
@@ -5363,6 +5443,12 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     cleared_from = []
     restored_lines = 0
     if multiple and fragment_ids:
+        # "A human kept this generic" is superseded by "a human says it is
+        # several people" -- the second is a stronger statement about the
+        # same cluster. Swept across every fragment, because the merged row
+        # reads generic when ANY member carries the key, so a leftover on a
+        # fragment would keep marking a row nobody can click.
+        clear_cluster_review_state(output_dir, meeting_stem, channel, fragment_ids)
         # Run-scoped for the same reason the confirm path is: the cluster
         # this marking describes exists only within this run, so an entry
         # from a superseded run shares nothing with it but a reused id.
@@ -5739,6 +5825,12 @@ def suggest_speakers(meeting_stem):
                 # real case this was built for). True means a human said so,
                 # and this cluster is out of naming for good.
                 "contains_multiple_speakers": context.contains_multiple_speakers,
+                # Set by `set-cluster-review-state`. Echoed so the panel can
+                # read a reviewer's "leave this one generic" back out of
+                # persisted state instead of component state -- which is
+                # what makes it survive a remount and a restart. Changes no
+                # score and no status: it is progress, not evidence.
+                "review_state": context.review_state,
                 # Same signal already used to gate suggestion status (real-
                 # data-validated this session against the echo/crosstalk
                 # artifact pattern) -- reused here to flag likely-artifact
