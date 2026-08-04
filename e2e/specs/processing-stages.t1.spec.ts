@@ -28,6 +28,11 @@ async function openProcessing(page: Page) {
     window.location.hash = '/meetings/processing';
   });
   await expect(page.getByTestId('processing-stage-label')).toBeVisible();
+  // The queue poll that first reports this recording bumps Processing's
+  // `generation`, whose render-phase reset clears stage + retryAudioFile.
+  // Wait until that has landed (the header switches from 'Note' to the
+  // session name) so a later emit can't race the reset.
+  await expect(page.getByRole('heading', { name: 'test-session' })).toBeVisible();
 }
 
 function emit(app: ElectronApplication, channel: string, payload: unknown) {
@@ -41,7 +46,7 @@ function emit(app: ElectronApplication, channel: string, payload: unknown) {
 }
 
 test('walks transcribing -> diarizing (with embedding sub-progress) -> summarizing -> finalizing without leaking a stale sub-label', async ({ launchApp }) => {
-  const { app, page } = await launchApp({ mockIpc: true });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true });
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
@@ -94,7 +99,7 @@ test('shows a ticking elapsed-time counter during segmentation, before any embed
   // channel…" the whole time -- indistinguishable from actually being
   // stuck. The user quit the app twice before ever reaching the point
   // where a percentage would appear. This ticker is the fix.
-  const { app, page } = await launchApp({ mockIpc: true });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true });
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
@@ -112,7 +117,7 @@ test('shows a ticking elapsed-time counter during segmentation, before any embed
 });
 
 test('a processing failure swaps to the error panel, and retrying does not leak the stale sub-label back', async ({ launchApp }) => {
-  const { app, page } = await launchApp({ mockIpc: true });
+  const { app, page } = await launchApp({ mockIpc: true, fakeAudio: true });
   await openProcessing(page);
 
   const label = page.getByTestId('processing-stage-label');
