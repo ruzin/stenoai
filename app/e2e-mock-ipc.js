@@ -23,10 +23,41 @@
 const fs = require('fs');
 const { EXPORT_CANCELED } = require('./ipc-sentinels');
 
-// A real (silent, zero-sample) 16-bit mono 16kHz WAV file's bytes,
-// base64-encoded -- valid enough for the renderer's blob: URL + <audio>
-// playback path to actually decode, unlike an arbitrary placeholder string.
-const MINIMAL_WAV_BASE64 = 'UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=';
+// A real, silent, 16-bit mono 8kHz WAV -- valid enough for the renderer's
+// blob: URL + <audio> path to actually decode, unlike a placeholder string.
+//
+// It has real DURATION, and that is the point. The previous fixture was a
+// 44-byte header with zero sample data, so the media element reported
+// duration 0 and fired `ended` about 300ms after play() -- measured in this
+// very renderer. PlaySampleButton flips its label back to "Play sample" on
+// `ended`, so the "toggling to stop" spec was racing a state that existed
+// for a third of a second: green on a Mac, red on a CI runner whose first
+// assertion poll landed after the clip had already finished. A spec about
+// playing a sample needs a sample that plays.
+const SILENT_WAV_SECONDS = 5;
+const SILENT_WAV_SAMPLE_RATE = 8000;
+
+function buildSilentWavBase64(seconds, sampleRate) {
+  const bytesPerSample = 2; // 16-bit
+  const dataBytes = seconds * sampleRate * bytesPerSample;
+  const buf = Buffer.alloc(44 + dataBytes); // zero-filled == silence
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataBytes, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); // PCM fmt chunk size
+  buf.writeUInt16LE(1, 20); // PCM
+  buf.writeUInt16LE(1, 22); // mono
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * bytesPerSample, 28); // byte rate
+  buf.writeUInt16LE(bytesPerSample, 32); // block align
+  buf.writeUInt16LE(16, 34); // bits per sample
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataBytes, 40);
+  return buf.toString('base64');
+}
+
+const MINIMAL_WAV_BASE64 = buildSilentWavBase64(SILENT_WAV_SECONDS, SILENT_WAV_SAMPLE_RATE);
 
 // A deterministic meeting the transcript-export T1 spec navigates to. Seeded
 // only when STENOAI_E2E_SEED_MEETING=1 so the other T1 specs keep an empty Home.
