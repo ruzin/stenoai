@@ -1452,3 +1452,130 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ExcerptFitTests(unittest.TestCase):
+    """A quote and its clip are two views of one turn, and each has its own
+    cap: 140 characters and 20 seconds. Nothing related them, so a long turn
+    showed a fifth of its text beside half of its audio - measured on a real
+    9-minute call, a 40.5 s / 742-character turn showed 19 % of the text and
+    played 20 s. The user reads one sentence and hears twenty seconds, which
+    reads as a wrong clip even though both start at the same instant."""
+
+    def _write(self, tmp, body):
+        path = Path(tmp) / "t.txt"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _manifest(*starts):
+        return [
+            {"start": s, "channel": "system", "diarization_speaker_id": "SPEAKER_0"}
+            for s in starts
+        ]
+
+    def test_a_turn_that_fits_both_caps_beats_a_longer_one_that_overflows(self):
+        long_text = "wort " * 200  # far past SAMPLE_TEXT_MAX_CHARS
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._write(
+                tmp,
+                f"[00:10] [Others] {long_text.strip()}\n"
+                "[01:00] [Others] a turn short enough to be shown whole\n"
+                "[01:20] [Others] trailing line that bounds the one above\n",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [
+                    {"start": 10.0, "end": 55.0},   # 45 s: over the audio cap
+                    {"start": 60.0, "end": 68.0},   # 8 s: fits
+                    {"start": 80.0, "end": 82.0},
+                ],
+                limit=1,
+                turn_manifest=self._manifest(10.0, 60.0, 80.0),
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(len(samples), 1)
+            self.assertIn(
+                "short enough", samples[0]["text"],
+                "ranking by raw duration prefers exactly the turns that overflow both caps",
+            )
+
+    def test_an_overflowing_turn_is_still_offered_when_nothing_else_fits(self):
+        long_text = "wort " * 200
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._write(tmp, f"[00:10] [Others] {long_text.strip()}\n")
+            samples = extract_segment_samples(
+                transcript, [{"start": 10.0, "end": 55.0}],
+                turn_manifest=self._manifest(10.0),
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertEqual(len(samples), 1, "a partial excerpt beats no excerpt")
+            self.assertTrue(samples[0]["text"].endswith("…"))
+
+
+class ExcerptFitBoundaryTests(unittest.TestCase):
+    """Both from the review of the fit ranking. Preferring a turn that
+    survives both display caps is right, but "fits" is not on its own a
+    measure of usefulness: the panel exists so a human can recognise a
+    voice, and a fraction of a second cannot carry one however faithfully
+    it is quoted."""
+
+    def _write(self, tmp, body):
+        path = Path(tmp) / "t.txt"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _manifest(*starts):
+        return [
+            {"start": s, "channel": "system", "diarization_speaker_id": "SPEAKER_0"}
+            for s in starts
+        ]
+
+    def test_a_fraction_of_a_second_does_not_beat_a_long_readable_turn(self):
+        # A 0.1 s turn quoting one word fits both caps; a 19 s turn misses
+        # the character cap by a single character. The short one is useless
+        # for recognising a voice and the long one's quote stays readable.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._write(
+                tmp,
+                "[00:10] [Others] Ja\n"
+                f"[00:30] [Others] {'a' * 141}\n"
+                "[01:00] [Others] trailing line\n",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [
+                    {"start": 10.0, "end": 10.1},
+                    {"start": 30.0, "end": 49.0},
+                    {"start": 60.0, "end": 61.0},
+                ],
+                limit=1,
+                turn_manifest=self._manifest(10.0, 30.0, 60.0),
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertAlmostEqual(samples[0]["start"], 30.0, places=1)
+
+    def test_a_clip_exactly_at_the_audio_cap_counts_as_fitting(self):
+        # `< SAMPLE_MAX_SECONDS` classed a turn of exactly the cap as
+        # overflowing, while the character cap is compared with `<=`. A turn
+        # that ends exactly at the limit survives it whole.
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = self._write(
+                tmp,
+                "[00:10] [Others] a turn that lands exactly on the audio cap\n"
+                "[00:40] [Others] Ja\n"
+                "[00:50] [Others] trailing line\n",
+            )
+            samples = extract_segment_samples(
+                transcript,
+                [
+                    {"start": 10.0, "end": 30.0},   # exactly SAMPLE_MAX_SECONDS
+                    {"start": 40.0, "end": 40.1},
+                    {"start": 50.0, "end": 51.0},
+                ],
+                limit=1,
+                turn_manifest=self._manifest(10.0, 40.0, 50.0),
+                target_ids={("system", "SPEAKER_0")},
+            )
+            self.assertAlmostEqual(samples[0]["start"], 10.0, places=1)

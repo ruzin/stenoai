@@ -67,6 +67,23 @@ function namesCollide(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+/** People already assigned somewhere in this meeting first, the rest after,
+ *  each group alphabetical. The picker is the only route to "this cluster is
+ *  someone I already named here", and that answer gets commoner the more the
+ *  diarizer splits a voice -- burying it in a global list of everyone ever
+ *  named is what pushes a hurried reviewer towards "New person" instead. */
+export function orderProfilesForRow<T extends { display_name: string; person_id: string }>(
+  profiles: T[],
+  alreadyInMeeting: Set<string>,
+): T[] {
+  return [...profiles].sort((a, b) => {
+    const aHere = alreadyInMeeting.has(a.person_id);
+    const bHere = alreadyInMeeting.has(b.person_id);
+    if (aHere !== bHere) return aHere ? -1 : 1;
+    return a.display_name.localeCompare(b.display_name);
+  });
+}
+
 // "mic" is always the device owner's own recording side (in-person audio);
 // "system" is loopback capture of the other call participant(s) -- see
 // determine_recording_type (src/speaker_suggestions.py) for the same
@@ -257,8 +274,33 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
       rows.push({ channel, diarizationSpeakerId, suggestion });
     }
   }
+  // Most speaking time first. Reviewing is voluntary and can be abandoned at
+  // any point, so the order decides how much of the transcript the first
+  // couple of decisions actually cover -- and the more the diarizer splits a
+  // recording, the further that diverges from channel/cluster-id order,
+  // which is only an artifact of how the diarizer numbered its slots.
+  // Number.isFinite, not `?? 0`: a non-numeric duration would make the
+  // subtraction NaN, and `||` treats NaN as falsy, so a single bad value
+  // would silently drop the whole list back to cluster-id order.
+  const speechSeconds = (row: Row) =>
+    Number.isFinite(row.suggestion.speech_duration_seconds)
+      ? row.suggestion.speech_duration_seconds
+      : 0;
   rows.sort(
-    (a, b) => a.channel.localeCompare(b.channel) || a.diarizationSpeakerId.localeCompare(b.diarizationSpeakerId),
+    (a, b) =>
+      speechSeconds(b) - speechSeconds(a)
+      || a.channel.localeCompare(b.channel)
+      || a.diarizationSpeakerId.localeCompare(b.diarizationSpeakerId),
+  );
+  // People this meeting has already been given a cluster for. Under an
+  // over-segmenting diarizer one person owns several clusters, so this is
+  // the set the reviewer reaches for most, not the long tail of everyone
+  // they have ever named.
+  // By person_id, never by display name: a rename can leave two profiles
+  // reading alike, and marking the wrong one as present here would invite
+  // exactly the misassignment this is meant to prevent.
+  const alreadyInMeeting = new Set(
+    rows.map((row) => row.suggestion.confirmed_person_id).filter((id): id is string => !!id),
   );
   const notDismissed = rows.filter((row) => !dismissed.has(rowKey(row)));
   // A row a human has explicitly marked stays in the main list even if its
@@ -499,7 +541,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                         No known people yet
                       </div>
                     ) : (
-                      (profilesQuery.data ?? []).map((profile) => (
+                      orderProfilesForRow(profilesQuery.data ?? [], alreadyInMeeting).map((profile) => (
                         <div key={profile.person_id} className="flex items-center gap-0.5">
                           <button
                             type="button"
@@ -507,10 +549,29 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                               setChangeOpenFor(null);
                               confirm(row, { personId: profile.person_id });
                             }}
-                            className="flex min-w-0 flex-1 items-center truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
+                            className="flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
                             style={{ color: 'var(--fg-1)' }}
+                            data-testid={`speaker-pick-person-${profile.person_id}`}
                           >
-                            {profile.display_name}
+                            <span className="truncate">{profile.display_name}</span>
+                            {alreadyInMeeting.has(profile.person_id) && (
+                              // The diarizer splits one voice across several
+                              // clusters routinely, so "this is the person I
+                              // already named above" is a frequent, correct
+                              // answer -- and one that has to be visibly
+                              // available, because the alternative a hurried
+                              // user reaches for is "New person", which
+                              // records the same voice as two people and
+                              // makes them a hard negative against
+                              // themselves.
+                              <span
+                                className="shrink-0 text-[11px]"
+                                style={{ color: 'var(--fg-2)' }}
+                                title="Already assigned in this meeting"
+                              >
+                                here
+                              </span>
+                            )}
                           </button>
                           <button
                             type="button"
