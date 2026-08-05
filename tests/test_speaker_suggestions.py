@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +36,7 @@ from src.speaker_suggestions import (
     set_cluster_review_state,
     suggest_speaker,
     suggest_speakers_for_meeting,
+    write_sidecar_document,
     write_speakers_sidecar,
 )
 from src.voiceprint import cosine_distance
@@ -1503,3 +1505,73 @@ class ReviewStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SidecarDurabilityTests(unittest.TestCase):
+    """The rename is atomic; that is not the same as durable.
+
+    This file holds the ONLY copy of a meeting's voice embeddings, and the
+    source audio is deleted by default -- so unlike a transcript, it cannot
+    be regenerated. An atomic rename guarantees a reader never sees a half
+    document; it guarantees nothing about the bytes having reached stable
+    storage. Without a flush, a power cut or kernel panic in the window
+    between the write and the disk can leave the renamed file empty, which
+    is exactly the unrecoverable outcome the atomic rename was chosen to
+    prevent.
+    """
+
+    def _seed(self, tmp):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir, {
+            "meeting_id": "mtg001",
+            "channels": {"system": {"recording_type": "remote", "clusters": {}}},
+        }
+
+    def test_the_bytes_are_flushed_to_disk_before_the_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir, doc = self._seed(tmp)
+            calls = []
+            real_fsync = os.fsync
+            real_replace = Path.replace
+
+            def spy_fsync(fd):
+                calls.append("fsync")
+                return real_fsync(fd)
+
+            def spy_replace(self, target):
+                calls.append("replace")
+                return real_replace(self, target)
+
+            with mock.patch("src.speaker_suggestions.os.fsync", side_effect=spy_fsync), \
+                 mock.patch.object(Path, "replace", spy_replace):
+                write_sidecar_document(output_dir, "mtg001", doc)
+
+            self.assertIn("fsync", calls, "the temp file was renamed into place unflushed")
+            self.assertLess(
+                calls.index("fsync"), calls.index("replace"),
+                "flushing after the rename protects nothing",
+            )
+            self.assertEqual(read_speakers_sidecar(output_dir, "mtg001"), doc)
+
+            if hasattr(os, "O_DIRECTORY"):
+                # The directory entry too, and necessarily AFTER the rename:
+                # otherwise a crash can leave it pointing at the old file
+                # even though the caller was told the sidecar was replaced.
+                self.assertGreater(
+                    calls.count("fsync"), 1, "the rename itself was never flushed",
+                )
+                last_fsync = len(calls) - 1 - calls[::-1].index("fsync")
+                self.assertGreater(last_fsync, calls.index("replace"))
+
+    def test_a_failed_flush_leaves_no_temp_file_and_does_not_claim_success(self):
+        # Same contract the write already had: a failure must not leave a
+        # half-written temp file behind for someone to mistake for a real
+        # sidecar, and must not return as if the sidecar had been replaced.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir, doc = self._seed(tmp)
+            with mock.patch("src.speaker_suggestions.os.fsync", side_effect=OSError("disk gone")):
+                with self.assertRaises(OSError):
+                    write_sidecar_document(output_dir, "mtg001", doc)
+            leftovers = [p.name for p in output_dir.iterdir()]
+            self.assertEqual(leftovers, [], f"temp file left behind: {leftovers}")

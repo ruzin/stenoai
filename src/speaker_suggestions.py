@@ -919,12 +919,38 @@ def write_sidecar_document(output_dir: Path, meeting_stem: str, sidecar: dict) -
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(sidecar, fh, indent=2)
+            # Flushed to stable storage BEFORE the rename, because atomic
+            # and durable are not the same guarantee. The rename makes sure
+            # a reader never sees half a document; it says nothing about the
+            # bytes having left the page cache. A power cut or kernel panic
+            # in that window renames an EMPTY file over the real sidecar --
+            # and unlike a transcript, this one cannot be regenerated, since
+            # the source audio is deleted by default. Flushing afterwards
+            # would protect nothing.
+            fh.flush()
+            os.fsync(fh.fileno())
         tmp_path.replace(path)
     except OSError:
         # Never leave a half-written temp file behind for someone to find
-        # later and mistake for a real sidecar.
+        # later and mistake for a real sidecar. Covers a failed flush too:
+        # a write that could not be made durable must not report success.
         tmp_path.unlink(missing_ok=True)
         raise
+
+    # And the directory entry, so a crash cannot leave it pointing at the
+    # old file after the caller was told the sidecar was replaced.
+    # Best-effort and deliberately silent: the data itself is already on
+    # disk, opening a directory is not portable (Windows refuses it), and
+    # failing here would turn a completed write into a reported error.
+    if hasattr(os, "O_DIRECTORY"):
+        try:
+            dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
 
 
 def minimum_speaker_count(channels: dict) -> int:
