@@ -173,6 +173,28 @@ export function useMarkSpeakerCluster() {
   });
 }
 
+/** Recording that a human reviewed a cluster and left it unnamed.
+ *
+ * Invalidates only THIS meeting's suggestions, unlike the marking mutation
+ * next door: keeping a row generic changes nothing about the person
+ * profiles and nothing about any other meeting -- it is a note about this
+ * review, so widening the invalidation would refetch every cached meeting
+ * for no change. */
+export function useSetClusterReviewState() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      meetingStem: string;
+      channel: string;
+      diarizationSpeakerId: string;
+      generic: boolean;
+    }) => unwrap(await ipc().speakers.setClusterReviewState(args)),
+    onSuccess: async (_data, args) => {
+      await qc.invalidateQueries({ queryKey: speakersKeys.suggestions(args.meetingStem) });
+    },
+  });
+}
+
 /** How many speaker clusters of a meeting are still unnamed -- read once,
  * right before a delete confirmation, to decide whether to add a sentence
  * saying the unnamed ones are about to become unnameable forever.

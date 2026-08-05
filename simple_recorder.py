@@ -353,7 +353,27 @@ def _persist_speaker_sidecar(output_dir, meeting_stem: str, transcript_data: dic
     speaker_clusters = transcript_data.get("speaker_clusters") or {}
     if not speaker_clusters:
         return False
-    from src.speaker_suggestions import write_speakers_sidecar
+    from src.speaker_suggestions import (
+        count_review_markings, read_speakers_sidecar, write_speakers_sidecar,
+    )
+    # Read before overwriting, purely to report what this run discards. A
+    # fresh diarization numbers its clusters from SPEAKER_0 again, so every
+    # marking a human made against the old ids stops describing anything --
+    # carrying them forward would attach a person's statement to whichever
+    # voice inherited the id. Losing them is right; losing them silently is
+    # not, and they are the one thing in this file no re-run reproduces.
+    # `reprocess` streams lines rather than one JSON document, so the report
+    # is a warning plus one greppable stdout line, mirroring the backfill's
+    # wording.
+    lost = count_review_markings(read_speakers_sidecar(output_dir, meeting_stem))
+    if lost["multi_speaker"] or lost["review_state"]:
+        message = (
+            f"{meeting_stem}: re-diarization discards "
+            f"{lost['multi_speaker']} cluster(s) marked as containing multiple speakers "
+            f"and {lost['review_state']} kept generic."
+        )
+        logger.warning("Speaker markings lost: %s", message)
+        print(f"LOST_SPEAKER_MARKINGS: {message}", flush=True)
     write_speakers_sidecar(
         output_dir, meeting_stem, speaker_clusters,
         turn_manifest=transcript_data.get("turn_manifest"),
@@ -4918,10 +4938,12 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     """
     from src.config import get_config, get_data_dirs
     from src.speaker_suggestions import (
+        clear_cluster_review_state,
         clusters_from_sidecar_channel,
         confirmed_participant_names,
         merge_same_channel_fragments,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
         record_original_labels,
         relabel_transcript_exact,
@@ -4941,6 +4963,13 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     if channel_data is None:
         print(json.dumps({"success": False, "error": f"No {channel!r} channel in sidecar for {meeting_stem!r}"}))
         sys.exit(1)
+
+    # Read once from the loaded sidecar rather than re-reading per call --
+    # every prototype and hard negative this command writes below describes
+    # a cluster from THIS sidecar, so they all carry the same run id. `None`
+    # on a legacy sidecar with no diarization_run block, which every
+    # add_speaker_prototype call already treats as "no run to record".
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
 
     raw_clusters = clusters_from_sidecar_channel(meeting_stem, channel_data)
     if diarization_speaker_id not in raw_clusters:
@@ -5006,12 +5035,29 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
     # rebuilds correct negatives against the people still confirmed in this
     # channel. A same-person re-confirm just replaces the prototype instead
     # of appending a duplicate.
+    #
+    # Every removal here is scoped to THIS sidecar's run, because the cluster
+    # ids only identify a voice within one diarization run -- a re-diarization
+    # renumbers from SPEAKER_0 with no memory of who held that id, so
+    # unscoped these removals would treat a stranger's confirmation as this
+    # cluster's previous owner and delete it.
+    #
+    # The cost is more than a stale positive prototype left standing: a
+    # confirmation made against a superseded run can no longer be corrected
+    # by re-confirming that id, which freezes the hard negatives it minted
+    # too. The mutual-negative loop further down records each confirmed
+    # cluster as negative evidence against the other people confirmed in this
+    # channel, so a confirm that got the owner wrong leaves somebody holding
+    # their OWN voice as a reason to refuse a future match -- and that entry
+    # now outlives every later confirm instead of being rebuilt away by the
+    # idempotency removals below. Clearing it takes `repair-speaker-profiles`,
+    # which drops entries by prototype_id and is not run-scoped.
     reassigned_from = []
     for existing_person in config.get_person_profiles():
         removed = config.remove_speaker_evidence(
             existing_person["person_id"], meeting_id=meeting_stem,
             channel=channel, channel_recording_type=channel_recording_type,
-            sids=fragment_ids,
+            sids=fragment_ids, diarization_run_id=run_id,
         )
         if not removed or existing_person["person_id"] == person["person_id"]:
             continue
@@ -5023,9 +5069,17 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         # used to strip the negatives the clusters they KEEP still justify,
         # and the rebuild below only restores negatives for the person being
         # confirmed now, so that evidence was simply lost.
+        #
+        # Run-scoped like the removal it guards, and it has to be: a
+        # leftover prototype from a superseded run would otherwise read as
+        # "still owns a cluster here" and suppress the cleanup for good,
+        # since nothing ever deletes that prototype. "Present" here means
+        # present in the meeting as it is diarized NOW, which is the only
+        # sense in which the negatives below are still justified.
         still_present = any(
             p.get("meeting_id") == meeting_stem
             and prototype_channel_matches(p, channel, channel_recording_type)
+            and prototype_run_matches(p, run_id)
             for p in (config.get_person_profile(existing_person["person_id"]) or {}).get(
                 "prototypes",
             ) or []
@@ -5034,7 +5088,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             config.remove_speaker_evidence(
                 existing_person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                negative=True,
+                negative=True, diarization_run_id=run_id,
             )
         for other in config.get_person_profiles():
             if other["person_id"] == existing_person["person_id"]:
@@ -5042,7 +5096,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             config.remove_speaker_evidence(
                 other["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                sids=fragment_ids, negative=True,
+                sids=fragment_ids, negative=True, diarization_run_id=run_id,
             )
 
     prototype = config.add_speaker_prototype(
@@ -5052,7 +5106,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         speech_duration_seconds=context.speech_duration_seconds,
         segment_count=context.segment_count,
         created_from="user_corrected" if reassigned_from else "user_confirmed",
-        channel=channel,
+        channel=channel, diarization_run_id=run_id,
     )
 
     # Mutual hard negatives against any OTHER speaker already confirmed in
@@ -5089,12 +5143,12 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         config.remove_speaker_evidence(
             existing_person["person_id"], meeting_id=meeting_stem,
             channel=channel, channel_recording_type=channel_recording_type,
-            sids=fragment_ids, negative=True,
+            sids=fragment_ids, negative=True, diarization_run_id=run_id,
         )
     config.remove_speaker_evidence(
         person["person_id"], meeting_id=meeting_stem,
         channel=channel, channel_recording_type=channel_recording_type,
-        negative=True,
+        negative=True, diarization_run_id=run_id,
     )
 
     hard_negatives_added = []
@@ -5107,11 +5161,21 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
         # them. Matching only the first prototype left the second cluster
         # with no negative evidence at all, so a later meeting could still
         # match this speaker to it.
+        #
+        # Run-scoped, because this selects a prototype by meeting+sid+channel
+        # and then mints a negative from the CURRENT run's embedding for that
+        # id. Unscoped, a prototype confirmed against a superseded run would
+        # produce a negative about a voice that person was never confirmed
+        # next to -- permanent suppression evidence built from a coincidence
+        # of cluster numbering, in both directions, and it would keep firing
+        # for as long as the meeting exists since the superseded prototype is
+        # deliberately never deleted.
         matches = [
             p for p in (other_person.get("prototypes") or [])
             if p.get("meeting_id") == meeting_stem
             and p.get("diarization_speaker_id") in other_sids
             and prototype_channel_matches(p, channel, channel_recording_type)
+            and prototype_run_matches(p, run_id)
         ]
         if not matches:
             continue
@@ -5127,7 +5191,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
                 speech_duration_seconds=other_context.speech_duration_seconds,
                 segment_count=other_context.segment_count,
                 created_from="user_confirmed", negative=True,
-                channel=channel,
+                channel=channel, diarization_run_id=run_id,
             )
         # And exactly ONE the other way: THIS cluster is a single piece of
         # evidence about them, however many clusters they own. Adding it per
@@ -5140,7 +5204,7 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             speech_duration_seconds=context.speech_duration_seconds,
             segment_count=context.segment_count,
             created_from="user_confirmed", negative=True,
-            channel=channel,
+            channel=channel, diarization_run_id=run_id,
         )
         hard_negatives_added.append(other_person["display_name"])
 
@@ -5170,6 +5234,12 @@ def confirm_speaker(meeting_stem, channel, diarization_speaker_id, person_id, ne
             for fragment_id in [resolved_id, *context.merged_from]:
                 pooled_segments.extend(raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
             relabeled_lines = relabel_transcript_speaker(transcript_path, pooled_segments, person["display_name"])
+
+    # Naming the cluster supersedes "a human kept this generic": the row is
+    # now decided, and leaving the marking would have the panel report a
+    # confirmed row as still parked. Swept across every fragment, because
+    # the merged row reads generic when ANY member carries the key.
+    clear_cluster_review_state(output_dir, meeting_stem, channel, fragment_ids)
 
     # Cheap and always-safe (unlike transcript relabeling, no reason to
     # gate this behind a flag) -- keeps the meeting's Participants chip in
@@ -5230,6 +5300,82 @@ def speaker_timestamps(meeting_stem, channel, diarization_speaker_id):
         print(f"  [{_format_timestamp(seg['start'])} - {_format_timestamp(seg['end'])}]")
 
 
+@cli.command(name='set-cluster-review-state')
+@click.argument('meeting_stem')
+@click.argument('channel')
+@click.argument('diarization_speaker_id')
+@click.option(
+    '--generic/--clear', 'generic', default=True,
+    help="--generic (default) records that a human reviewed this cluster and "
+         "chose to leave it unnamed; --clear removes that marking.",
+)
+def set_cluster_review_state_command(meeting_stem, channel, diarization_speaker_id, generic):
+    """Record how far the review got on one diarized cluster.
+
+    "Keep generic" is the only review outcome that leaves no other trace. A
+    confirm writes a prototype, a mixed marking writes its own key, but
+    deciding to leave a row alone used to change nothing on disk -- so a
+    restart, or merely navigating away and back, re-presented every row the
+    reviewer had already dealt with. That is the work the button exists to
+    save, undone by the panel unmounting.
+
+    It changes no score and no suggestion: it says the reviewer stopped
+    here, not that the voice is unidentifiable. Naming the cluster or
+    marking it as holding several people supersedes it, and both clear it.
+    """
+    from src.config import get_data_dirs
+    from src.speaker_suggestions import (
+        REVIEW_STATE_GENERIC,
+        clusters_from_sidecar_channel,
+        merge_same_channel_fragments,
+        set_cluster_review_state,
+    )
+
+    output_dir = get_data_dirs()["output"]
+    state = REVIEW_STATE_GENERIC if generic else None
+    sidecar = set_cluster_review_state(
+        output_dir, meeting_stem, channel, diarization_speaker_id, state,
+    )
+    if sidecar is None:
+        print(json.dumps({
+            "success": False,
+            "error": f"No cluster {diarization_speaker_id!r} in {channel!r} channel of {meeting_stem!r}",
+        }))
+        sys.exit(1)
+
+    # The reach, not just the id: the panel shows merged rows, so a caller
+    # needs to know which raw clusters the row it just marked covers --
+    # same reporting mark-speaker-cluster does, and the same reason.
+    channel_data = (sidecar.get("channels") or {}).get(channel) or {}
+    resolved_id = diarization_speaker_id
+    fragment_ids = [diarization_speaker_id]
+    try:
+        clusters, id_resolution = merge_same_channel_fragments(
+            clusters_from_sidecar_channel(meeting_stem, channel_data)
+        )
+    except (KeyError, TypeError, ValueError):
+        # The mark is already on disk by now; only the merge that computes
+        # its reach can still fail, and it does whenever any OTHER cluster
+        # in this channel lacks a usable embedding. Report the raw id
+        # rather than failing an action that already succeeded.
+        # (A structurally wrong channels/clusters map cannot get this far --
+        # the write refuses it first; see _freshest_channel.)
+        clusters, id_resolution = {}, {}
+    resolved_id = id_resolution.get(diarization_speaker_id, diarization_speaker_id)
+    if resolved_id in clusters:
+        fragment_ids = [resolved_id, *clusters[resolved_id][1].merged_from]
+
+    print(json.dumps({
+        "success": True,
+        "meeting_id": meeting_stem,
+        "channel": channel,
+        "diarization_speaker_id": diarization_speaker_id,
+        "resolved_diarization_speaker_id": resolved_id,
+        "fragment_ids": fragment_ids,
+        "review_state": state,
+    }))
+
+
 @cli.command(name='mark-speaker-cluster')
 @click.argument('meeting_stem')
 @click.argument('channel')
@@ -5263,6 +5409,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     """
     from src.config import get_config, get_data_dirs
     from src.speaker_suggestions import (
+        clear_cluster_review_state,
         confirmed_participant_names,
         merge_same_channel_fragments,
         clusters_from_sidecar_channel,
@@ -5289,9 +5436,20 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     # the CLI honest about what just happened.
     channel_data = (sidecar.get("channels") or {}).get(channel) or {}
     channel_recording_type = channel_data.get("recording_type")
-    clusters, id_resolution = merge_same_channel_fragments(
-        clusters_from_sidecar_channel(meeting_stem, channel_data)
-    )
+    # From the rewritten document set_cluster_multi_speaker returned, which
+    # carries the existing run forward -- marking a cluster is an annotation
+    # of this diarization output, not a new one. `None` on a legacy sidecar.
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
+    try:
+        clusters, id_resolution = merge_same_channel_fragments(
+            clusters_from_sidecar_channel(meeting_stem, channel_data)
+        )
+    except (KeyError, TypeError, ValueError):
+        # Same as set-cluster-review-state: the marking already landed, and
+        # only the reach computation can still fail -- on any OTHER cluster
+        # in this channel with no usable embedding. A traceback here would
+        # claim a marking failed that did not.
+        clusters, id_resolution = {}, {}
     resolved_id = id_resolution.get(diarization_speaker_id, diarization_speaker_id)
     fragment_ids = set()
     if resolved_id in clusters:
@@ -5316,11 +5474,20 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
     cleared_from = []
     restored_lines = 0
     if multiple and fragment_ids:
+        # "A human kept this generic" is superseded by "a human says it is
+        # several people" -- the second is a stronger statement about the
+        # same cluster. Swept across every fragment, because the merged row
+        # reads generic when ANY member carries the key, so a leftover on a
+        # fragment would keep marking a row nobody can click.
+        clear_cluster_review_state(output_dir, meeting_stem, channel, fragment_ids)
+        # Run-scoped for the same reason the confirm path is: the cluster
+        # this marking describes exists only within this run, so an entry
+        # from a superseded run shares nothing with it but a reused id.
         for person in config.get_person_profiles():
             removed = config.remove_speaker_evidence(
                 person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                sids=fragment_ids,
+                sids=fragment_ids, diarization_run_id=run_id,
             )
             if not removed:
                 continue
@@ -5334,7 +5501,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
             config.remove_speaker_evidence(
                 person["person_id"], meeting_id=meeting_stem,
                 channel=channel, channel_recording_type=channel_recording_type,
-                sids=fragment_ids, negative=True,
+                sids=fragment_ids, negative=True, diarization_run_id=run_id,
             )
             for other in config.get_person_profiles():
                 if other["person_id"] == person["person_id"]:
@@ -5342,7 +5509,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
                 config.remove_speaker_evidence(
                     other["person_id"], meeting_id=meeting_stem,
                     channel=channel, channel_recording_type=channel_recording_type,
-                    sids=fragment_ids, negative=True,
+                    sids=fragment_ids, negative=True, diarization_run_id=run_id,
                 )
         if cleared_from:
             # The transcript is the artefact a human reads, and the one the
@@ -5420,6 +5587,7 @@ def speaker_naming_status(meeting_stem):
         merge_same_channel_fragments,
         clusters_from_sidecar_channel,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
     )
 
@@ -5432,6 +5600,13 @@ def speaker_naming_status(meeting_stem):
         }))
         return
 
+    # A name from a superseded diarization run does not name anything here:
+    # the run this sidecar describes renumbered its clusters, so that
+    # prototype's id now belongs to whichever voice inherited it. Counting
+    # it as named is the one error direction that costs data -- it hides an
+    # unnamed cluster from the delete warning, and an unnamed cluster cannot
+    # be named again once the audio is gone.
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
     profiles = get_config().get_person_profiles()
     total = 0
     named = 0
@@ -5458,6 +5633,7 @@ def speaker_naming_status(meeting_stem):
                     p.get("meeting_id") == meeting_stem
                     and p.get("diarization_speaker_id") in fragment_ids
                     and prototype_channel_matches(p, channel_name, recording_type)
+                    and prototype_run_matches(p, run_id)
                     for p in (person.get("prototypes") or [])
                 )
                 for person in profiles
@@ -5495,6 +5671,7 @@ def suggest_speakers(meeting_stem):
         merge_same_channel_fragments,
         minimum_speaker_count,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
         sample_text_from_samples,
         suggest_speakers_for_meeting,
@@ -5530,6 +5707,14 @@ def suggest_speakers(meeting_stem):
     # unaffected; they cut audio at this run's own segments.
     turn_manifest = sidecar.get("transcript_lines")
 
+    # Which diarization run the clusters below belong to. A prototype
+    # confirmed against a DIFFERENT run describes a voice this run may have
+    # given to somebody else -- the diarizer numbers from SPEAKER_0 every
+    # time with no memory of who held that id -- so it may not speak for
+    # any row here. `None` on a legacy sidecar, where the predicate's
+    # both-absent rule keeps every existing confirmation current.
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
+
     profiles = get_config().get_person_profiles()
     # Merge fragments per channel first, then suggest for ALL channels in
     # one call -- used-person exclusivity is meeting-wide (a person can't
@@ -5545,6 +5730,11 @@ def suggest_speakers(meeting_stem):
     results_by_channel = suggest_speakers_for_meeting(merged_by_channel, profiles)
 
     channels_out = {}
+    # People whose confirmation in this meeting was made against a run that
+    # no longer describes anything on screen, keyed by person id so someone
+    # who lost several clusters is reported once. Insertion-ordered, so the
+    # notice reads in the order the clusters appear.
+    stale_assignments = {}
     for channel_name, channel in (sidecar.get("channels") or {}).items():
         clusters = merged_by_channel[channel_name]
         results = results_by_channel[channel_name]
@@ -5578,22 +5768,43 @@ def suggest_speakers(meeting_stem):
             # not yet met), and any client-side "just confirmed" feedback
             # is gone the moment the panel unmounts (e.g. navigating away
             # and back). This survives both.
+            #
+            # Only evidence from THIS run counts. A prototype confirmed
+            # against a superseded run would otherwise show up as a
+            # confirmation the user appears to have made themselves, on a
+            # row that may be a different person entirely -- and unlike a
+            # wrong suggestion, nothing about it invites a second look.
             confirmed_by_user = None
             confirmed_person_id = None
+            superseded_owners = []
             for person in profiles:
-                if any(
-                    p.get("meeting_id") == meeting_stem
+                owned = [
+                    p for p in (person.get("prototypes") or [])
+                    if p.get("meeting_id") == meeting_stem
                     and p.get("diarization_speaker_id") in fragment_ids
                     and prototype_channel_matches(p, channel_name, recording_type)
-                    for p in (person.get("prototypes") or [])
-                ):
-                    confirmed_by_user = person["display_name"]
-                    # The id as well as the name: display names are not a
-                    # stable identity (a rename can make two profiles read
-                    # alike), and the panel uses this to tell which people
-                    # already hold a cluster of THIS meeting.
-                    confirmed_person_id = person["person_id"]
-                    break
+                ]
+                if not owned:
+                    continue
+                if any(prototype_run_matches(p, run_id) for p in owned):
+                    if confirmed_by_user is None:
+                        confirmed_by_user = person["display_name"]
+                        # The id as well as the name: display names are not a
+                        # stable identity (a rename can make two profiles read
+                        # alike), and the panel uses this to tell which people
+                        # already hold a cluster of THIS meeting.
+                        confirmed_person_id = person["person_id"]
+                else:
+                    superseded_owners.append(person)
+            # Reported per cluster and only while the cluster is still
+            # unclaimed, so the notice this feeds can actually go away.
+            # Nothing ever deletes a superseded prototype -- that is the
+            # point of the run scoping -- so a notice derived from the
+            # prototypes alone would outlive every action the user could
+            # take to answer it.
+            if confirmed_by_user is None:
+                for person in superseded_owners:
+                    stale_assignments.setdefault(person["person_id"], person["display_name"])
             cluster_out[sid] = {
                 "status": r.status,
                 "suggested_person_id": r.suggested_person_id,
@@ -5645,6 +5856,12 @@ def suggest_speakers(meeting_stem):
                 # real case this was built for). True means a human said so,
                 # and this cluster is out of naming for good.
                 "contains_multiple_speakers": context.contains_multiple_speakers,
+                # Set by `set-cluster-review-state`. Echoed so the panel can
+                # read a reviewer's "leave this one generic" back out of
+                # persisted state instead of component state -- which is
+                # what makes it survive a remount and a restart. Changes no
+                # score and no status: it is progress, not evidence.
+                "review_state": context.review_state,
                 # Same signal already used to gate suggestion status (real-
                 # data-validated this session against the echo/crosstalk
                 # artifact pattern) -- reused here to flag likely-artifact
@@ -5668,6 +5885,25 @@ def suggest_speakers(meeting_stem):
         # as four clusters with nothing indicating anything was dropped.
         # No caller acts on this number today -- see minimum_speaker_count.
         "minimum_speaker_count": minimum_speaker_count(sidecar.get("channels") or {}),
+        # Confirmations this meeting's re-diarization orphaned. The panel
+        # renders one meeting-level notice from this: the clusters were
+        # renumbered, these people's assignments no longer point at anything
+        # on screen, and re-confirming them is the only thing that restores
+        # the link. Empty is the normal case, including on every legacy
+        # library, and their voice evidence is untouched either way -- it
+        # keeps scoring candidates in every meeting.
+        #
+        # Known gap, accepted: someone whose only superseded prototype names
+        # a cluster id the new run does not produce at all is never listed,
+        # because the collection walks this run's clusters. Their assignment
+        # really is orphaned, but no row here can carry them and the notice
+        # says "re-confirm them", which they cannot. It only goes unnoticed
+        # once every surviving cluster is confirmed -- until then the notice
+        # is up anyway for the others.
+        "stale_assignments": [
+            {"person_id": pid, "display_name": name}
+            for pid, name in stale_assignments.items()
+        ],
         "channels": channels_out,
     }))
 
@@ -5966,7 +6202,7 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
     from src.config import get_config, get_data_dirs
     from src.transcriber import WhisperTranscriber, STENO_DIARIZE_TIMEOUT_FLOOR_S, _run_steno_diarize
     from src.speaker_suggestions import (
-        build_clusters_from_diarization, cluster_ids_marked_multi_speaker,
+        build_clusters_from_diarization, count_review_markings,
         determine_recording_type, read_speakers_sidecar,
         speakers_sidecar_path, write_speakers_sidecar,
     )
@@ -6010,6 +6246,7 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
     skipped_no_audio = []
     skipped_no_clusters = []
     lost_multi_speaker_markings = []
+    lost_review_state_markings = []
     errors = []
 
     for stem in stems:
@@ -6055,17 +6292,27 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
                 # marking is genuinely gone rather than transferable -- but
                 # it is the one thing in that file no re-run can reproduce,
                 # so losing it is reported instead of silent.
-                dropped = sum(
-                    len(cluster_ids_marked_multi_speaker(ch))
-                    for ch in ((previous_sidecar or {}).get("channels") or {}).values()
-                )
-                if dropped:
+                # Counted by the shared helper, so this report and
+                # _persist_speaker_sidecar's cannot drift apart on what
+                # counts as a marking (they are the only two places one is
+                # ever lost).
+                dropped = count_review_markings(previous_sidecar)
+                if dropped["multi_speaker"]:
                     logger.warning(
                         "backfill-speaker-embeddings: %s had %d cluster(s) marked as "
                         "containing multiple speakers; re-diarization discards those markings.",
-                        stem, dropped,
+                        stem, dropped["multi_speaker"],
                     )
-                    lost_multi_speaker_markings.append({"stem": stem, "clusters": dropped})
+                    lost_multi_speaker_markings.append(
+                        {"stem": stem, "clusters": dropped["multi_speaker"]})
+                if dropped["review_state"]:
+                    logger.warning(
+                        "backfill-speaker-embeddings: %s had %d cluster(s) kept generic; "
+                        "re-diarization discards those markings.",
+                        stem, dropped["review_state"],
+                    )
+                    lost_review_state_markings.append(
+                        {"stem": stem, "clusters": dropped["review_state"]})
                 write_speakers_sidecar(output_dir, stem, channels_out)
                 processed.append(stem)
             else:
@@ -6089,6 +6336,10 @@ def backfill_speaker_embeddings(limit, extension, force, meeting_stem):
         "skipped_no_clusters": skipped_no_clusters,
         "skipped_already_processed": skipped_already_processed,
         "lost_multi_speaker_markings": lost_multi_speaker_markings,
+        # Same shape and the same reason: a marking is a human statement the
+        # re-diarization cannot carry over, and the only one in this file no
+        # re-run can reproduce.
+        "lost_review_state_markings": lost_review_state_markings,
         "errors": errors,
         "total_meetings": len(all_stems),
     }))
@@ -6115,6 +6366,7 @@ def backfill_participants(relabel_transcripts):
         confirmed_participant_names,
         merge_same_channel_fragments,
         prototype_channel_matches,
+        prototype_run_matches,
         read_speakers_sidecar,
         relabel_transcript_exact,
         relabel_transcript_multi,
@@ -6157,6 +6409,12 @@ def backfill_participants(relabel_transcripts):
         # needs pooled_segments. Building both unconditionally is cheap
         # and keeps the branch below simple.
         turn_manifest = sidecar.get("transcript_lines")
+        # Which run these cluster ids belong to. Relabeling reads a
+        # prototype as "this person IS this cluster" and then writes their
+        # name into the transcript, so it is scoped like every other reader
+        # of a current assignment -- and unlike the participants line
+        # above, which is deliberately not (see confirmed_participant_names).
+        sidecar_run_id = (sidecar.get("diarization_run") or {}).get("run_id")
         assignments = []
         target_ids_by_name: dict = {}
         for channel_name, channel_data in (sidecar.get("channels") or {}).items():
@@ -6169,6 +6427,15 @@ def backfill_participants(relabel_transcripts):
                     if prototype.get("meeting_id") != meeting_id or not prototype_channel_matches(
                         prototype, channel_name, recording_type,
                     ):
+                        continue
+                    if not prototype_run_matches(prototype, sidecar_run_id):
+                        # Confirmed against a run this sidecar no longer
+                        # describes. The id survived the re-diarization, but
+                        # the voice behind it did not, so writing this name
+                        # onto its lines would put one participant's name on
+                        # another's words -- the failure this whole slice
+                        # exists to stop, and here it lands in the file the
+                        # user reads as the record of the meeting.
                         continue
                     sid = prototype.get("diarization_speaker_id")
                     if sid not in id_resolution:
@@ -6374,7 +6641,7 @@ def repair_speaker_profiles(apply_changes):
        prototype_channel_matches shrinks to entries whose sidecar is gone.
     """
     from src.config import get_config, get_data_dirs
-    from src.speaker_suggestions import read_speakers_sidecar
+    from src.speaker_suggestions import prototype_run_matches, read_speakers_sidecar
 
     config = get_config()
     profiles = config.get_person_profiles()
@@ -6399,11 +6666,18 @@ def repair_speaker_profiles(apply_changes):
             n_rt = negative.get("recording_type")
             if not negative.get("prototype_id") or not n_meeting or not n_sid or n_rt in (None, "unknown"):
                 continue
+            # Same run only. "This negative cites a cluster its owner holds
+            # on the other channel" is evidence of a collision only if both
+            # entries describe the same diarization run; across runs the id
+            # was simply handed to a different voice, and reading that as a
+            # collision would delete a negative that is exactly right for
+            # the run it came from.
             owner_rts = {
                 p.get("recording_type")
                 for other in profiles if other["person_id"] != person["person_id"]
                 for p in (other.get("prototypes") or [])
                 if p.get("meeting_id") == n_meeting and p.get("diarization_speaker_id") == n_sid
+                and prototype_run_matches(p, negative.get("diarization_run_id"))
             }
             owner_rts.discard(None)
             owner_rts.discard("unknown")
@@ -6418,6 +6692,11 @@ def repair_speaker_profiles(apply_changes):
     # Pass B -- duplicates within one person's list (oldest kept). The key
     # includes channel (recording_type for legacy entries): the same
     # SPEAKER_N on mic and system are different clusters, not duplicates.
+    # It includes the diarization run for the same reason one step further
+    # out: since confirmations are run-scoped, one person legitimately holds
+    # the same meeting+channel+id twice, once per run. Without the run in
+    # the key this pass drops the NEWER of the two -- keeping the superseded
+    # entry and deleting the one that describes the meeting as it is now.
     for person in profiles:
         for negative_flag, key_name in ((False, "prototypes"), (True, "hard_negatives")):
             seen = set()
@@ -6432,7 +6711,11 @@ def repair_speaker_profiles(apply_changes):
                 sid = entry.get("diarization_speaker_id")
                 if not meeting_id or not sid:
                     continue
-                dedupe_key = (meeting_id, sid, entry.get("channel") or entry.get("recording_type"))
+                dedupe_key = (
+                    meeting_id, sid,
+                    entry.get("channel") or entry.get("recording_type"),
+                    entry.get("diarization_run_id"),
+                )
                 if dedupe_key in seen:
                     drops.setdefault((person["person_id"], negative_flag), set()).add(entry.get("prototype_id"))
                     _stats(person)["duplicates_removed"] += 1
@@ -6463,6 +6746,17 @@ def repair_speaker_profiles(apply_changes):
                     sidecar_cache[meeting_id] = read_speakers_sidecar(output_dir, meeting_id)
                 sidecar = sidecar_cache[meeting_id]
                 if sidecar is None:
+                    continue
+                if not prototype_run_matches(
+                    entry, (sidecar.get("diarization_run") or {}).get("run_id"),
+                ):
+                    # The sidecar describes a different run, so the cluster
+                    # this id resolves to is whatever the diarizer numbered
+                    # that way this time. Writing its channel onto the entry
+                    # would turn a guess into recorded fact, and every later
+                    # prototype_channel_matches would trust it. Left legacy,
+                    # it keeps the recording_type proxy, which at least
+                    # admits to being one.
                     continue
                 owners = [
                     name for name, ch in (sidecar.get("channels") or {}).items()

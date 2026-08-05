@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 import simple_recorder
 from src.config import Config
-from src.speaker_suggestions import write_speakers_sidecar
+from src.speaker_suggestions import read_speakers_sidecar, write_speakers_sidecar
 
 
 def _last_json(output):
@@ -29,16 +29,25 @@ class BackfillParticipantsCliTests(unittest.TestCase):
             result = CliRunner().invoke(simple_recorder.backfill_participants, args)
         return result
 
-    def _confirm(self, cfg, person_name, meeting_id, sid="SPEAKER_00", recording_type="in_person"):
+    def _confirm(self, cfg, person_name, meeting_id, sid="SPEAKER_00", recording_type="in_person",
+                 run_id=None):
         person = cfg.create_person_profile(person_name)
         cfg.add_speaker_prototype(
             person["person_id"], [1.0, 0.0],
             recording_type=recording_type, meeting_id=meeting_id,
             diarization_speaker_id=sid,
             speech_duration_seconds=30.0, segment_count=5,
-            created_from="user_confirmed",
+            created_from="user_confirmed", diarization_run_id=run_id,
         )
         return person
+
+    def _run_id(self, tmp, meeting_stem="mtg001"):
+        """The seeded sidecar's run id, for tests that hand-build a prototype
+        against it. Unstamped it would describe a confirmation made before
+        the meeting was re-diarized, which the relabel path deliberately
+        refuses -- and several of these tests assert that nothing gets
+        relabeled, so they would pass for the wrong reason."""
+        return read_speakers_sidecar(Path(tmp) / "output", meeting_stem)["diarization_run"]["run_id"]
 
     def test_writes_participants_for_meeting_with_no_prior_section(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,7 +118,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
             original = "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Speaker 2] hello there"
             transcript_path.write_text(original, encoding="utf-8")
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
+            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run([], tmp, cfg)
             data = _last_json(result.output)
@@ -141,7 +150,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
+            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -182,7 +191,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
+            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -219,7 +228,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
+            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -252,7 +261,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
+            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -298,8 +307,8 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Valentin Weyer", "mtg001", sid="SPEAKER_00", recording_type="in_person")
-            self._confirm(cfg, "Inga Hahn", "mtg001", sid="SPEAKER_00", recording_type="remote")
+            self._confirm(cfg, "Valentin Weyer", "mtg001", sid="SPEAKER_00", recording_type="in_person", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Inga Hahn", "mtg001", sid="SPEAKER_00", recording_type="remote", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -307,6 +316,55 @@ class BackfillParticipantsCliTests(unittest.TestCase):
             self.assertEqual(data["transcripts_relabeled"], {})
             self.assertEqual(data["transcripts_skipped_ambiguous"], {"mtg001": 1})
             self.assertIn("[00:05] [Speaker 3] contested line", transcript_path.read_text())
+
+    def test_relabel_transcripts_leaves_a_re_diarized_meeting_alone(self):
+        # This command writes a person's NAME onto transcript lines, chosen
+        # by cluster id. A re-diarization gives that id to whichever voice
+        # the diarizer numbered first this time, so an unscoped run of this
+        # backfill puts one participant's name on another participant's
+        # words -- silently, in the file the user reads as the record of the
+        # meeting. Not relabeling is the only honest answer: after a
+        # re-diarization nothing here knows which cluster was theirs.
+        #
+        # Participants are a different question and stay meeting-scoped:
+        # they were confirmed as present in this meeting, and that stays
+        # true however often the audio is re-diarized.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            channels = {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_00": {
+                            "embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5,
+                            "segments": [{"start": 4.0, "end": 6.0}],
+                        },
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            transcripts_dir = Path(tmp) / "transcripts"
+            transcripts_dir.mkdir(parents=True, exist_ok=True)
+            transcript_path = transcripts_dir / "mtg001_transcript.txt"
+            transcript_path.write_text(
+                "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Speaker 2] hello there",
+                encoding="utf-8",
+            )
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            self._confirm(cfg, "Max", "mtg001", run_id=run1)
+
+            write_speakers_sidecar(output_dir, "mtg001", channels)  # re-diarized
+
+            result = self._run(["--relabel-transcripts"], tmp, cfg)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["transcripts_relabeled"], {})
+            self.assertIn("[00:05] [Speaker 2] hello there", transcript_path.read_text())
+            self.assertEqual(
+                data["meetings_updated"], [{"meeting_id": "mtg001", "participants": ["Max"]}],
+            )
 
 
 if __name__ == "__main__":

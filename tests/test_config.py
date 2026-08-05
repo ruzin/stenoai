@@ -1002,6 +1002,36 @@ class ConfigPersonProfileTests(unittest.TestCase):
             )
             self.assertNotIn("channel", prototype)
 
+    def test_add_speaker_prototype_stores_diarization_run_id_when_given(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            person = config.create_person_profile("Max")
+            prototype = config.add_speaker_prototype(
+                person["person_id"], [0.1, 0.2],
+                recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=25.0, segment_count=4,
+                created_from="user_confirmed", diarization_run_id="r1",
+            )
+            self.assertEqual(prototype["diarization_run_id"], "r1")
+
+    def test_add_speaker_prototype_omits_diarization_run_id_when_none(self):
+        # Same absent-means-legacy convention as `channel`: a prototype
+        # written before this field existed, or from a caller that has no
+        # run to report, must read exactly like one written today with no
+        # run id -- not like one that carries an explicit `None`.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            person = config.create_person_profile("Max")
+            prototype = config.add_speaker_prototype(
+                person["person_id"], [0.1, 0.2],
+                recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_00",
+                speech_duration_seconds=25.0, segment_count=4,
+                created_from="user_confirmed",
+            )
+            self.assertNotIn("diarization_run_id", prototype)
+
     def test_add_speaker_prototype_rejects_invalid_channel(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
@@ -1016,13 +1046,14 @@ class ConfigPersonProfileTests(unittest.TestCase):
                 )
 
     def _add(self, config, person_id, meeting_id, sid, channel=None,
-             recording_type="in_person", negative=False):
+             recording_type="in_person", negative=False, diarization_run_id=None):
         return config.add_speaker_prototype(
             person_id, [0.1, 0.2],
             recording_type=recording_type, meeting_id=meeting_id,
             diarization_speaker_id=sid,
             speech_duration_seconds=25.0, segment_count=4,
             created_from="user_confirmed", channel=channel, negative=negative,
+            diarization_run_id=diarization_run_id,
         )
 
     def test_remove_speaker_evidence_scopes_to_meeting_and_channel(self):
@@ -1074,6 +1105,80 @@ class ConfigPersonProfileTests(unittest.TestCase):
                 channel_recording_type="in_person",
             )
             self.assertEqual(removed, 1)
+
+    def test_remove_speaker_evidence_without_a_run_scope_ignores_run_ids(self):
+        # The sentinel default is what every pre-existing caller relies on:
+        # omitting the parameter must not start filtering, or the repair and
+        # correction paths that never learned about runs would quietly stop
+        # removing anything.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            pid = config.create_person_profile("Max")["person_id"]
+            self._add(config, pid, "mtg001", "SPEAKER_00", channel="mic", diarization_run_id="r1")
+            self._add(config, pid, "mtg001", "SPEAKER_01", channel="mic", diarization_run_id="r2")
+            self._add(config, pid, "mtg001", "SPEAKER_02", channel="mic")
+            removed = config.remove_speaker_evidence(
+                pid, meeting_id="mtg001", channel="mic",
+                channel_recording_type="in_person",
+            )
+            self.assertEqual(removed, 3)
+            self.assertEqual(config.get_person_profile(pid)["prototypes"], [])
+
+    def test_remove_speaker_evidence_scoped_to_a_run_spares_other_runs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            pid = config.create_person_profile("Max")["person_id"]
+            self._add(config, pid, "mtg001", "SPEAKER_00", channel="mic", diarization_run_id="r1")
+            self._add(config, pid, "mtg001", "SPEAKER_00", channel="mic", diarization_run_id="r2")
+            self._add(config, pid, "mtg001", "SPEAKER_00", channel="mic")
+            removed = config.remove_speaker_evidence(
+                pid, meeting_id="mtg001", channel="mic",
+                channel_recording_type="in_person",
+                sids={"SPEAKER_00"}, diarization_run_id="r2",
+            )
+            self.assertEqual(removed, 1)
+            remaining = config.get_person_profile(pid)["prototypes"]
+            self.assertEqual(
+                [p.get("diarization_run_id") for p in remaining], ["r1", None],
+            )
+
+    def test_remove_speaker_evidence_scoped_to_none_only_removes_run_less_entries(self):
+        # An explicit None is a real scope ("the sidecar reports no run"), not
+        # the absence of one. Collapsing the two would make a caller working
+        # against a legacy sidecar delete run-stamped evidence it cannot have
+        # produced.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            pid = config.create_person_profile("Max")["person_id"]
+            self._add(config, pid, "mtg001", "SPEAKER_00", channel="mic", diarization_run_id="r1")
+            self._add(config, pid, "mtg001", "SPEAKER_00", channel="mic")
+            removed = config.remove_speaker_evidence(
+                pid, meeting_id="mtg001", channel="mic",
+                channel_recording_type="in_person",
+                sids={"SPEAKER_00"}, diarization_run_id=None,
+            )
+            self.assertEqual(removed, 1)
+            remaining = config.get_person_profile(pid)["prototypes"]
+            self.assertEqual([p.get("diarization_run_id") for p in remaining], ["r1"])
+
+    def test_delete_person_profile_scopes_negative_cleanup_to_each_prototypes_run(self):
+        # The negatives a confirm creates carry that confirm's run id, so the
+        # cleanup that follows the deleted person's prototypes must not reach
+        # past them into a later run's evidence about a still-existing person.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = Config(config_path=Path(tmp_dir) / "config.json")
+            max_id = config.create_person_profile("Max")["person_id"]
+            sarah_id = config.create_person_profile("Sarah")["person_id"]
+            self._add(config, max_id, "mtg001", "SPEAKER_00", channel="mic", diarization_run_id="r1")
+            # Sarah's negative derived from Max's r1 confirm, plus one from a
+            # later re-diarization that has nothing to do with him.
+            self._add(config, sarah_id, "mtg001", "SPEAKER_00", channel="mic",
+                      negative=True, diarization_run_id="r1")
+            self._add(config, sarah_id, "mtg001", "SPEAKER_00", channel="mic",
+                      negative=True, diarization_run_id="r2")
+            self.assertTrue(config.delete_person_profile(max_id))
+            remaining = config.get_person_profile(sarah_id)["hard_negatives"]
+            self.assertEqual([n["diarization_run_id"] for n in remaining], ["r2"])
 
     def test_remove_speaker_evidence_missing_person_returns_zero(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -42,6 +42,18 @@ type StenoWindow = Window & {
         newPersonName?: string;
         personId?: string;
       }) => Promise<{ success: boolean; error?: string }>;
+      setClusterReviewState: (params: {
+        meetingStem: string;
+        channel: string;
+        diarizationSpeakerId: string;
+        generic: boolean;
+      }) => Promise<{
+        success: boolean;
+        error?: string;
+        resolved_diarization_speaker_id?: string;
+        fragment_ids?: string[];
+        review_state?: string | null;
+      }>;
       suggestForMeeting: (meetingStem: string) => Promise<{
         success: boolean;
         minimum_speaker_count?: number;
@@ -54,6 +66,7 @@ type StenoWindow = Window & {
               suggested_name: string | null;
               candidates: unknown[];
               contains_multiple_speakers?: boolean;
+              review_state?: string | null;
               sample_text?: string | null;
               samples?: Array<{ start: number; end: number; text: string | null }>;
             }
@@ -423,6 +436,78 @@ test('deleting a meeting reports its unnamed speakers and removes its voice-embe
     prototypes: unknown[];
   }>;
   expect(profiles.find((p) => p.display_name === 'Max')?.prototypes).toHaveLength(1);
+
+  expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
+});
+
+test('keeping a speaker generic round-trips through the sidecar, and a confirm clears it', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  // The standing-rule coverage for the persisted review state: the panel's
+  // "Keep generic" used to change nothing outside React, so the only proof
+  // that matters is that the marking is on disk and comes back out of a
+  // real suggest-speakers. The fixture stays legacy-shaped (no run block) --
+  // its specs staying green IS the backward-compatibility proof.
+  const realDirBefore = fileSig(realUserDataDir());
+  const stem = 'e2e-review-state';
+  seedMeeting(userDataDir, stem);
+
+  const { page } = await launchApp();
+  const sidecarPath = path.join(userDataDir, 'output', `${stem}_speakers.json`);
+
+  const before = await page.evaluate(
+    (s) => (window as StenoWindow).stenoai.speakers.suggestForMeeting(s), stem,
+  );
+  expect(before.channels.system.SPEAKER_0.review_state ?? null).toBeNull();
+
+  const marked = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.setClusterReviewState(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', generic: true },
+  );
+  expect(marked.success).toBe(true);
+  expect(marked.review_state).toBe('generic');
+
+  // On disk, in the cluster entry itself -- and the embeddings the sidecar
+  // exists to carry survived the rewrite.
+  await expect
+    .poll(() => readJson(sidecarPath).channels.system.clusters.SPEAKER_0.review_state)
+    .toBe('generic');
+  expect(readJson(sidecarPath).channels.system.clusters.SPEAKER_0.embedding).toEqual([1.0, 0.0]);
+  // Written to exactly the cluster it was handed, not smeared across the channel.
+  expect(readJson(sidecarPath).channels.system.clusters.SPEAKER_1.review_state).toBeUndefined();
+
+  const after = await page.evaluate(
+    (s) => (window as StenoWindow).stenoai.speakers.suggestForMeeting(s), stem,
+  );
+  expect(after.channels.system.SPEAKER_0.review_state).toBe('generic');
+
+  // Naming the cluster is a stronger statement about it and supersedes the
+  // marking -- otherwise the panel would report a confirmed row as parked.
+  const confirmed = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Ida' },
+  );
+  expect(confirmed.success).toBe(true);
+  await expect
+    .poll(() => readJson(sidecarPath).channels.system.clusters.SPEAKER_0.review_state)
+    .toBeUndefined();
+
+  // And the explicit undo removes the key rather than storing a null.
+  const reMarked = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.setClusterReviewState(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', generic: true },
+  );
+  expect(reMarked.success).toBe(true);
+  const cleared = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.setClusterReviewState(params),
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', generic: false },
+  );
+  expect(cleared.success).toBe(true);
+  expect(cleared.review_state).toBeNull();
+  await expect
+    .poll(() => readJson(sidecarPath).channels.system.clusters.SPEAKER_1.review_state)
+    .toBeUndefined();
 
   expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
 });

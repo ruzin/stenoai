@@ -28,6 +28,8 @@ import simple_recorder
 from src.config import Config
 from src.speaker_suggestions import (
     MULTI_SPEAKER_KEY,
+    REVIEW_STATE_GENERIC,
+    REVIEW_STATE_KEY,
     extract_sample_text,
     ClusterContext,
     clusters_from_sidecar_channel,
@@ -37,6 +39,7 @@ from src.speaker_suggestions import (
     read_speakers_sidecar,
     sample_segments,
     set_cluster_multi_speaker,
+    set_cluster_review_state,
     suggest_speaker,
     suggest_speakers_for_meeting,
     write_speakers_sidecar,
@@ -1048,6 +1051,119 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
              mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
             return CliRunner().invoke(command, args)
 
+    def _seeded_run_id(self, tmp):
+        """The seeded sidecar's run id. Tests that hand-build a prototype
+        instead of going through `confirm-speaker` have to stamp it, or they
+        describe a state the app cannot reach: evidence about a run that is
+        not the one on disk, which the withdrawal path deliberately leaves
+        alone because its cluster ids mean something else now."""
+        return read_speakers_sidecar(Path(tmp) / "output", "mtg001")["diarization_run"]["run_id"]
+
+    def _rediarize(self, tmp):
+        """Rewrite the seeded sidecar with a fresh run whose cluster ids are
+        reused but whose voices are not, which is what a re-diarization
+        produces. Returns the new run id."""
+        self._seed(tmp, clusters={
+            "SPEAKER_0": {
+                "embedding": [0.0, 1.0], "speech_duration_seconds": 55.0,
+                "segment_count": 9, "segments": [{"start": 2.0, "end": 6.0}],
+            },
+            "SPEAKER_1": {
+                "embedding": [1.0, 0.0], "speech_duration_seconds": 35.0,
+                "segment_count": 7, "segments": [{"start": 21.0, "end": 25.0}],
+            },
+        })
+        return self._seeded_run_id(tmp)
+
+    def test_marking_a_reused_cluster_id_leaves_an_older_runs_confirmation_alone(self):
+        # The withdrawal loop's half of the run-scope defect. Marking THIS
+        # run's SPEAKER_0 as mixed says nothing about the person confirmed on
+        # a previous run's SPEAKER_0: the diarizer reuses the id for an
+        # unrelated voice, so unscoped this would withdraw a confirmation
+        # nobody questioned and delete the prototype behind it.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            pid = cfg.create_person_profile("Julian")["person_id"]
+            run1 = self._seeded_run_id(tmp)
+            cfg.add_speaker_prototype(
+                pid, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
+                segment_count=10, created_from="user_confirmed", channel="system",
+                diarization_run_id=run1,
+            )
+
+            run2 = self._rediarize(tmp)
+            self.assertNotEqual(run1, run2)
+
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(
+                data["cleared_confirmation_from"], [],
+                "the marking describes this run's cluster, not the one Julian was confirmed on",
+            )
+            profile = cfg.get_person_profile(pid)
+            self.assertEqual(
+                [p["diarization_run_id"] for p in profile["prototypes"]], [run1],
+            )
+
+    def test_marking_withdraws_this_runs_negatives_and_keeps_an_older_runs(self):
+        # The other two removals in the same loop, which the test above never
+        # reaches (it stops at a positive removal that matches nothing). A
+        # negative recorded against a previous run's SPEAKER_0 is evidence
+        # about a different voice, so the marking must leave it standing on
+        # both the withdrawn person's profile and everyone else's.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            julian = cfg.create_person_profile("Julian")["person_id"]
+            max_id = cfg.create_person_profile("Max")["person_id"]
+            run1 = self._seeded_run_id(tmp)
+            run2 = self._rediarize(tmp)
+
+            # Julian is the one confirmed on the CURRENT run's SPEAKER_0...
+            cfg.add_speaker_prototype(
+                julian, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=55.0,
+                segment_count=9, created_from="user_confirmed", channel="system",
+                diarization_run_id=run2,
+            )
+            # ...and Max was ruled out for it, in this run and in the last.
+            for run_id in (run1, run2):
+                cfg.add_speaker_prototype(
+                    max_id, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
+                    diarization_speaker_id="SPEAKER_0", speech_duration_seconds=55.0,
+                    segment_count=9, created_from="user_confirmed", channel="system",
+                    negative=True, diarization_run_id=run_id,
+                )
+            # Julian carries a stale one of his own from before the re-run.
+            cfg.add_speaker_prototype(
+                julian, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
+                segment_count=10, created_from="user_confirmed", channel="system",
+                negative=True, diarization_run_id=run1,
+            )
+
+            result = self._run(
+                simple_recorder.mark_speaker_cluster,
+                ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
+            )
+            data = _last_json(result.output)
+            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(cfg.get_person_profile(julian)["prototypes"], [])
+            self.assertEqual(
+                [n["diarization_run_id"] for n in cfg.get_person_profile(julian)["hard_negatives"]],
+                [run1],
+            )
+            self.assertEqual(
+                [n["diarization_run_id"] for n in cfg.get_person_profile(max_id)["hard_negatives"]],
+                [run1],
+            )
+
     def test_marks_and_reports_the_new_minimum_speaker_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
@@ -1074,17 +1190,19 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             person = cfg.create_person_profile("Julian")
             pid = person["person_id"]
             # Confirmed on SPEAKER_0 (the cluster about to be marked)...
+            run_id = self._seeded_run_id(tmp)
             cfg.add_speaker_prototype(
                 pid, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
                 diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
                 segment_count=10, created_from="user_confirmed", channel="system",
+                diarization_run_id=run_id,
             )
             # ...and ruled OUT for SPEAKER_1 by a different confirmation.
             cfg.add_speaker_prototype(
                 pid, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
                 diarization_speaker_id="SPEAKER_1", speech_duration_seconds=40.0,
                 segment_count=8, created_from="user_confirmed", channel="system",
-                negative=True,
+                negative=True, diarization_run_id=run_id,
             )
 
             result = self._run(
@@ -1187,6 +1305,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
                 speech_duration_seconds=30.0, segment_count=5,
                 created_from="user_confirmed", channel="mic",
+                diarization_run_id=self._seeded_run_id(tmp),
             )
             result = self._run(
                 simple_recorder.mark_speaker_cluster,
@@ -1217,6 +1336,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
                 speech_duration_seconds=30.0, segment_count=5,
                 created_from="user_confirmed", channel="mic",
+                diarization_run_id=self._seeded_run_id(tmp),
             )
             result = self._run(
                 simple_recorder.mark_speaker_cluster,
@@ -1405,6 +1525,9 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
         })
         return output_dir
 
+    def _run_id(self, tmp):
+        return read_speakers_sidecar(Path(tmp) / "output", "mtg001")["diarization_run"]["run_id"]
+
     def test_counts_unnamed_clusters(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
@@ -1423,10 +1546,36 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
                 speech_duration_seconds=60.0, segment_count=10,
                 created_from="user_confirmed", channel="system",
+                # Stamped with the sidecar's own run, the way a real confirm
+                # against it does -- an unstamped prototype here would
+                # describe a state the app cannot reach.
+                diarization_run_id=self._run_id(tmp),
             )
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
             self.assertEqual(data["named_clusters"], 1)
             self.assertEqual(data["unnamed_clusters"], 1)
+
+    def test_a_name_from_a_superseded_run_does_not_count_as_named(self):
+        # This feeds the sentence shown before a delete, and the cost of
+        # getting it wrong is one-directional: an unnamed cluster is gone
+        # for good once the audio is deleted, and a stale prototype claiming
+        # its id is exactly how a cluster nobody has ever heard gets counted
+        # as already taken care of.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            person = cfg.create_person_profile("Julian")
+            cfg.add_speaker_prototype(
+                person["person_id"], [1.0, 0.0], recording_type="remote",
+                meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
+                speech_duration_seconds=60.0, segment_count=10,
+                created_from="user_confirmed", channel="system",
+                diarization_run_id=self._run_id(tmp),
+            )
+            self._seed(tmp)  # re-diarized: same ids, new run, other voices
+            data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
+            self.assertEqual(data["named_clusters"], 0)
+            self.assertEqual(data["unnamed_clusters"], 2)
 
     def test_a_marked_cluster_is_not_counted_as_waiting_to_be_named(self):
         # It has already been reviewed and ruled out. Counting it would nag
@@ -1579,3 +1728,256 @@ class ExcerptFitBoundaryTests(unittest.TestCase):
                 target_ids={("system", "SPEAKER_0")},
             )
             self.assertAlmostEqual(samples[0]["start"], 10.0, places=1)
+
+
+class SetClusterReviewStateCliTests(unittest.TestCase):
+    """The CLI behind "Keep generic". It records that a human looked at a
+    row and chose to leave it unnamed -- the one review outcome that
+    produces no other trace, and therefore the one that a restart silently
+    undoes if it is not written down."""
+
+    def _run(self, command, args, tmp, cfg=None):
+        cfg = cfg or Config(config_path=Path(tmp) / "config.json")
+        with mock.patch("src.config.get_config", return_value=cfg), \
+             mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
+            return CliRunner().invoke(command, args)
+
+    def _seed(self, tmp, clusters=None):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "system": {
+                "recording_type": "remote",
+                "clusters": clusters or {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                                  "segment_count": 10, "segments": [{"start": 1.0, "end": 5.0}]},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 40.0,
+                                  "segment_count": 8, "segments": [{"start": 20.0, "end": 24.0}]},
+                },
+            },
+        })
+        return output_dir
+
+    def _stored(self, output_dir, sid):
+        return read_speakers_sidecar(output_dir, "mtg001")["channels"]["system"]["clusters"][sid]
+
+    def test_marking_generic_round_trips_and_clears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_0"], tmp)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["review_state"], REVIEW_STATE_GENERIC)
+            self.assertEqual(self._stored(output_dir, "SPEAKER_0")[REVIEW_STATE_KEY],
+                             REVIEW_STATE_GENERIC)
+
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_0", "--clear"], tmp)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertIsNone(data["review_state"])
+            self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_0"))
+
+    def test_reports_the_merged_reach_not_just_the_id_it_was_handed(self):
+        # The reviewer clicked one row; that row may be several raw
+        # clusters. Saying which ones it covers keeps the CLI honest about
+        # what just happened, the same way mark-speaker-cluster does.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_2"], tmp)
+            data = _last_json(result.output)
+            self.assertEqual(data["diarization_speaker_id"], "SPEAKER_2")
+            self.assertEqual(data["resolved_diarization_speaker_id"], "SPEAKER_0")
+            self.assertEqual(sorted(data["fragment_ids"]), ["SPEAKER_0", "SPEAKER_2"])
+
+    def test_a_missing_sidecar_fails_as_json_and_never_as_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "output").mkdir(parents=True, exist_ok=True)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["never-diarised", "system", "SPEAKER_0"], tmp)
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(_last_json(result.output)["success"])
+            self.assertNotIn("Traceback", result.output)
+
+    def test_a_missing_channel_fails_as_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "mic", "SPEAKER_0"], tmp)
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(_last_json(result.output)["success"])
+            self.assertNotIn("Traceback", result.output)
+
+    def test_a_missing_cluster_fails_as_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed(tmp)
+            result = self._run(simple_recorder.set_cluster_review_state_command,
+                               ["mtg001", "system", "SPEAKER_99"], tmp)
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(_last_json(result.output)["success"])
+            self.assertNotIn("Traceback", result.output)
+
+    def test_confirming_a_cluster_clears_the_marking_from_every_fragment(self):
+        # "Generic" means a human chose to stop there. Naming the row is a
+        # stronger statement about the same cluster and supersedes it -- and
+        # a key left on a fragment would keep the merged row reading generic
+        # after the confirm, because the merged view is an any().
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                set_cluster_review_state(output_dir, "mtg001", "system", sid, REVIEW_STATE_GENERIC)
+
+            result = self._run(simple_recorder.confirm_speaker,
+                               ["mtg001", "system", "SPEAKER_2", "--new-person", "Julian"],
+                               tmp, cfg=cfg)
+            self.assertTrue(_last_json(result.output)["success"])
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, sid))
+
+    def test_marking_a_cluster_as_mixed_clears_it_from_every_fragment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                set_cluster_review_state(output_dir, "mtg001", "system", sid, REVIEW_STATE_GENERIC)
+
+            result = self._run(simple_recorder.mark_speaker_cluster,
+                               ["mtg001", "system", "SPEAKER_0"], tmp)
+            self.assertTrue(_last_json(result.output)["success"])
+            for sid in ("SPEAKER_0", "SPEAKER_2"):
+                self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, sid))
+
+    def test_clearing_a_mixed_marking_does_not_resurrect_a_review_marking(self):
+        # --single withdraws the "two people" statement; it says nothing
+        # about the reviewer having once kept the row generic, and inventing
+        # that back would put a mark on the row nobody set.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_0",
+                                     REVIEW_STATE_GENERIC)
+            self._run(simple_recorder.mark_speaker_cluster,
+                      ["mtg001", "system", "SPEAKER_0"], tmp)
+            self._run(simple_recorder.mark_speaker_cluster,
+                      ["mtg001", "system", "SPEAKER_0", "--single"], tmp)
+            self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_0"))
+
+    def _write_raw(self, tmp, payload):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "mtg001_speakers.json").write_text(json.dumps(payload))
+        return output_dir
+
+    def test_a_structurally_wrong_sidecar_fails_as_json_not_as_a_traceback(self):
+        # The never-raises contract is not only about missing things. This
+        # file is JSON on a user's disk: a half-written copy, a botched
+        # restore or a hand-edit can leave any of these keys holding the
+        # wrong type, and Electron parses the last JSON line of stdout --
+        # a traceback reaches the UI as "something went wrong", with the
+        # actual state unreported.
+        broken = [
+            {"channels": ["not-a-dict"]},
+            {"channels": {"system": ["not-a-dict"]}},
+            {"channels": {"system": {"clusters": ["not-a-dict"]}}},
+            {"channels": {"system": {"clusters": {"SPEAKER_0": "not-a-dict"}}}},
+            # Reaches the merge, which needs an embedding per cluster.
+            {"channels": {"system": {"clusters": {"SPEAKER_0": {}}}}},
+        ]
+        for payload in broken:
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
+                self._write_raw(tmp, payload)
+                for command in (simple_recorder.set_cluster_review_state_command,
+                                simple_recorder.mark_speaker_cluster):
+                    result = self._run(command, ["mtg001", "system", "SPEAKER_0"], tmp)
+                    self.assertNotIn("Traceback", result.output)
+                    self.assertIn(result.exit_code, (0, 1))
+                    if result.exit_code == 1:
+                        self.assertFalse(_last_json(result.output)["success"])
+
+
+class PersistSidecarReportsLostMarkingsTests(unittest.TestCase):
+    """`reprocess --retranscribe` re-runs the whole transcription, including
+    diarization, and overwrites the sidecar through _persist_speaker_sidecar.
+    Every human marking on the old clusters goes with it -- correctly, since
+    the new run's ids describe different voices -- but this path said nothing
+    at all, unlike the backfill next door. A marking is the one thing in that
+    file no re-run can reproduce, so its loss has to be greppable afterwards.
+    """
+
+    def _seed(self, tmp, multi=False, generic=False):
+        from src.speaker_suggestions import (
+            REVIEW_STATE_GENERIC, set_cluster_multi_speaker, set_cluster_review_state,
+        )
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0,
+                                  "segment_count": 5},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 20.0,
+                                  "segment_count": 4},
+                },
+            },
+        })
+        if multi:
+            set_cluster_multi_speaker(output_dir, "mtg001", "mic", "SPEAKER_0", True)
+        if generic:
+            set_cluster_review_state(output_dir, "mtg001", "mic", "SPEAKER_1", REVIEW_STATE_GENERIC)
+        return output_dir
+
+    _FRESH_RUN = {
+        "speaker_clusters": {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_0": {"embedding": [0.0, 1.0], "speech_duration_seconds": 28.0,
+                                  "segment_count": 5},
+                },
+            },
+        },
+    }
+
+    def test_overwriting_a_marked_sidecar_reports_both_kinds_of_loss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, multi=True, generic=True)
+            with mock.patch("simple_recorder.logger") as log:
+                self.assertTrue(
+                    simple_recorder._persist_speaker_sidecar(output_dir, "mtg001", self._FRESH_RUN))
+            warned = " ".join(str(c) for c in log.warning.call_args_list)
+            self.assertIn("mtg001", warned)
+            self.assertIn("multiple speakers", warned)
+            self.assertIn("kept generic", warned)
+
+    def test_says_nothing_when_the_previous_sidecar_carried_no_markings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            with mock.patch("simple_recorder.logger") as log:
+                simple_recorder._persist_speaker_sidecar(output_dir, "mtg001", self._FRESH_RUN)
+            self.assertEqual(log.warning.call_args_list, [])
+
+    def test_a_first_run_with_no_previous_sidecar_reports_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            with mock.patch("simple_recorder.logger") as log:
+                self.assertTrue(
+                    simple_recorder._persist_speaker_sidecar(output_dir, "mtg001", self._FRESH_RUN))
+            self.assertEqual(log.warning.call_args_list, [])

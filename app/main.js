@@ -8055,6 +8055,21 @@ ipcMain.handle('mark-speaker-cluster', async (_e, params) => {
   }
 });
 
+ipcMain.handle('set-cluster-review-state', async (_e, params) => {
+  try {
+    const out = await runPythonScript('simple_recorder.py', [
+      'set-cluster-review-state',
+      params.meetingStem,
+      params.channel,
+      params.diarizationSpeakerId,
+      params.generic ? '--generic' : '--clear',
+    ]);
+    return JSON.parse(out);
+  } catch (error) {
+    return parsePythonFailureJson(error);
+  }
+});
+
 ipcMain.handle('speaker-naming-status', async (_e, meetingStem) => {
   try {
     const out = await runPythonScript('simple_recorder.py', ['speaker-naming-status', meetingStem]);

@@ -124,12 +124,12 @@
 - Consumes: Task 2's predicate.
 - Produces: `suggest-speakers` gains a top-level `stale_assignments` array of `{person_id, display_name}`. The renderer (Task 7) renders one meeting-level notice from it. Absent or empty means nothing to report.
 
-- [ ] **Step 1: Write the failing tests.** A prototype from run `r1` against a sidecar stamped `r2` must **not** produce `confirmed_by_user` or `confirmed_person_id` for that cluster, and must appear once in `stale_assignments`. A prototype from `r2` against `r2` behaves exactly as today. A legacy pair (no ids at all) behaves exactly as today. Add one test that `speaker-naming-status` does not count a stale prototype's cluster as named.
-- [ ] **Step 2: Run and watch them fail.**
-- [ ] **Step 3: Apply the predicate at every reader.** The `confirmed_by_user` / `confirmed_person_id` derivation; `still_present`; the mutual-negative `matches` selection - without scoping there, a stale old-run prototype whose sid collides with a new-run sid would be treated as owning the new cluster and would seed negatives built from the new run's embeddings. Then assemble `stale_assignments`, deduped per person.
-- [ ] **Step 4: Leave participants alone, and say why in the code.** `confirmed_participant_names` stays meeting-scoped. Add the comment: attendance is a property of the meeting, not of a run, and run-filtering the `full-reprocess` restore would empty the section on every reprocess. Without that comment a later reader will "fix" it.
-- [ ] **Step 5: Run green, then the whole suite.**
-- [ ] **Step 6: Commit.**
+- [x] **Step 1: Write the failing tests.** A prototype from run `r1` against a sidecar stamped `r2` must **not** produce `confirmed_by_user` or `confirmed_person_id` for that cluster, and must appear once in `stale_assignments`. A prototype from `r2` against `r2` behaves exactly as today. A legacy pair (no ids at all) behaves exactly as today. Add one test that `speaker-naming-status` does not count a stale prototype's cluster as named.
+- [x] **Step 2: Run and watch them fail.**
+- [x] **Step 3: Apply the predicate at every reader.** The `confirmed_by_user` / `confirmed_person_id` derivation; `still_present`; the mutual-negative `matches` selection - without scoping there, a stale old-run prototype whose sid collides with a new-run sid would be treated as owning the new cluster and would seed negatives built from the new run's embeddings. Then assemble `stale_assignments`, deduped per person.
+- [x] **Step 4: Leave participants alone, and say why in the code.** `confirmed_participant_names` stays meeting-scoped. Add the comment: attendance is a property of the meeting, not of a run, and run-filtering the `full-reprocess` restore would empty the section on every reprocess. Without that comment a later reader will "fix" it.
+- [x] **Step 5: Run green, then the whole suite.**
+- [x] **Step 6: Commit.**
 
 ---
 
@@ -143,12 +143,12 @@
 - Consumes: the sidecar document helpers.
 - Produces: per-cluster optional key `review_state` with the single value `"generic"`; CLI `set-cluster-review-state <meeting_stem> <channel> <diarization_speaker_id> --generic|--clear`; `suggest-speakers` echoes `review_state` per cluster so the renderer can read it.
 
-- [ ] **Step 1: Write the failing tests.** The helper sets and clears the key on the exact raw id it was handed. A merged row reads as generic when **any** raw member carries it, mirroring how `merge_same_channel_fragments` already computes `contains_multiple_speakers` with `any()`. `confirm-speaker` clears it from **every fragment id** of the confirmed cluster, and `mark-speaker-cluster --multiple` does the same - so no orphaned key on a non-primary fragment can keep a row generic after a confirm. The CLI's never-raises contract: missing sidecar, missing channel, and missing cluster each produce `success: false` JSON and exit 1, with no traceback.
-- [ ] **Step 2: Run and watch them fail.**
-- [ ] **Step 3: Implement the helper and the CLI.** The write helper mirrors `set_cluster_multi_speaker`: re-read the freshest sidecar immediately before writing, apply the one change, replace atomically via `write_sidecar_document`. The CLI mirrors `mark-speaker-cluster`'s argument shape and reports the merged reach (resolved id plus fragment set) in its JSON.
-- [ ] **Step 4: Wire the transitions and the echo.** Clear on confirm and on mark; echo `review_state` per cluster from `suggest-speakers`.
-- [ ] **Step 5: Run green, then the whole suite.**
-- [ ] **Step 6: Commit.**
+- [x] **Step 1: Write the failing tests.** The helper sets and clears the key on the exact raw id it was handed. A merged row reads as generic when **any** raw member carries it, mirroring how `merge_same_channel_fragments` already computes `contains_multiple_speakers` with `any()`. `confirm-speaker` clears it from **every fragment id** of the confirmed cluster, and `mark-speaker-cluster --multiple` does the same - so no orphaned key on a non-primary fragment can keep a row generic after a confirm. The CLI's never-raises contract: missing sidecar, missing channel, and missing cluster each produce `success: false` JSON and exit 1, with no traceback.
+- [x] **Step 2: Run and watch them fail.**
+- [x] **Step 3: Implement the helper and the CLI.** The write helper mirrors `set_cluster_multi_speaker`: re-read the freshest sidecar immediately before writing, apply the one change, replace atomically via `write_sidecar_document`. The CLI mirrors `mark-speaker-cluster`'s argument shape and reports the merged reach (resolved id plus fragment set) in its JSON.
+- [x] **Step 4: Wire the transitions and the echo.** Clear on confirm and on mark; echo `review_state` per cluster from `suggest-speakers`.
+- [x] **Step 5: Run green, then the whole suite.**
+- [x] **Step 6: Commit.**
 
 ---
 
@@ -163,12 +163,12 @@
 - Consumes: Task 6's CLI and echo, Task 5's `stale_assignments`.
 - Produces: `speakers.setClusterReviewState({ meetingStem, channel, diarizationSpeakerId, generic })` on the preload bridge, and `useSetClusterReviewState` in the hooks module.
 
-- [ ] **Step 1: Write the failing renderer tests.** Beside `speakerReviewOrdering.test.ts`, test the pure derivations rather than the component internals: a row whose suggestion carries `review_state: "generic"` reads as kept-generic; the notice text is produced when `stale_assignments` is non-empty and not when it is empty. Extract the derivations as exported helpers so they are testable without mounting, the same way `orderProfilesForRow` already is.
-- [ ] **Step 2: Add the failing T1 assertions.** In `speaker-review.t1.spec.ts`: after clicking "Keep generic" the row stays visible and reads as kept generic; the button is absent on a confirmed row and on a mixed row. Extend `app/e2e-mock-ipc.js` with the new handler and the `review_state` echo so the mock matches the real contract.
-- [ ] **Step 3: Run both and watch them fail.** `npx vitest run` and `npm run test:e2e -- --project=t1 --grep speaker`.
-- [ ] **Step 4: Bridge and wire.** The `ipcMain.handle` mirrors the `mark-speaker-cluster` handler including `parsePythonFailureJson` on error; the preload entry joins the existing `speakers` group; the hook invalidates `speakersKeys.suggestions(meetingStem)`. In the panel, the button calls the mutation, and the `dismissed` state and its `notDismissed` filtering are **removed** - the marker now comes from query data, which is what makes it survive a remount by construction. Gate the button off on confirmed and mixed rows; today it renders on both because it sits outside the `!isMarked` conditional.
-- [ ] **Step 5: Run typecheck, lint, vitest, T1.** Compare lint against the 37/0 baseline.
-- [ ] **Step 6: Commit.**
+- [x] **Step 1: Write the failing renderer tests.** Beside `speakerReviewOrdering.test.ts`, test the pure derivations rather than the component internals: a row whose suggestion carries `review_state: "generic"` reads as kept-generic; the notice text is produced when `stale_assignments` is non-empty and not when it is empty. Extract the derivations as exported helpers so they are testable without mounting, the same way `orderProfilesForRow` already is.
+- [x] **Step 2: Replace the T1 test that pins the old behaviour, deliberately.** `speaker-review.t1.spec.ts` currently holds `'Keep generic dismisses the row locally, no confirm call needed'`, which asserts the row reaches `toHaveCount(0)`. This slice inverts that on purpose, so the test must be **rewritten and renamed** - its present name becomes false. The replacement asserts the new contract: after clicking, the row stays visible, reads as kept generic, and the undo is one click away. Renaming it is the point: a silently adjusted assertion would disguise a product decision as test maintenance. Then add the two new assertions - the button is absent on a confirmed row and on a mixed row - and extend `app/e2e-mock-ipc.js` with the new handler and the `review_state` echo so the mock matches the real contract. Leave the in-flight-disabled assertion around line 253 intact; it covers a different property of the same button.
+- [x] **Step 3: Run both and watch them fail.** `npx vitest run` and `npm run test:e2e -- --project=t1 --grep speaker`.
+- [x] **Step 4: Bridge and wire.** The `ipcMain.handle` mirrors the `mark-speaker-cluster` handler including `parsePythonFailureJson` on error; the preload entry joins the existing `speakers` group; the hook invalidates `speakersKeys.suggestions(meetingStem)`. In the panel, the button calls the mutation, and the `dismissed` state and its `notDismissed` filtering are **removed** - the marker now comes from query data, which is what makes it survive a remount by construction. Gate the button off on confirmed and mixed rows; today it renders on both because it sits outside the `!isMarked` conditional.
+- [x] **Step 5: Run typecheck, lint, vitest, T1.** Compare lint against the 37/0 baseline.
+- [x] **Step 6: Commit.**
 
 ---
 
@@ -182,11 +182,11 @@
 - Consumes: Task 6's key.
 - Produces: no new public surface; a counted, logged report on both paths.
 
-- [ ] **Step 1: Write the failing tests.** `backfill-speaker-embeddings --force` over a sidecar carrying `review_state` markings reports their count alongside the existing `lost_multi_speaker_markings`. The `reprocess --retranscribe` path emits a warning naming both counts where today it emits nothing - this is the pre-existing silent loss, so assert on the current silence first to prove the test bites.
-- [ ] **Step 2: Run and watch them fail.**
-- [ ] **Step 3: Implement.** The backfill already reads the previous sidecar before overwriting; extend its accounting. Give `_persist_speaker_sidecar` the same read-before-overwrite accounting, reported as a `logger.warning` plus one greppable stdout line mirroring the backfill's wording, because `reprocess` streams lines rather than one JSON document. Do not surface it in the renderer; that is out of scope.
-- [ ] **Step 4: Run green.**
-- [ ] **Step 5: Commit.**
+- [x] **Step 1: Write the failing tests.** `backfill-speaker-embeddings --force` over a sidecar carrying `review_state` markings reports their count alongside the existing `lost_multi_speaker_markings`. The `reprocess --retranscribe` path emits a warning naming both counts where today it emits nothing - this is the pre-existing silent loss, so assert on the current silence first to prove the test bites.
+- [x] **Step 2: Run and watch them fail.**
+- [x] **Step 3: Implement.** The backfill already reads the previous sidecar before overwriting; extend its accounting. Give `_persist_speaker_sidecar` the same read-before-overwrite accounting, reported as a `logger.warning` plus one greppable stdout line mirroring the backfill's wording, because `reprocess` streams lines rather than one JSON document. Do not surface it in the renderer; that is out of scope.
+- [x] **Step 4: Run green.**
+- [x] **Step 5: Commit.**
 
 ---
 
@@ -200,11 +200,11 @@
 - Consumes: everything above.
 - Produces: the standing-rule coverage for a user-facing change.
 
-- [ ] **Step 1: Write the failing spec.** Drive `window.stenoai.speakers.setClusterReviewState` through the preload bridge against the real backend, then read the meeting's `_speakers.json` from disk and assert the `review_state` key on the right cluster; clear it and assert it is gone. Model-free, following the existing T2 speaker specs.
-- [ ] **Step 2: Run and watch it fail.** `npm run test:e2e -- --project=t2 --grep-invert @pipeline`.
-- [ ] **Step 3: Confirm the compatibility proof still holds.** `speaker-naming.t2` and `speaker-multi-marking.t2` must pass against the **unchanged**, legacy-shaped `writeSpeakersSidecar` fixture. If a change to that fixture was needed to make anything pass, the backward compatibility is broken and the cause is in Tasks 1-6, not in the fixture.
-- [ ] **Step 4: Full verification.** `ruff check .`, `python -m unittest discover tests`, `npm run typecheck:renderer`, `npm run lint:renderer`, `npx vitest run`, T1 and model-free T2. Compare every number against the baseline in Global Constraints and classify any difference.
-- [ ] **Step 5: Commit.**
+- [x] **Step 1: Write the failing spec.** Drive `window.stenoai.speakers.setClusterReviewState` through the preload bridge against the real backend, then read the meeting's `_speakers.json` from disk and assert the `review_state` key on the right cluster; clear it and assert it is gone. Model-free, following the existing T2 speaker specs.
+- [x] **Step 2: Run and watch it fail.** `npm run test:e2e -- --project=t2 --grep-invert @pipeline`.
+- [x] **Step 3: Confirm the compatibility proof still holds.** `speaker-naming.t2` and `speaker-multi-marking.t2` must pass against the **unchanged**, legacy-shaped `writeSpeakersSidecar` fixture. If a change to that fixture was needed to make anything pass, the backward compatibility is broken and the cause is in Tasks 1-6, not in the fixture.
+- [x] **Step 4: Full verification.** `ruff check .`, `python -m unittest discover tests`, `npm run typecheck:renderer`, `npm run lint:renderer`, `npx vitest run`, T1 and model-free T2. Compare every number against the baseline in Global Constraints and classify any difference.
+- [x] **Step 5: Commit.**
 
 ---
 

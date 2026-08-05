@@ -501,6 +501,13 @@ export interface SpeakerSuggestion {
    *  WHICH person a cluster went to compares this, not the name. Optional:
    *  a payload predating this field simply carries no id. */
   confirmed_person_id?: string | null;
+  /** How far a human got reviewing this cluster. `"generic"` means they
+   *  looked at it and chose to leave it unnamed -- the one review outcome
+   *  that leaves no other trace, so it is read from here rather than from
+   *  component state and survives a remount by construction. Absent on a
+   *  payload predating the field, and on every unreviewed row. Never
+   *  affects the suggestion: it records progress, not evidence. */
+  review_state?: string | null;
 }
 export type SuggestSpeakersResponse = Result<{
   meeting_id: string;
@@ -515,8 +522,20 @@ export type SuggestSpeakersResponse = Result<{
    *  Nothing consumes this number today -- Sortformer takes no speaker-count
    *  hint, so there is no re-diarization call to feed it into. */
   minimum_speaker_count: number;
+  /** People whose confirmation in this meeting was made against a
+   *  diarization run that no longer describes the clusters below, because
+   *  the meeting was re-diarized since. Their voice evidence is untouched
+   *  and keeps scoring candidates everywhere; what is lost is the link to a
+   *  cluster, and only re-confirming restores it. Absent or empty is the
+   *  normal case, including on every library that was never re-diarized. */
+  stale_assignments?: StaleAssignment[];
   channels: Record<string, Record<string, SpeakerSuggestion>>;
 }>;
+
+export interface StaleAssignment {
+  person_id: string;
+  display_name: string;
+}
 
 export interface MarkSpeakerClusterParams {
   meetingStem: string;
@@ -524,6 +543,22 @@ export interface MarkSpeakerClusterParams {
   diarizationSpeakerId: string;
   containsMultipleSpeakers: boolean;
 }
+
+export interface SetClusterReviewStateParams {
+  meetingStem: string;
+  channel: string;
+  diarizationSpeakerId: string;
+  /** True records "a human reviewed this and left it unnamed"; false
+   *  removes that marking, which is the undo. */
+  generic: boolean;
+}
+export type SetClusterReviewStateResponse = Result<{
+  resolved_diarization_speaker_id: string;
+  /** Every raw cluster id the marked row covers. The panel shows merged
+   *  rows, so one click can reach several ids. */
+  fragment_ids: string[];
+  review_state: string | null;
+}>;
 export type MarkSpeakerClusterResponse = Result<{
   resolved_diarization_speaker_id: string;
   contains_multiple_speakers: boolean;
@@ -1120,6 +1155,10 @@ export interface StenoaiBridge {
       GetSpeakerSampleAudioResponse
     >;
     markCluster: RequestFn<[params: MarkSpeakerClusterParams], MarkSpeakerClusterResponse>;
+    setClusterReviewState: RequestFn<
+      [params: SetClusterReviewStateParams],
+      SetClusterReviewStateResponse
+    >;
     namingStatus: RequestFn<[meetingStem: string], SpeakerNamingStatusResponse>;
   };
 

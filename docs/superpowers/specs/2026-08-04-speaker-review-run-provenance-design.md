@@ -87,8 +87,8 @@ The rule is deliberately ASYMMETRIC because of how the two ids can come to disag
 | absent | absent | current | pure legacy, nothing was ever re-diarized with run stamping |
 | present | present, equal | current | confirmed against exactly this run |
 | present | present, different | stale | confirmed against a different run's clusters |
-| absent | present | stale | can only arise if the recording was re-diarized after the confirmation - the confirm predates run stamping, the sidecar postdates it |
-| present | absent | stale | defensive: only reachable if a build without run stamping re-diarized after a stamped confirm; the sidecar's clusters are then not provably the confirm-time run |
+| absent | present | stale | a fresh run happened after the confirmation. Note this is the ordinary upgrade path, not an exotic one: confirming against a still-legacy sidecar stores no id even on a stamped build, and the meeting's first re-diarization then stamps the sidecar |
+| present | absent | stale | defensive: reachable through a build without run stamping, or through a restored `.bak` sidecar. Either way the sidecar's clusters are not provably the confirm-time run |
 
 The rule lives as one shared predicate in `src/speaker_suggestions.py` (beside `prototype_channel_matches`, which `src/config.py` already imports the same way), so the read path and the write path below cannot drift apart.
 

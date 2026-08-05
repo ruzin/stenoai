@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,8 @@ from unittest import mock
 
 from src.speaker_suggestions import (
     ClusterContext,
+    REVIEW_STATE_GENERIC,
+    REVIEW_STATE_KEY,
     SAME_MEETING_MERGE_DISTANCE_THRESHOLD,
     SUGGESTION_CONFIDENCE_MARGIN,
     SUGGESTION_DISTANCE_THRESHOLD,
@@ -14,6 +17,7 @@ from src.speaker_suggestions import (
     SUGGESTION_MIN_DURATION_SECONDS,
     SUGGESTION_MIN_SEGMENT_COUNT,
     build_clusters_from_diarization,
+    clear_cluster_review_state,
     clusters_from_sidecar_channel,
     confirmed_participant_names,
     determine_recording_type,
@@ -22,13 +26,17 @@ from src.speaker_suggestions import (
     longest_segment,
     merge_same_channel_fragments,
     prototype_channel_matches,
+    prototype_run_matches,
     read_speakers_sidecar,
     relabel_transcript_exact,
     relabel_transcript_multi,
     relabel_transcript_speaker,
     score_candidates,
+    set_cluster_multi_speaker,
+    set_cluster_review_state,
     suggest_speaker,
     suggest_speakers_for_meeting,
+    write_sidecar_document,
     write_speakers_sidecar,
 )
 from src.voiceprint import cosine_distance
@@ -383,6 +391,23 @@ class PrototypeChannelMatchesTests(unittest.TestCase):
         self.assertFalse(prototype_channel_matches(legacy, "system", "remote"))
 
 
+class PrototypeRunMatchesTests(unittest.TestCase):
+    def test_both_absent_is_current(self):
+        self.assertTrue(prototype_run_matches({}, None))
+
+    def test_both_present_and_equal_is_current(self):
+        self.assertTrue(prototype_run_matches({"diarization_run_id": "run-a"}, "run-a"))
+
+    def test_both_present_and_different_is_stale(self):
+        self.assertFalse(prototype_run_matches({"diarization_run_id": "run-a"}, "run-b"))
+
+    def test_entry_absent_sidecar_present_is_stale(self):
+        self.assertFalse(prototype_run_matches({}, "run-a"))
+
+    def test_entry_present_sidecar_absent_is_stale(self):
+        self.assertFalse(prototype_run_matches({"diarization_run_id": "run-a"}, None))
+
+
 class SuggestSpeakersForMeetingTests(unittest.TestCase):
     def test_same_person_not_suggested_for_two_clusters(self):
         # Two clusters both plausibly Max; only the closer one should claim
@@ -571,6 +596,78 @@ class SpeakersSidecarTests(unittest.TestCase):
             output_dir = Path(tmp_dir)
             (output_dir / "mtg001_speakers.json").write_text("{not json")
             self.assertIsNone(read_speakers_sidecar(output_dir, "mtg001"))
+
+    def test_write_stamps_a_diarization_run(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            channels = {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            loaded = read_speakers_sidecar(output_dir, "mtg001")
+            run = loaded["diarization_run"]
+            self.assertIsInstance(run["run_id"], str)
+            self.assertTrue(run["run_id"])
+            self.assertIsInstance(run["created_at"], float)
+
+    def test_successive_writes_mint_different_run_ids(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            channels = {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            first_run_id = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            second_run_id = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            self.assertNotEqual(first_run_id, second_run_id)
+
+    def test_legacy_sidecar_without_diarization_run_round_trips_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            legacy = {
+                "meeting_id": "mtg001",
+                "created_at": 100.0,
+                "channels": {
+                    "mic": {
+                        "recording_type": "in_person",
+                        "clusters": {
+                            "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                        },
+                    },
+                },
+            }
+            (output_dir / "mtg001_speakers.json").write_text(json.dumps(legacy))
+            loaded = read_speakers_sidecar(output_dir, "mtg001")
+            self.assertEqual(loaded, legacy)
+            self.assertIsNone(loaded.get("diarization_run"))
+
+    def test_rewrite_via_set_cluster_multi_speaker_preserves_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            channels = {
+                "system": {
+                    "recording_type": "remote",
+                    "clusters": {
+                        "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                    },
+                },
+            }
+            write_speakers_sidecar(output_dir, "mtg001", channels)
+            run_id_before = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            set_cluster_multi_speaker(output_dir, "mtg001", "system", "SPEAKER_0", True)
+            run_id_after = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            self.assertEqual(run_id_before, run_id_after)
 
     def test_clusters_from_sidecar_channel_builds_expected_shape(self):
         channel = {
@@ -1277,5 +1374,204 @@ class ExtractSpeakerSampleAudioTests(unittest.TestCase):
             self.assertFalse(ok)
 
 
+class ReviewStateTests(unittest.TestCase):
+    """"Keep generic" as a persisted fact rather than a React state set.
+
+    The button exists for the row a reviewer looked at and decided to leave
+    alone. Held only in the component, that decision dies on a remount --
+    navigating away and back re-presents every row they already dealt with,
+    which is exactly the work the button was meant to save. Persisting it
+    also makes it survivable in the other direction: a half-finished review
+    can be picked up tomorrow.
+    """
+
+    def _seed(self, tmp, clusters=None):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        write_speakers_sidecar(output_dir, "mtg001", {
+            "system": {
+                "recording_type": "remote",
+                "clusters": clusters or {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 60.0,
+                                  "segment_count": 10},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 40.0,
+                                  "segment_count": 8},
+                },
+            },
+        })
+        return output_dir
+
+    def _stored(self, output_dir, sid):
+        sidecar = read_speakers_sidecar(output_dir, "mtg001")
+        return sidecar["channels"]["system"]["clusters"][sid]
+
+    def test_marking_writes_the_key_on_the_exact_cluster_it_was_handed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            result = set_cluster_review_state(
+                output_dir, "mtg001", "system", "SPEAKER_0", REVIEW_STATE_GENERIC,
+            )
+            self.assertIsNotNone(result)
+            self.assertEqual(self._stored(output_dir, "SPEAKER_0")[REVIEW_STATE_KEY],
+                             REVIEW_STATE_GENERIC)
+            self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_1"))
+
+    def test_clearing_removes_the_key_rather_than_storing_a_null(self):
+        # Absent means "not marked" everywhere in this sidecar, so a stored
+        # null would be a third state no reader knows about.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_0",
+                                     REVIEW_STATE_GENERIC)
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_0", None)
+            self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, "SPEAKER_0"))
+
+    def test_a_missing_sidecar_channel_or_cluster_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            self.assertIsNone(set_cluster_review_state(
+                output_dir, "never-diarised", "system", "SPEAKER_0", REVIEW_STATE_GENERIC))
+            self.assertIsNone(set_cluster_review_state(
+                output_dir, "mtg001", "mic", "SPEAKER_0", REVIEW_STATE_GENERIC))
+            self.assertIsNone(set_cluster_review_state(
+                output_dir, "mtg001", "system", "SPEAKER_99", REVIEW_STATE_GENERIC))
+
+    def test_a_rewrite_preserves_the_marking(self):
+        # set_cluster_multi_speaker rewrites the whole document; the two
+        # markings are independent facts about the same cluster and neither
+        # may drop the other.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_0",
+                                     REVIEW_STATE_GENERIC)
+            set_cluster_multi_speaker(output_dir, "mtg001", "system", "SPEAKER_1", True)
+            self.assertEqual(self._stored(output_dir, "SPEAKER_0")[REVIEW_STATE_KEY],
+                             REVIEW_STATE_GENERIC)
+
+    def test_a_merged_row_reads_generic_when_any_fragment_carries_it(self):
+        # Mirrors how contains_multiple_speakers merges: the marking is
+        # written on a raw id, the panel shows the merged row, and the
+        # reviewer's decision was about the row they saw.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp, clusters={
+                "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 1600.0,
+                              "segment_count": 580},
+                "SPEAKER_2": {"embedding": [0.995, 0.0999], "speech_duration_seconds": 1538.0,
+                              "segment_count": 552},
+            })
+            # The NON-primary fragment: SPEAKER_0 wins the merge on duration.
+            set_cluster_review_state(output_dir, "mtg001", "system", "SPEAKER_2",
+                                     REVIEW_STATE_GENERIC)
+            sidecar = read_speakers_sidecar(output_dir, "mtg001")
+            merged, _ = merge_same_channel_fragments(
+                clusters_from_sidecar_channel("mtg001", sidecar["channels"]["system"])
+            )
+            self.assertEqual(merged["SPEAKER_0"][1].merged_from, ["SPEAKER_2"])
+            self.assertEqual(merged["SPEAKER_0"][1].review_state, REVIEW_STATE_GENERIC)
+
+    def test_a_legacy_cluster_without_the_key_reads_as_unmarked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            sidecar = read_speakers_sidecar(output_dir, "mtg001")
+            clusters = clusters_from_sidecar_channel("mtg001", sidecar["channels"]["system"])
+            self.assertIsNone(clusters["SPEAKER_0"][1].review_state)
+
+    def test_clearing_sweeps_every_fragment_of_a_merged_row(self):
+        # A key left on a non-primary fragment would keep the merged row
+        # reading generic after a confirm, because the merged view is an
+        # any() over the members.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            for sid in ("SPEAKER_0", "SPEAKER_1"):
+                set_cluster_review_state(output_dir, "mtg001", "system", sid,
+                                         REVIEW_STATE_GENERIC)
+            cleared = clear_cluster_review_state(
+                output_dir, "mtg001", "system", {"SPEAKER_0", "SPEAKER_1"},
+            )
+            self.assertEqual(cleared, 2)
+            for sid in ("SPEAKER_0", "SPEAKER_1"):
+                self.assertNotIn(REVIEW_STATE_KEY, self._stored(output_dir, sid))
+
+    def test_clearing_what_was_never_marked_reports_nothing_and_raises_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = self._seed(tmp)
+            self.assertEqual(
+                clear_cluster_review_state(output_dir, "mtg001", "system", {"SPEAKER_0"}), 0)
+            self.assertEqual(
+                clear_cluster_review_state(output_dir, "gone", "system", {"SPEAKER_0"}), 0)
+            self.assertEqual(
+                clear_cluster_review_state(output_dir, "mtg001", "mic", {"SPEAKER_0"}), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class SidecarDurabilityTests(unittest.TestCase):
+    """The rename is atomic; that is not the same as durable.
+
+    This file holds the ONLY copy of a meeting's voice embeddings, and the
+    source audio is deleted by default -- so unlike a transcript, it cannot
+    be regenerated. An atomic rename guarantees a reader never sees a half
+    document; it guarantees nothing about the bytes having reached stable
+    storage. Without a flush, a power cut or kernel panic in the window
+    between the write and the disk can leave the renamed file empty, which
+    is exactly the unrecoverable outcome the atomic rename was chosen to
+    prevent.
+    """
+
+    def _seed(self, tmp):
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir, {
+            "meeting_id": "mtg001",
+            "channels": {"system": {"recording_type": "remote", "clusters": {}}},
+        }
+
+    def test_the_bytes_are_flushed_to_disk_before_the_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir, doc = self._seed(tmp)
+            calls = []
+            real_fsync = os.fsync
+            real_replace = Path.replace
+
+            def spy_fsync(fd):
+                calls.append("fsync")
+                return real_fsync(fd)
+
+            def spy_replace(self, target):
+                calls.append("replace")
+                return real_replace(self, target)
+
+            with mock.patch("src.speaker_suggestions.os.fsync", side_effect=spy_fsync), \
+                 mock.patch.object(Path, "replace", spy_replace):
+                write_sidecar_document(output_dir, "mtg001", doc)
+
+            self.assertIn("fsync", calls, "the temp file was renamed into place unflushed")
+            self.assertLess(
+                calls.index("fsync"), calls.index("replace"),
+                "flushing after the rename protects nothing",
+            )
+            self.assertEqual(read_speakers_sidecar(output_dir, "mtg001"), doc)
+
+            if hasattr(os, "O_DIRECTORY"):
+                # The directory entry too, and necessarily AFTER the rename:
+                # otherwise a crash can leave it pointing at the old file
+                # even though the caller was told the sidecar was replaced.
+                self.assertGreater(
+                    calls.count("fsync"), 1, "the rename itself was never flushed",
+                )
+                last_fsync = len(calls) - 1 - calls[::-1].index("fsync")
+                self.assertGreater(last_fsync, calls.index("replace"))
+
+    def test_a_failed_flush_leaves_no_temp_file_and_does_not_claim_success(self):
+        # Same contract the write already had: a failure must not leave a
+        # half-written temp file behind for someone to mistake for a real
+        # sidecar, and must not return as if the sidecar had been replaced.
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir, doc = self._seed(tmp)
+            with mock.patch("src.speaker_suggestions.os.fsync", side_effect=OSError("disk gone")):
+                with self.assertRaises(OSError):
+                    write_sidecar_document(output_dir, "mtg001", doc)
+            leftovers = [p.name for p in output_dir.iterdir()]
+            self.assertEqual(leftovers, [], f"temp file left behind: {leftovers}")

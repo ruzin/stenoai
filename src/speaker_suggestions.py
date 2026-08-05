@@ -46,6 +46,7 @@ import re
 import subprocess
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -160,6 +161,36 @@ def prototype_channel_matches(prototype: dict, channel_name: str, channel_record
     return prototype.get("recording_type") == channel_recording_type
 
 
+def prototype_run_matches(entry: dict, sidecar_run_id) -> bool:
+    """Is a stored prototype/hard-negative still evidence about the sidecar's
+    CURRENT diarization run's clusters?
+
+    Both the read path (which prototypes may populate `confirmed_by_user`)
+    and the write path (`remove_speaker_evidence`'s run-scoped removal) call
+    this one predicate so they can never drift apart on what "still current"
+    means (see docs/superpowers/specs/2026-08-04-speaker-review-run-provenance-design.md
+    section 4/5).
+
+    The two mixed absent/present cases are deliberately asymmetric, because
+    they arise from different histories rather than a coin flip:
+    - entry absent, sidecar present: only reachable if the meeting was
+      re-diarized (stamping the sidecar with a run id) AFTER the entry was
+      confirmed on a build that predates run stamping. The entry's clusters
+      are provably not this run's clusters, so it is stale -- this is the
+      exact hazard this slice exists to catch.
+    - entry present, sidecar absent: only reachable if a build WITHOUT run
+      stamping re-diarized a meeting whose entry was confirmed by a build
+      WITH it -- the reverse order from the case above, and not the one this
+      slice targets. Nothing proves the now-unstamped sidecar's clusters are
+      the confirmed run's clusters, so this is pinned stale defensively too.
+    Both absent stays current: pure legacy, nothing here was ever run-stamped.
+    """
+    entry_run_id = entry.get("diarization_run_id")
+    if entry_run_id is None and sidecar_run_id is None:
+        return True
+    return entry_run_id == sidecar_run_id
+
+
 def build_clusters_from_diarization(segments: list, embeddings: dict) -> dict:
     """Group one channel's raw diarizer segments + per-speaker embeddings
     into the `clusters` shape `write_speakers_sidecar` expects:
@@ -217,6 +248,11 @@ class ClusterContext:
     # enrolling it as anyone's voice evidence would poison the profile it
     # was filed under and every future suggestion scored against it.
     contains_multiple_speakers: bool = False
+    # How far a human got reviewing this cluster (see REVIEW_STATE_KEY), or
+    # None where they have not said. Carried here only so the panel can show
+    # it back: unlike contains_multiple_speakers it feeds no score and no
+    # gate, because it describes the reviewer's progress and not the voice.
+    review_state: Optional[str] = None
 
 
 @dataclass
@@ -546,6 +582,19 @@ def merge_same_channel_fragments(clusters: dict) -> tuple:
                 contains_multiple_speakers=any(
                     clusters[sid][1].contains_multiple_speakers for sid in members
                 ),
+                # Same any() as above, for a different reason: the reviewer
+                # marked the ROW they saw, and which raw fragment carried
+                # the mark is an implementation detail they never saw. One
+                # marked member therefore marks the merged row -- and the
+                # transitions clear the whole member set, so a mark cannot
+                # survive on a fragment nobody can reach.
+                review_state=next(
+                    (
+                        clusters[sid][1].review_state for sid in members
+                        if clusters[sid][1].review_state is not None
+                    ),
+                    None,
+                ),
             ),
         )
 
@@ -582,11 +631,25 @@ def write_speakers_sidecar(
     "which line belongs to this cluster" via fuzzy timestamp matching
     after the fact -- see the plan doc's Phase 8. Omitted (not written as
     an empty list) when not given, so older sidecars and this key's
-    absence both read the same way via `.get("transcript_lines")`."""
+    absence both read the same way via `.get("transcript_lines")`.
+
+    Mints a fresh `diarization_run` (`run_id` + `created_at`) every call,
+    minted HERE rather than by each caller: every producer of a new run --
+    the live pipeline, the Phase 3 backfill command, and a future
+    re-diarize -- funnels through this one function, so stamping it here
+    needs no new plumbing at any call site and cannot be forgotten by one.
+    The read-modify-write helpers (`write_sidecar_document`,
+    `set_cluster_multi_speaker`) rewrite the whole document instead of
+    calling back in here, so they carry the existing run id forward
+    unchanged -- a rewrite of the same diarization output is not a new
+    run, and re-minting on every write would make a stale review-state
+    key (added in a later slice) look current when the clusters it was
+    reviewed against never changed."""
     payload = {
         "meeting_id": meeting_stem,
         "created_at": time.time(),
         "channels": channels,
+        "diarization_run": {"run_id": str(uuid.uuid4()), "created_at": time.time()},
     }
     if turn_manifest:
         payload["transcript_lines"] = turn_manifest
@@ -616,6 +679,26 @@ def write_speakers_sidecar(
 MULTI_SPEAKER_KEY = "contains_multiple_speakers"
 
 
+# How far a human got reviewing one cluster, for the decisions that produce
+# no other trace. Same placement rationale as MULTI_SPEAKER_KEY: written
+# into the cluster entry itself so it travels with exactly the cluster it
+# describes, only written when set, absent means "not marked".
+#
+# Exactly one value, deliberately. "Assigned" is already derivable from a
+# matching prototype and "mixed" is already MULTI_SPEAKER_KEY; recording
+# either here as a second copy would create a consistency obligation with
+# no information gain, and the copies would disagree the first time one
+# path updated without the other. "Unreviewed" is the absence of
+# everything.
+#
+# It changes no score and no suggestion status. A reviewer saying "leave
+# this one generic" is a statement about their own progress, not about the
+# voice -- treating it as evidence would let a shrug quietly suppress a
+# real match.
+REVIEW_STATE_KEY = "review_state"
+REVIEW_STATE_GENERIC = "generic"
+
+
 def cluster_ids_marked_multi_speaker(channel_data: dict) -> set:
     """Every raw diarization_speaker_id in one channel marked as holding
     more than one person."""
@@ -624,6 +707,39 @@ def cluster_ids_marked_multi_speaker(channel_data: dict) -> set:
         for sid, cluster in (channel_data.get("clusters") or {}).items()
         if cluster.get(MULTI_SPEAKER_KEY)
     }
+
+
+def count_review_markings(sidecar: Optional[dict]) -> dict:
+    """How many clusters in a whole sidecar carry each human marking:
+    `{"multi_speaker": n, "review_state": n}`.
+
+    Exists once so the two paths that overwrite a sidecar with a fresh
+    diarization -- `backfill-speaker-embeddings` and
+    `_persist_speaker_sidecar` (reprocess --retranscribe) -- report the same
+    thing. Those are the only places a marking is ever lost, and a second
+    copy of this counting is how one of them would quietly stop counting the
+    newer kind.
+
+    Tolerates any shape, including None: it is called only to build a
+    warning, and a warning must never be what fails a re-diarization.
+    """
+    counts = {"multi_speaker": 0, "review_state": 0}
+    if not isinstance(sidecar, dict):
+        return counts
+    channels = sidecar.get("channels")
+    if not isinstance(channels, dict):
+        return counts
+    for channel_data in channels.values():
+        if not isinstance(channel_data, dict):
+            continue
+        for cluster in _cluster_entries(channel_data).values():
+            if not isinstance(cluster, dict):
+                continue
+            if cluster.get(MULTI_SPEAKER_KEY):
+                counts["multi_speaker"] += 1
+            if cluster.get(REVIEW_STATE_KEY):
+                counts["review_state"] += 1
+    return counts
 
 
 def set_cluster_multi_speaker(
@@ -639,34 +755,20 @@ def set_cluster_multi_speaker(
     doesn't exist -- callers report that as an error rather than silently
     marking nothing.
     """
-    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
     if sidecar is None:
         return None
-    channel_data = (sidecar.get("channels") or {}).get(channel)
-    if channel_data is None:
-        return None
-    cluster = (channel_data.get("clusters") or {}).get(diarization_speaker_id)
-    if cluster is None:
+    cluster = _cluster_entries(channel_data).get(diarization_speaker_id)
+    if not isinstance(cluster, dict):
         return None
 
-    # Re-read immediately before writing and apply this ONE change to the
-    # freshest copy, rather than writing back the whole document as it
-    # looked on entry. The write is atomic, the read-modify-write was not:
-    # two overlapping marks both started from the same sidecar, and whoever
-    # replaced the file second discarded the other's marking silently --
-    # along with any confirmation cleanup its caller had already performed
-    # against it. This narrows the window to re-read-until-rename instead of
-    # entry-until-rename; it does not make the sequence a transaction, and a
-    # mark landing inside that remaining window would still be lost. Closing
-    # it fully needs a lock that works on macOS and Windows alike, which is
-    # a bigger change than this defect warrants.
-    freshest = read_speakers_sidecar(output_dir, meeting_stem)
-    if freshest is not None:
-        fresh_cluster = (
-            ((freshest.get("channels") or {}).get(channel) or {}).get("clusters") or {}
-        ).get(diarization_speaker_id)
-        if fresh_cluster is not None:
-            sidecar = freshest
+    # The second read, as late as possible before the write -- see
+    # _freshest_channel on the window this closes and the one it leaves.
+    fresh_sidecar, fresh_channel = _freshest_channel(output_dir, meeting_stem, channel)
+    if fresh_sidecar is not None:
+        fresh_cluster = _cluster_entries(fresh_channel).get(diarization_speaker_id)
+        if isinstance(fresh_cluster, dict):
+            sidecar = fresh_sidecar
             cluster = fresh_cluster
 
     if marked:
@@ -676,6 +778,124 @@ def set_cluster_multi_speaker(
 
     write_sidecar_document(output_dir, meeting_stem, sidecar)
     return sidecar
+
+
+def _freshest_channel(output_dir: Path, meeting_stem: str, channel: str) -> tuple:
+    """The sidecar as it is on disk RIGHT NOW plus its `channel` entry, for a
+    read-modify-write that must not overwrite a concurrent one.
+
+    Callers use it twice: once to validate, and once again immediately
+    before writing, applying their change to whatever that second read
+    returned. The write is atomic; the read-modify-write around it is not.
+    Two overlapping marks that both started from the same in-memory sidecar
+    ended with the second writer discarding the first's marking silently,
+    along with any confirmation cleanup its caller had already performed
+    against it. The second read narrows that window to read-until-rename
+    instead of entry-until-rename. It does not make the sequence a
+    transaction, and a write landing inside the remaining window is still
+    lost; closing it fully needs a lock that works on macOS and Windows
+    alike, which is a bigger change than this defect warrants.
+
+    Returns `(None, None)` when the sidecar or the channel is gone.
+
+    Types are checked rather than assumed. This file is JSON on a user's
+    disk: a half-written copy, a restored backup or a hand-edit can leave
+    any of these keys holding the wrong type, and `.get` on a list raises.
+    Every caller owes its own caller a JSON error rather than a traceback,
+    so a structurally wrong document has to read the same as a missing one.
+    """
+    sidecar = read_speakers_sidecar(output_dir, meeting_stem)
+    if not isinstance(sidecar, dict):
+        return None, None
+    channels = sidecar.get("channels")
+    if not isinstance(channels, dict):
+        return None, None
+    channel_data = channels.get(channel)
+    if not isinstance(channel_data, dict):
+        return None, None
+    return sidecar, channel_data
+
+
+def _cluster_entries(channel_data: dict) -> dict:
+    """One channel's `clusters` map, or an empty one when it is missing or
+    the wrong type (see _freshest_channel on why that is not assumed)."""
+    clusters = channel_data.get("clusters")
+    return clusters if isinstance(clusters, dict) else {}
+
+
+def set_cluster_review_state(
+    output_dir: Path, meeting_stem: str, channel: str,
+    diarization_speaker_id: str, state: Optional[str],
+) -> Optional[dict]:
+    """Set/clear how far the review got on ONE raw cluster.
+
+    Writes to exactly the id it was handed, like set_cluster_multi_speaker:
+    the panel shows merged rows, but the sidecar records raw clusters, and
+    inventing a write to the merge primary would put the mark on an id the
+    caller never named. The merged view resolves it on the way out (see
+    merge_same_channel_fragments).
+
+    `state=None` clears. Returns the written sidecar, or None when the
+    sidecar, channel or cluster does not exist -- callers report that rather
+    than reporting a mark that never happened.
+    """
+    sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
+    if sidecar is None:
+        return None
+    cluster = _cluster_entries(channel_data).get(diarization_speaker_id)
+    if not isinstance(cluster, dict):
+        return None
+
+    # The second read, same as set_cluster_multi_speaker: this key rides in
+    # the same document as the voice embeddings, so writing back a copy
+    # that went stale would take a concurrent marking with it.
+    fresh_sidecar, fresh_channel = _freshest_channel(output_dir, meeting_stem, channel)
+    if fresh_sidecar is not None:
+        fresh_cluster = _cluster_entries(fresh_channel).get(diarization_speaker_id)
+        if isinstance(fresh_cluster, dict):
+            sidecar = fresh_sidecar
+            cluster = fresh_cluster
+
+    if state is None:
+        cluster.pop(REVIEW_STATE_KEY, None)
+    else:
+        cluster[REVIEW_STATE_KEY] = state
+
+    write_sidecar_document(output_dir, meeting_stem, sidecar)
+    return sidecar
+
+
+def clear_cluster_review_state(
+    output_dir: Path, meeting_stem: str, channel: str, diarization_speaker_ids,
+) -> int:
+    """Drop the review marking from a whole set of raw cluster ids in one
+    write. Returns how many actually carried it.
+
+    Takes a set because the transitions that call it (a confirm, a mixed
+    marking) are about a MERGED row, and the merged view reads generic when
+    any member carries the key -- clearing only the primary would leave the
+    row marked by a fragment nobody can see or click.
+
+    Never raises and never reports a failure: it runs after the action it
+    follows has already succeeded, and a missing sidecar or channel there
+    means there is nothing to clear, not that the confirm went wrong.
+    """
+    sidecar, channel_data = _freshest_channel(output_dir, meeting_stem, channel)
+    if sidecar is None:
+        return 0
+    # The second read, same as the two setters above.
+    fresh_sidecar, fresh_channel = _freshest_channel(output_dir, meeting_stem, channel)
+    if fresh_sidecar is not None:
+        sidecar, channel_data = fresh_sidecar, fresh_channel
+    clusters = _cluster_entries(channel_data)
+    cleared = 0
+    for sid in diarization_speaker_ids:
+        cluster = clusters.get(sid)
+        if isinstance(cluster, dict) and cluster.pop(REVIEW_STATE_KEY, None) is not None:
+            cleared += 1
+    if cleared:
+        write_sidecar_document(output_dir, meeting_stem, sidecar)
+    return cleared
 
 
 def write_sidecar_document(output_dir: Path, meeting_stem: str, sidecar: dict) -> None:
@@ -699,12 +919,38 @@ def write_sidecar_document(output_dir: Path, meeting_stem: str, sidecar: dict) -
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(sidecar, fh, indent=2)
+            # Flushed to stable storage BEFORE the rename, because atomic
+            # and durable are not the same guarantee. The rename makes sure
+            # a reader never sees half a document; it says nothing about the
+            # bytes having left the page cache. A power cut or kernel panic
+            # in that window renames an EMPTY file over the real sidecar --
+            # and unlike a transcript, this one cannot be regenerated, since
+            # the source audio is deleted by default. Flushing afterwards
+            # would protect nothing.
+            fh.flush()
+            os.fsync(fh.fileno())
         tmp_path.replace(path)
     except OSError:
         # Never leave a half-written temp file behind for someone to find
-        # later and mistake for a real sidecar.
+        # later and mistake for a real sidecar. Covers a failed flush too:
+        # a write that could not be made durable must not report success.
         tmp_path.unlink(missing_ok=True)
         raise
+
+    # And the directory entry, so a crash cannot leave it pointing at the
+    # old file after the caller was told the sidecar was replaced.
+    # Best-effort and deliberately silent: the data itself is already on
+    # disk, opening a directory is not portable (Windows refuses it), and
+    # failing here would turn a completed write into a reported error.
+    if hasattr(os, "O_DIRECTORY"):
+        try:
+            dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
 
 
 def minimum_speaker_count(channels: dict) -> int:
@@ -790,6 +1036,7 @@ def clusters_from_sidecar_channel(meeting_id: str, channel: dict) -> dict:
                 speech_duration_seconds=cluster.get("speech_duration_seconds", 0.0),
                 segment_count=cluster.get("segment_count", 0),
                 contains_multiple_speakers=bool(cluster.get(MULTI_SPEAKER_KEY)),
+                review_state=cluster.get(REVIEW_STATE_KEY),
             ),
         )
     return out
@@ -1305,6 +1552,17 @@ def confirmed_participant_names(meeting_stem: str, profiles: list) -> list:
     already carry the `meeting_id` they were confirmed from. A person
     counts once even with multiple prototypes from this meeting (e.g.
     merged same-channel fragments, or confirmed on both channels).
+
+    Meeting-scoped and NOT run-scoped, deliberately -- do not "fix" this
+    into running prototype_run_matches the way the cluster-level readers
+    do. Attendance is a property of the meeting, not of a diarization run:
+    a prototype from a superseded run no longer says WHICH cluster this
+    person is, but it still says they were confirmed as present here, and
+    that stays true however often the audio is re-diarized. Run-filtering
+    it would empty the Participants section on every reprocess (the
+    `full-reprocess` restore reads exactly this), deleting correct
+    information to enforce a scope that answers a question nobody asked
+    here.
     """
     names = []
     for person in profiles:

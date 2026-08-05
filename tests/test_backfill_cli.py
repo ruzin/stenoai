@@ -218,3 +218,52 @@ class BackfillSpeakerEmbeddingsCliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackfillReportsLostMarkingsTests(BackfillSpeakerEmbeddingsCliTests):
+    """A re-diarization drops every human marking on the old clusters, and
+    that is correct: the new run numbers its clusters independently, so
+    carrying the markings over would attach a person's statement to whichever
+    voice happened to inherit an id. Losing them SILENTLY is the defect --
+    they are the one thing in that file no re-run can reproduce."""
+
+    def _seed_marked_sidecar(self, tmp, stem="mtg001", multi=False, generic=False):
+        from src.speaker_suggestions import (
+            REVIEW_STATE_GENERIC, set_cluster_multi_speaker, set_cluster_review_state,
+            write_speakers_sidecar,
+        )
+        output_dir = Path(tmp) / "output"
+        write_speakers_sidecar(output_dir, stem, {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_0": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0,
+                                  "segment_count": 5},
+                    "SPEAKER_1": {"embedding": [0.0, 1.0], "speech_duration_seconds": 20.0,
+                                  "segment_count": 4},
+                },
+            },
+        })
+        if multi:
+            set_cluster_multi_speaker(output_dir, stem, "mic", "SPEAKER_0", True)
+        if generic:
+            set_cluster_review_state(output_dir, stem, "mic", "SPEAKER_1", REVIEW_STATE_GENERIC)
+
+    def test_reports_review_markings_it_is_about_to_discard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_meeting(tmp)
+            self._seed_marked_sidecar(tmp, multi=True, generic=True)
+            data = _last_json(self._run(["--force"], tmp).output)
+            self.assertEqual(data["processed"], ["mtg001"])
+            self.assertEqual(
+                data["lost_multi_speaker_markings"], [{"stem": "mtg001", "clusters": 1}])
+            self.assertEqual(
+                data["lost_review_state_markings"], [{"stem": "mtg001", "clusters": 1}])
+
+    def test_says_nothing_when_there_was_nothing_to_lose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_meeting(tmp)
+            self._seed_marked_sidecar(tmp)
+            data = _last_json(self._run(["--force"], tmp).output)
+            self.assertEqual(data["lost_multi_speaker_markings"], [])
+            self.assertEqual(data["lost_review_state_markings"], [])

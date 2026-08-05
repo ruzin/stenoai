@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -8,7 +9,7 @@ from click.testing import CliRunner
 
 import simple_recorder
 from src.config import Config
-from src.speaker_suggestions import write_speakers_sidecar
+from src.speaker_suggestions import read_speakers_sidecar, write_speakers_sidecar
 
 
 def _last_json(output):
@@ -146,6 +147,289 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self.assertEqual(sarah_profile["prototypes"][0]["embedding_mean"], [0.0, 1.0])
             self.assertEqual(len(sarah_profile["hard_negatives"]), 1)
             self.assertEqual(sarah_profile["hard_negatives"][0]["embedding_mean"], [1.0, 0.0])
+
+    def test_confirm_stamps_prototypes_and_hard_negatives_with_the_sidecars_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run_id = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(result2.output)["person_id"]
+
+            max_profile = cfg.get_person_profile(max_id)
+            sarah_profile = cfg.get_person_profile(sarah_id)
+            # Positive prototype and mutual hard negative both carry it, on
+            # both sides -- every add_speaker_prototype call this command
+            # makes is expected to thread the same id.
+            self.assertEqual(max_profile["prototypes"][0]["diarization_run_id"], run_id)
+            self.assertEqual(max_profile["hard_negatives"][0]["diarization_run_id"], run_id)
+            self.assertEqual(sarah_profile["prototypes"][0]["diarization_run_id"], run_id)
+            self.assertEqual(sarah_profile["hard_negatives"][0]["diarization_run_id"], run_id)
+
+    def test_confirm_against_legacy_sidecar_produces_prototypes_without_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_legacy_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(result2.output)["person_id"]
+
+            max_profile = cfg.get_person_profile(max_id)
+            sarah_profile = cfg.get_person_profile(sarah_id)
+            self.assertNotIn("diarization_run_id", max_profile["prototypes"][0])
+            self.assertNotIn("diarization_run_id", max_profile["hard_negatives"][0])
+            self.assertNotIn("diarization_run_id", sarah_profile["prototypes"][0])
+            self.assertNotIn("diarization_run_id", sarah_profile["hard_negatives"][0])
+
+    def _rediarize(self, tmp, meeting_stem="mtg001"):
+        """Overwrite the sidecar with a run whose cluster ids are the same but
+        whose voices are not -- exactly what a re-diarization produces, since
+        the diarizer numbers from SPEAKER_00 every time with no memory of who
+        held that id before. Returns the new run id."""
+        output_dir = Path(tmp) / "output"
+        write_speakers_sidecar(output_dir, meeting_stem, {
+            "mic": {
+                "recording_type": "in_person",
+                "clusters": {
+                    "SPEAKER_00": {"embedding": [0.0, 1.0], "speech_duration_seconds": 28.0, "segment_count": 5},
+                    "SPEAKER_01": {"embedding": [1.0, 0.0], "speech_duration_seconds": 22.0, "segment_count": 4},
+                },
+            },
+        })
+        return read_speakers_sidecar(output_dir, meeting_stem)["diarization_run"]["run_id"]
+
+    def test_confirming_a_reused_cluster_id_from_a_newer_run_spares_the_older_runs_person(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+
+            run2 = self._rediarize(tmp)
+            self.assertNotEqual(run1, run2)
+
+            # Same id, genuinely different voice. Nothing here supersedes
+            # Max's confirmation -- it was made about a cluster that no longer
+            # exists, not about this one.
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Sarah"], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertTrue(data2["success"])
+            self.assertEqual(data2["reassigned_from"], [])
+
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual(len(max_profile["prototypes"]), 1)
+            self.assertEqual(max_profile["prototypes"][0]["diarization_run_id"], run1)
+            self.assertEqual(max_profile["prototypes"][0]["embedding_mean"], [1.0, 0.0])
+
+            sarah_profile = cfg.get_person_profile(data2["person_id"])
+            self.assertEqual(len(sarah_profile["prototypes"]), 1)
+            self.assertEqual(sarah_profile["prototypes"][0]["diarization_run_id"], run2)
+            self.assertEqual(sarah_profile["prototypes"][0]["embedding_mean"], [0.0, 1.0])
+
+    def test_confirming_a_reused_cluster_id_keeps_an_older_runs_negatives(self):
+        # The idempotency-rebuild removals, which the test above never
+        # reaches: it stops at a positive removal that matches nothing. Those
+        # two clear the negatives THIS confirm is about to rewrite, so
+        # unscoped they take a previous run's negatives with them -- evidence
+        # about a different voice that nothing in this confirm questioned.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            r1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(r1.output)["person_id"]
+            r2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(r2.output)["person_id"]
+
+            run2 = self._rediarize(tmp)
+            # Sarah is confirmed on the new run's SPEAKER_00 -- the id her own
+            # run-1 hard negative is recorded against.
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--person-id", sarah_id], tmp, cfg=cfg)
+
+            sarah_profile = cfg.get_person_profile(sarah_id)
+            self.assertEqual(
+                [n["diarization_run_id"] for n in sarah_profile["hard_negatives"]], [run1],
+                "her run-1 negative is about the voice that held SPEAKER_00 back then",
+            )
+            self.assertEqual(
+                sorted(p["diarization_run_id"] for p in sarah_profile["prototypes"]),
+                sorted([run1, run2]),
+            )
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual([p["diarization_run_id"] for p in max_profile["prototypes"]], [run1])
+            self.assertEqual([n["diarization_run_id"] for n in max_profile["hard_negatives"]], [run1])
+
+    def test_reassigning_this_runs_cluster_leaves_the_previous_runs_negatives_standing(self):
+        # The reassignment loop's two negative cleanups, reached only when a
+        # confirm actually supersedes somebody. Both are about the cluster
+        # being taken away, so neither may reach into a previous run's
+        # evidence about a reused id.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            r2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            sarah_id = _last_json(r2.output)["person_id"]
+            sarah_run1_negative = cfg.get_person_profile(sarah_id)["hard_negatives"][0]["prototype_id"]
+
+            self._rediarize(tmp)
+            r3, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Ida"], tmp, cfg=cfg)
+            ida_id = _last_json(r3.output)["person_id"]
+            # Hand-built rather than earned, because a run-1 confirmation
+            # would also leave Ida a run-1 prototype, and the cleanup under
+            # test only runs for someone who owns no cluster here any more.
+            ida_run1_negative = cfg.add_speaker_prototype(
+                ida_id, [0.5, 0.5], recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_01", speech_duration_seconds=20.0,
+                segment_count=4, created_from="user_confirmed", channel="mic",
+                negative=True, diarization_run_id=run1,
+            )["prototype_id"]
+
+            # Ida loses the cluster to Jon, so both cleanups fire.
+            r4, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Jon"], tmp, cfg=cfg)
+            self.assertEqual(_last_json(r4.output)["reassigned_from"], ["Ida"])
+
+            self.assertEqual(
+                [n["prototype_id"] for n in cfg.get_person_profile(ida_id)["hard_negatives"]],
+                [ida_run1_negative],
+                "her run-2 negative went with the cluster; the run-1 one is not this confirm's",
+            )
+            self.assertIn(
+                sarah_run1_negative,
+                [n["prototype_id"] for n in cfg.get_person_profile(sarah_id)["hard_negatives"]],
+                "a bystander's run-1 negative survives a reassignment in run 2",
+            )
+
+    def test_reconfirming_a_cluster_on_a_legacy_sidecar_still_supersedes(self):
+        # The correction path on a library that predates run stamping: with no
+        # run id anywhere, re-confirming is still the "Change" flow and must
+        # take the prototype off the person who no longer owns the cluster.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_legacy_sidecar(tmp)
+            cfg = Config(config_path=Path(tmp) / "config.json")
+
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            max_id = _last_json(result1.output)["person_id"]
+
+            self._seed_legacy_sidecar(tmp)  # rewritten, still no run block
+            result2, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Sarah"], tmp, cfg=cfg)
+            data2 = _last_json(result2.output)
+            self.assertTrue(data2["success"])
+            self.assertEqual(data2["reassigned_from"], ["Max"])
+
+            self.assertEqual(cfg.get_person_profile(max_id)["prototypes"], [])
+            sarah_profile = cfg.get_person_profile(data2["person_id"])
+            self.assertEqual(len(sarah_profile["prototypes"]), 1)
+            self.assertNotIn("diarization_run_id", sarah_profile["prototypes"][0])
+
+    def test_a_superseded_prototype_does_not_keep_someone_present_in_this_channel(self):
+        # The `still_present` read that guards the negative cleanup. When a
+        # person loses their only cluster of THIS run, the negatives they
+        # earned by being here go with it -- but a leftover prototype from a
+        # superseded run reads as "they still own a cluster here" and
+        # suppresses that cleanup, leaving evidence behind that nothing in
+        # this meeting justifies any more.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            max_id = cfg.create_person_profile("Max")["person_id"]
+            # His run-1 cluster, on the id he does NOT hold in run 2.
+            cfg.add_speaker_prototype(
+                max_id, [0.0, 1.0], recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_01", speech_duration_seconds=25.0,
+                segment_count=4, created_from="user_confirmed", channel="mic",
+                diarization_run_id=run1,
+            )
+
+            self._rediarize(tmp)
+            # Earned, not hand-built: confirming him and then Sarah is what
+            # mints his run-2 negative in the first place.
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--person-id", max_id], tmp, cfg=cfg)
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
+            self.assertEqual(len(cfg.get_person_profile(max_id)["hard_negatives"]), 1)
+
+            # He loses his one run-2 cluster to Ida, so he is no longer
+            # present in this channel in this run at all.
+            r, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Ida"], tmp, cfg=cfg)
+            self.assertEqual(_last_json(r.output)["reassigned_from"], ["Max"])
+
+            max_profile = cfg.get_person_profile(max_id)
+            self.assertEqual(
+                max_profile["hard_negatives"], [],
+                "his run-2 negatives rest on a presence he no longer has",
+            )
+            self.assertEqual(
+                [p["diarization_run_id"] for p in max_profile["prototypes"]], [run1],
+                "and his run-1 prototype is still not this confirm's to touch",
+            )
+
+    def test_a_superseded_prototype_does_not_seed_negatives_from_this_runs_voices(self):
+        # The mutual-negative source selection. It picks a person by
+        # meeting+cluster id and then mints a negative from the CURRENT run's
+        # embedding for that id -- so an unscoped match records "Sarah is not
+        # this voice" about a voice Max was never confirmed next to, and
+        # hands Max the same about Sarah. Hard negatives are permanent
+        # suppression, so a wrong one is not noise: it refuses a real match
+        # for either of them in meetings that have nothing to do with this.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._seed_sidecar(tmp)
+            output_dir = Path(tmp) / "output"
+            run1 = read_speakers_sidecar(output_dir, "mtg001")["diarization_run"]["run_id"]
+            cfg = Config(config_path=Path(tmp) / "config.json")
+            max_id = cfg.create_person_profile("Max")["person_id"]
+            cfg.add_speaker_prototype(
+                max_id, [0.0, 1.0], recording_type="in_person", meeting_id="mtg001",
+                diarization_speaker_id="SPEAKER_01", speech_duration_seconds=25.0,
+                segment_count=4, created_from="user_confirmed", channel="mic",
+                diarization_run_id=run1,
+            )
+
+            self._rediarize(tmp)
+            result, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Sarah"], tmp, cfg=cfg)
+            data = _last_json(result.output)
+            self.assertTrue(data["success"])
+            self.assertEqual(data["hard_negatives_added_against"], [])
+            self.assertEqual(cfg.get_person_profile(data["person_id"])["hard_negatives"], [])
+            self.assertEqual(cfg.get_person_profile(max_id)["hard_negatives"], [])
+
+    def _seed_legacy_sidecar(self, tmp, meeting_stem="mtg001"):
+        # A sidecar written before diarization_run existed -- no top-level
+        # "diarization_run" key at all, not one holding None. Written by
+        # hand rather than through write_speakers_sidecar, which always
+        # stamps a run now.
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "meeting_id": meeting_stem,
+            "created_at": time.time(),
+            "channels": {
+                "mic": {
+                    "recording_type": "in_person",
+                    "clusters": {
+                        "SPEAKER_00": {"embedding": [1.0, 0.0], "speech_duration_seconds": 30.0, "segment_count": 5},
+                        "SPEAKER_01": {"embedding": [0.0, 1.0], "speech_duration_seconds": 25.0, "segment_count": 4},
+                    },
+                },
+            },
+        }
+        (output_dir / f"{meeting_stem}_speakers.json").write_text(json.dumps(payload))
+        return output_dir
 
     def _seed_three_cluster_sidecar(self, tmp, meeting_stem="mtg001"):
         """One channel, three clusters -- the shape that appears as soon as the
@@ -285,8 +569,13 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
     def test_legacy_prototype_without_channel_still_matches_via_recording_type(self):
         # A prototype confirmed before the channel field existed must still
         # count as a same-channel confirmation via the recording_type proxy.
+        # On a legacy sidecar, because that is where such a prototype
+        # actually lives: a build old enough to write no `channel` wrote no
+        # run block either, and pairing it with a freshly stamped sidecar
+        # would describe a meeting re-diarized since that confirm -- which
+        # the run scope correctly refuses, testing something else entirely.
         with tempfile.TemporaryDirectory() as tmp:
-            self._seed_sidecar(tmp)
+            self._seed_legacy_sidecar(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
             alice = cfg.create_person_profile("Alice")
             cfg.add_speaker_prototype(

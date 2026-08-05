@@ -209,6 +209,7 @@ const stenoai = {
     getSampleAudio: (meetingStem, channel, diarizationSpeakerId, segmentIndex) =>
       invoke('get-speaker-sample-audio', meetingStem, channel, diarizationSpeakerId, segmentIndex),
     markCluster: (params) => invoke('mark-speaker-cluster', params),
+    setClusterReviewState: (params) => invoke('set-cluster-review-state', params),
     namingStatus: (meetingStem) => invoke('speaker-naming-status', meetingStem),
   },
 
