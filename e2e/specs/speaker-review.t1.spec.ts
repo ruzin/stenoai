@@ -28,7 +28,7 @@ test('Approve confirms the suggested person for a "confirmed"-tier row', async (
   await openDetail(page);
 
   const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
-  await expect(row).toContainText('Likely Julian');
+  await expect(row).toContainText('Likely Person Alpha');
   // Identification anchor (channel + first-heard timestamp + duration) --
   // without this, an "Unidentified speaker" row gives a human nothing to
   // go on to figure out who a cluster actually is.
@@ -40,8 +40,8 @@ test('Approve confirms the suggested person for a "confirmed"-tier row', async (
   // (real persisted evidence) always wins over the distance-based
   // "Likely X" text, so there's no separate, potentially-contradictory
   // feedback line to keep in sync with it.
-  await expect(row).toContainText('✓ Confirmed as Julian');
-  await expect(row).not.toContainText('Likely Julian');
+  await expect(row).toContainText('✓ Confirmed as Person Alpha');
+  await expect(row).not.toContainText('Likely Person Alpha');
   // Re-approving an already-confirmed cluster is a no-op that would change
   // nothing visible -- the button is hidden rather than inviting a
   // pointless click.
@@ -56,15 +56,15 @@ test('Change picks a different existing person for a "possible"-tier row', async
   await openDetail(page);
 
   const row = page.getByTestId('speaker-row-mic:SPEAKER_1');
-  await expect(row).toContainText('Might be Christian Weyer');
+  await expect(row).toContainText('Might be Person Beta');
   await row.getByRole('button', { name: 'Change' }).click();
 
   // The popover portals outside the row's DOM subtree, so target it at the
-  // page level -- there's only one "Julian" entry visible while the popover
+  // page level -- there's only one "Person Alpha" entry visible while the popover
   // is open.
-  await page.getByRole('button', { name: 'Julian', exact: true }).click();
+  await page.getByRole('button', { name: 'Person Alpha', exact: true }).click();
 
-  await expect(row).toContainText('✓ Confirmed as Julian');
+  await expect(row).toContainText('✓ Confirmed as Person Alpha');
 });
 
 test('New person creates and confirms a brand-new profile', async ({ launchApp }) => {
@@ -78,10 +78,10 @@ test('New person creates and confirms a brand-new profile', async ({ launchApp }
   await expect(row).toContainText('Unidentified speaker');
   await row.getByRole('button', { name: 'New person' }).click();
 
-  await page.getByTestId('speaker-new-person-input').fill('Max');
+  await page.getByTestId('speaker-new-person-input').fill('Person Gamma');
   await page.getByTestId('speaker-new-person-submit').click();
 
-  await expect(row).toContainText('✓ Confirmed as Max');
+  await expect(row).toContainText('✓ Confirmed as Person Gamma');
 });
 
 test('New person blocks creating a duplicate of an existing person', async ({ launchApp }) => {
@@ -94,11 +94,11 @@ test('New person blocks creating a duplicate of an existing person', async ({ la
   const row = page.getByTestId('speaker-row-mic:SPEAKER_2');
   await row.getByRole('button', { name: 'New person' }).click();
 
-  // "Julian" already exists (seeded). Typing it verbatim -- or any
+  // "Person Alpha" already exists (seeded). Typing it verbatim -- or any
   // case/whitespace variant -- must surface the collision and block
-  // Create, rather than silently splitting Julian's evidence across two
+  // Create, rather than silently splitting Person Alpha's evidence across two
   // person_ids.
-  await page.getByTestId('speaker-new-person-input').fill('  julian ');
+  await page.getByTestId('speaker-new-person-input').fill('  person alpha ');
   await expect(page.getByTestId('speaker-new-person-duplicate')).toBeVisible();
   await expect(page.getByTestId('speaker-new-person-submit')).toBeDisabled();
 
@@ -119,13 +119,13 @@ test('a person profile can be deleted from the Change popover, unwinding any row
 
   const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
   await row.getByRole('button', { name: 'Approve' }).click();
-  await expect(row).toContainText('✓ Confirmed as Julian');
+  await expect(row).toContainText('✓ Confirmed as Person Alpha');
 
   await row.getByRole('button', { name: 'Change' }).click();
-  await page.getByTestId('speaker-delete-person-p-julian').click();
+  await page.getByTestId('speaker-delete-person-p-alpha').click();
 
   const confirmDialog = page.locator('[data-confirm-dialog]');
-  await expect(confirmDialog).toContainText('Delete Julian?');
+  await expect(confirmDialog).toContainText('Delete Person Alpha?');
   await confirmDialog.getByRole('button', { name: 'Delete' }).click();
   await expect(confirmDialog).toHaveCount(0);
 
@@ -133,11 +133,11 @@ test('a person profile can be deleted from the Change popover, unwinding any row
   // confirmed as them reverts to unidentified, not left pointing at a
   // person that no longer exists.
   await expect(row).toContainText('Unidentified speaker');
-  await expect(row).not.toContainText('Julian');
+  await expect(row).not.toContainText('Person Alpha');
 
   // And they're gone from the Change list too.
   await row.getByRole('button', { name: 'Change' }).click();
-  await expect(page.getByRole('button', { name: 'Julian', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Person Alpha', exact: true })).toHaveCount(0);
 });
 
 // Replaces 'Keep generic dismisses the row locally, no confirm call needed',
@@ -212,7 +212,7 @@ test('Keep generic is not offered on a row that is already decided', async ({ la
   // contradictory things about the same cluster.
   const confirmed = page.getByTestId('speaker-row-mic:SPEAKER_0');
   await confirmed.getByRole('button', { name: 'Approve' }).click();
-  await expect(confirmed).toContainText('✓ Confirmed as Julian');
+  await expect(confirmed).toContainText('✓ Confirmed as Person Alpha');
   await expect(confirmed.getByRole('button', { name: 'Keep generic label' })).toHaveCount(0);
 
   // Marked as several people: same reasoning from the other direction.
@@ -272,7 +272,7 @@ test('confirmation persists after navigating away and back, unlike the transient
 
   const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
   await row.getByRole('button', { name: 'Approve' }).click();
-  await expect(row).toContainText('✓ Confirmed as Julian');
+  await expect(row).toContainText('✓ Confirmed as Person Alpha');
 
   // Navigate away (unmounts SpeakerReviewPanel, destroying all of its local
   // state -- there is no more "feedback" Map to fall back on) and back --
@@ -286,7 +286,7 @@ test('confirmation persists after navigating away and back, unlike the transient
   await openDetail(page);
 
   const rowAfter = page.getByTestId('speaker-row-mic:SPEAKER_0');
-  await expect(rowAfter).toContainText('✓ Confirmed as Julian');
+  await expect(rowAfter).toContainText('✓ Confirmed as Person Alpha');
   await expect(rowAfter.getByRole('button', { name: 'Approve' })).toHaveCount(0);
 });
 
@@ -322,7 +322,7 @@ test('confirming one row disables every OTHER row\'s actions too, not just the o
   await expect(rowB.getByRole('button', { name: 'Keep generic label' })).toBeDisabled();
 
   // And once rowA's confirm resolves, rowB's actions become available again.
-  await expect(rowA).toContainText('✓ Confirmed as Julian');
+  await expect(rowA).toContainText('✓ Confirmed as Person Alpha');
   await expect(rowB.getByRole('button', { name: 'Change' })).toBeEnabled();
 });
 
@@ -358,7 +358,7 @@ test('marking a row as more than one person removes every naming action and can 
   await openDetail(page);
 
   const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
-  await expect(row).toContainText('Likely Julian');
+  await expect(row).toContainText('Likely Person Alpha');
 
   await row.getByTestId('speaker-mark-multi-mic:SPEAKER_0').click();
 
@@ -390,7 +390,7 @@ test('marking a row as more than one person removes every naming action and can 
   );
 
   await clearMark.click();
-  await expect(row).toContainText('Likely Julian');
+  await expect(row).toContainText('Likely Person Alpha');
   await expect(row.getByRole('button', { name: 'Approve' })).toHaveCount(1);
 });
 
@@ -506,13 +506,13 @@ test('the Change picker offers people already assigned in this meeting first', a
   // person" -- naming the same voice twice makes it a hard negative against
   // itself, which suppresses that speaker's future suggestions for good.
   await page.getByTestId('speaker-approve-mic:SPEAKER_0').click();
-  await expect(page.getByTestId('speaker-row-mic:SPEAKER_0')).toContainText('Confirmed as Julian');
+  await expect(page.getByTestId('speaker-row-mic:SPEAKER_0')).toContainText('Confirmed as Person Alpha');
 
   await page.getByTestId('speaker-change-mic:SPEAKER_1').click();
   const names = await page
     .locator('[data-testid^="speaker-pick-person-"]')
     .evaluateAll((els) => els.map((el) => el.textContent?.trim() ?? ''));
 
-  expect(names[0]).toContain('Julian');
+  expect(names[0]).toContain('Person Alpha');
   expect(names[0]).toContain('here');
 });

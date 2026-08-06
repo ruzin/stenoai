@@ -189,7 +189,7 @@ class MarkedClusterIsWithheldTests(unittest.TestCase):
         # The embedding is IDENTICAL to the profile's, so without the
         # marking this is an unambiguous "confirmed". Anything short of
         # status "none" here means the guard is not doing its job.
-        profiles = [_profile("p1", "Julian", [1.0, 0.0])]
+        profiles = [_profile("p1", "Person Alpha", [1.0, 0.0])]
         unmarked = suggest_speaker([1.0, 0.0], _context(), profiles)
         self.assertEqual(unmarked.status, "confirmed")
 
@@ -210,7 +210,7 @@ class MarkedClusterIsWithheldTests(unittest.TestCase):
         # must not be able to do that -- otherwise marking a contaminated
         # cluster would COST the real cluster its correct suggestion,
         # punishing the user for telling the truth.
-        profiles = [_profile("p1", "Julian", [1.0, 0.0])]
+        profiles = [_profile("p1", "Person Alpha", [1.0, 0.0])]
         results = suggest_speakers_for_meeting({
             "system": {
                 "SPEAKER_0": (
@@ -1084,7 +1084,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            pid = cfg.create_person_profile("Julian")["person_id"]
+            pid = cfg.create_person_profile("Person Alpha")["person_id"]
             run1 = self._seeded_run_id(tmp)
             cfg.add_speaker_prototype(
                 pid, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
@@ -1104,7 +1104,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             self.assertTrue(data["success"])
             self.assertEqual(
                 data["cleared_confirmation_from"], [],
-                "the marking describes this run's cluster, not the one Julian was confirmed on",
+                "the marking describes this run's cluster, not the one Person Alpha was confirmed on",
             )
             profile = cfg.get_person_profile(pid)
             self.assertEqual(
@@ -1120,14 +1120,14 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            julian = cfg.create_person_profile("Julian")["person_id"]
+            person_alpha = cfg.create_person_profile("Person Alpha")["person_id"]
             max_id = cfg.create_person_profile("Max")["person_id"]
             run1 = self._seeded_run_id(tmp)
             run2 = self._rediarize(tmp)
 
-            # Julian is the one confirmed on the CURRENT run's SPEAKER_0...
+            # Person Alpha is the one confirmed on the CURRENT run's SPEAKER_0...
             cfg.add_speaker_prototype(
-                julian, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
+                person_alpha, [0.0, 1.0], recording_type="remote", meeting_id="mtg001",
                 diarization_speaker_id="SPEAKER_0", speech_duration_seconds=55.0,
                 segment_count=9, created_from="user_confirmed", channel="system",
                 diarization_run_id=run2,
@@ -1140,9 +1140,9 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                     segment_count=9, created_from="user_confirmed", channel="system",
                     negative=True, diarization_run_id=run_id,
                 )
-            # Julian carries a stale one of his own from before the re-run.
+            # Person Alpha carries a stale one of his own from before the re-run.
             cfg.add_speaker_prototype(
-                julian, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
+                person_alpha, [1.0, 0.0], recording_type="remote", meeting_id="mtg001",
                 diarization_speaker_id="SPEAKER_0", speech_duration_seconds=60.0,
                 segment_count=10, created_from="user_confirmed", channel="system",
                 negative=True, diarization_run_id=run1,
@@ -1153,10 +1153,10 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 ["mtg001", "system", "SPEAKER_0"], tmp, cfg=cfg,
             )
             data = _last_json(result.output)
-            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
-            self.assertEqual(cfg.get_person_profile(julian)["prototypes"], [])
+            self.assertEqual(data["cleared_confirmation_from"], ["Person Alpha"])
+            self.assertEqual(cfg.get_person_profile(person_alpha)["prototypes"], [])
             self.assertEqual(
-                [n["diarization_run_id"] for n in cfg.get_person_profile(julian)["hard_negatives"]],
+                [n["diarization_run_id"] for n in cfg.get_person_profile(person_alpha)["hard_negatives"]],
                 [run1],
             )
             self.assertEqual(
@@ -1178,7 +1178,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
     def test_marking_one_cluster_keeps_the_negatives_earned_by_the_others(self):
         # From the bot review, and it destroys data. A person's hard
         # negatives are created when OTHER clusters are confirmed as
-        # somebody else -- "this voice is not Julian" is evidence about
+        # somebody else -- "this voice is not Person Alpha" is evidence about
         # THAT cluster. Marking cluster A as mixed cleared every negative
         # the person had in this meeting and channel, including the ones
         # earned by clusters B and C, which are untouched by the marking
@@ -1187,7 +1187,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             pid = person["person_id"]
             # Confirmed on SPEAKER_0 (the cluster about to be marked)...
             run_id = self._seeded_run_id(tmp)
@@ -1247,9 +1247,9 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
     def test_marking_a_confirmed_cluster_takes_the_name_out_of_the_transcript(self):
         # The last of the three P1s from the bot review, and the one a user
         # actually reads. confirm-speaker --relabel-transcript rewrites the
-        # cluster's lines to "Julian". Marking it as more than one person
+        # cluster's lines to "Person Alpha". Marking it as more than one person
         # afterwards withdraws the profile, the prototype and the
-        # participants chip -- but left "Julian" standing in the saved
+        # participants chip -- but left "Person Alpha" standing in the saved
         # transcript, which is what feeds the summary and every export. The
         # app then knows the cluster holds several people while the
         # artefact keeps naming one of them.
@@ -1266,11 +1266,11 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             with mock.patch("src.config.get_config", return_value=cfg), \
                  mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}):
                 confirmed = CliRunner().invoke(simple_recorder.confirm_speaker, [
-                    "mtg001", "mic", "SPEAKER_00", "--new-person", "Julian",
+                    "mtg001", "mic", "SPEAKER_00", "--new-person", "Person Alpha",
                     "--relabel-transcript",
                 ])
             self.assertTrue(_last_json(confirmed.output)["success"])
-            self.assertIn("[00:05] [Julian] hello there", transcript.read_text())
+            self.assertIn("[00:05] [Person Alpha] hello there", transcript.read_text())
 
             result = self._run(
                 simple_recorder.mark_speaker_cluster,
@@ -1278,10 +1278,10 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             )
             data = _last_json(result.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(data["cleared_confirmation_from"], ["Person Alpha"])
 
             text = transcript.read_text()
-            self.assertNotIn("Julian", text, "the withdrawn name must leave the transcript too")
+            self.assertNotIn("Person Alpha", text, "the withdrawn name must leave the transcript too")
             self.assertIn(
                 "[00:05] [Speaker 2] hello there", text,
                 "and the label the line carried before the confirmation comes back",
@@ -1295,11 +1295,11 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         # fallback states exactly what the user just decided.
         with tempfile.TemporaryDirectory() as tmp:
             transcript = self._seed_with_transcript(
-                tmp, "[00:05] [Julian] hello there",
+                tmp, "[00:05] [Person Alpha] hello there",
                 [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_00"}],
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0], recording_type="in_person",
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
@@ -1312,7 +1312,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 ["mtg001", "mic", "SPEAKER_00"], tmp, cfg=cfg,
             )
             data = _last_json(result.output)
-            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(data["cleared_confirmation_from"], ["Person Alpha"])
             self.assertEqual(data["transcript_lines_restored"], 1)
             self.assertIn("[00:05] [Multiple speakers] hello there", transcript.read_text())
 
@@ -1325,12 +1325,12 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         # cleanup that never happened.
         with tempfile.TemporaryDirectory() as tmp:
             transcript = self._seed_with_transcript(
-                tmp, "[00:05] [Julian] hello there\n\n[00:20] [You] hi back",
+                tmp, "[00:05] [Person Alpha] hello there\n\n[00:20] [You] hi back",
                 # One entry, two diarised lines: cannot be paired.
                 [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_00"}],
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0], recording_type="in_person",
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_00",
@@ -1343,12 +1343,12 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
                 ["mtg001", "mic", "SPEAKER_00"], tmp, cfg=cfg,
             )
             data = _last_json(result.output)
-            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(data["cleared_confirmation_from"], ["Person Alpha"])
             self.assertEqual(
                 data["transcript_lines_restored"], 0,
                 "a refusal must be reported as zero, not as a silent success",
             )
-            self.assertIn("[00:05] [Julian] hello there", transcript.read_text())
+            self.assertIn("[00:05] [Person Alpha] hello there", transcript.read_text())
 
     def test_unknown_cluster_fails_loudly_rather_than_marking_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1363,7 +1363,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             for meeting in ("other1", "other2"):
                 cfg.add_speaker_prototype(
                     person["person_id"], [1.0, 0.0], recording_type="remote",
@@ -1399,7 +1399,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
 
             result = self._run(
                 simple_recorder.confirm_speaker,
-                ["mtg001", "system", "SPEAKER_0", "--new-person", "Julian"], tmp, cfg=cfg,
+                ["mtg001", "system", "SPEAKER_0", "--new-person", "Person Alpha"], tmp, cfg=cfg,
             )
             self.assertEqual(result.exit_code, 1)
             self.assertFalse(_last_json(result.output)["success"])
@@ -1421,11 +1421,11 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
 
             confirmed = self._run(
                 simple_recorder.confirm_speaker,
-                ["mtg001", "system", "SPEAKER_0", "--new-person", "Julian"], tmp, cfg=cfg,
+                ["mtg001", "system", "SPEAKER_0", "--new-person", "Person Alpha"], tmp, cfg=cfg,
             )
             self.assertTrue(_last_json(confirmed.output)["success"])
-            julian = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Julian")
-            self.assertEqual(len(julian["prototypes"]), 1)
+            person_alpha = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Person Alpha")
+            self.assertEqual(len(person_alpha["prototypes"]), 1)
 
             marked = self._run(
                 simple_recorder.mark_speaker_cluster,
@@ -1433,11 +1433,11 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             )
             data = _last_json(marked.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["cleared_confirmation_from"], ["Julian"])
+            self.assertEqual(data["cleared_confirmation_from"], ["Person Alpha"])
 
-            julian = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Julian")
+            person_alpha = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Person Alpha")
             self.assertEqual(
-                julian["prototypes"], [],
+                person_alpha["prototypes"], [],
                 "a blended two-voice embedding must not stay enrolled as a person",
             )
 
@@ -1462,16 +1462,16 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
 
             self._run(
                 simple_recorder.confirm_speaker,
-                ["mtg001", "system", "SPEAKER_0", "--new-person", "Julian"], tmp, cfg=cfg,
+                ["mtg001", "system", "SPEAKER_0", "--new-person", "Person Alpha"], tmp, cfg=cfg,
             )
-            julian = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Julian")
-            self.assertEqual(len(julian["prototypes"]), 1)
+            person_alpha = next(p for p in cfg.get_person_profiles() if p["display_name"] == "Person Alpha")
+            self.assertEqual(len(person_alpha["prototypes"]), 1)
 
             set_cluster_multi_speaker(output_dir, "mtg001", "system", "SPEAKER_0", True)
 
             result = self._run(
                 simple_recorder.confirm_speaker,
-                ["mtg001", "system", "SPEAKER_1", "--new-person", "Max"], tmp, cfg=cfg,
+                ["mtg001", "system", "SPEAKER_1", "--new-person", "Person Gamma"], tmp, cfg=cfg,
             )
             data = _last_json(result.output)
             self.assertTrue(data["success"])
@@ -1492,7 +1492,7 @@ class MarkSpeakerClusterCliTests(unittest.TestCase):
             cfg = Config(config_path=Path(tmp) / "config.json")
             result = self._run(
                 simple_recorder.confirm_speaker,
-                ["mtg001", "system", "SPEAKER_1", "--new-person", "Julian"], tmp, cfg=cfg,
+                ["mtg001", "system", "SPEAKER_1", "--new-person", "Person Alpha"], tmp, cfg=cfg,
             )
             self.assertTrue(_last_json(result.output)["success"])
 
@@ -1540,7 +1540,7 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0], recording_type="remote",
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
@@ -1564,7 +1564,7 @@ class SpeakerNamingStatusCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0], recording_type="remote",
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
@@ -1841,7 +1841,7 @@ class SetClusterReviewStateCliTests(unittest.TestCase):
                 set_cluster_review_state(output_dir, "mtg001", "system", sid, REVIEW_STATE_GENERIC)
 
             result = self._run(simple_recorder.confirm_speaker,
-                               ["mtg001", "system", "SPEAKER_2", "--new-person", "Julian"],
+                               ["mtg001", "system", "SPEAKER_2", "--new-person", "Person Alpha"],
                                tmp, cfg=cfg)
             self.assertTrue(_last_json(result.output)["success"])
             for sid in ("SPEAKER_0", "SPEAKER_2"):

@@ -313,8 +313,8 @@ function install({ ipcMain }) {
   const speakerState = {
     personProfiles: seedSpeakers
       ? [
-          { person_id: 'p-julian', display_name: 'Julian', prototype_counts: { remote: 2 }, hard_negative_counts: {}, updated_at: 0 },
-          { person_id: 'p-christian', display_name: 'Christian Weyer', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
+          { person_id: 'p-alpha', display_name: 'Person Alpha', prototype_counts: { remote: 2 }, hard_negative_counts: {}, updated_at: 0 },
+          { person_id: 'p-beta', display_name: 'Person Beta', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
         ]
       : [],
     // channels -> { diarization_speaker_id: SpeakerSuggestion }
@@ -322,9 +322,9 @@ function install({ ipcMain }) {
       ? {
           mic: {
             SPEAKER_0: {
-              status: 'confirmed', suggested_person_id: 'p-julian', suggested_name: 'Julian',
+              status: 'confirmed', suggested_person_id: 'p-alpha', suggested_name: 'Person Alpha',
               merged_from: [],
-              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.05, hard_negative_conflict: false, negative_distance: null }],
+              candidates: [{ person_id: 'p-alpha', display_name: 'Person Alpha', distance: 0.05, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 245, segment_count: 60, first_timestamp: '02:10',
               sample_text: 'I think we should ship this on Friday',
@@ -350,9 +350,9 @@ function install({ ipcMain }) {
             // (the real suggest_speaker always attaches the best candidate,
             // regardless of confidence tier) -- only "none" has them null.
             SPEAKER_1: {
-              status: 'possible', suggested_person_id: 'p-christian', suggested_name: 'Christian Weyer',
+              status: 'possible', suggested_person_id: 'p-beta', suggested_name: 'Person Beta',
               merged_from: [],
-              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.28, hard_negative_conflict: false, negative_distance: null }],
+              candidates: [{ person_id: 'p-beta', display_name: 'Person Beta', distance: 0.28, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 80, segment_count: 20, first_timestamp: '05:45',
               sample_text: 'let me check the numbers again',
@@ -367,7 +367,7 @@ function install({ ipcMain }) {
             SPEAKER_2: {
               status: 'none', suggested_person_id: null, suggested_name: null,
               merged_from: [],
-              candidates: [{ person_id: 'p-julian', display_name: 'Julian', distance: 0.55, hard_negative_conflict: false, negative_distance: null }],
+              candidates: [{ person_id: 'p-alpha', display_name: 'Person Alpha', distance: 0.55, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 30, segment_count: 8, first_timestamp: '00:42',
               sample_text: null,
@@ -389,9 +389,9 @@ function install({ ipcMain }) {
             // Real-library shape (short scattered turns) -- hidden by
             // default behind the panel's "Show N filtered rows" toggle.
             SPEAKER_4: {
-              status: 'possible', suggested_person_id: 'p-christian', suggested_name: 'Christian Weyer',
+              status: 'possible', suggested_person_id: 'p-beta', suggested_name: 'Person Beta',
               merged_from: [],
-              candidates: [{ person_id: 'p-christian', display_name: 'Christian Weyer', distance: 0.35, hard_negative_conflict: false, negative_distance: null }],
+              candidates: [{ person_id: 'p-beta', display_name: 'Person Beta', distance: 0.35, hard_negative_conflict: false, negative_distance: null }],
               reasons: [],
               speech_duration_seconds: 12, segment_count: 20, first_timestamp: '08:03',
               sample_text: null,

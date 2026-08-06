@@ -128,7 +128,7 @@ class FullReprocessCliTests(unittest.TestCase):
                 d.mkdir(parents=True, exist_ok=True)
             (output_dir / "mtg001_summary.json").write_text(json.dumps({
                 "session_info": {"name": "Weekly Sync"},
-                "user_notes": "Remember to follow up with Max.",
+                "user_notes": "Remember to follow up with Person Gamma.",
                 "participants": [],
             }), encoding="utf-8")
             (recordings_dir / "mtg001.wav").write_bytes(b"fake-audio")
@@ -157,7 +157,7 @@ class FullReprocessCliTests(unittest.TestCase):
             self.assertEqual(Path(audio_file), recordings_dir / "mtg001.wav")
             self.assertEqual(name, "Weekly Sync")
             self.assertIsNone(live_transcript)
-            self.assertEqual(seen_notes_text["text"], "Remember to follow up with Max.")
+            self.assertEqual(seen_notes_text["text"], "Remember to follow up with Person Gamma.")
             # The temp notes file is cleaned up after the call.
             self.assertFalse(Path(seen_notes_text["path"]).exists())
 
@@ -223,7 +223,7 @@ class FullReprocessCliTests(unittest.TestCase):
             (recordings_dir / "mtg001.wav").write_bytes(b"fake-audio")
 
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Max")
+            person = cfg.create_person_profile("Person Gamma")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0],
                 recording_type="in_person", meeting_id="mtg001",
@@ -237,8 +237,8 @@ class FullReprocessCliTests(unittest.TestCase):
                 result = self._run(["mtg001"], tmp, cfg)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["participants_restored"], ["Max"])
-            self.assertIn("## Participants\n\nMax", (output_dir / "mtg001_summary.md").read_text())
+            self.assertEqual(data["participants_restored"], ["Person Gamma"])
+            self.assertIn("## Participants\n\nPerson Gamma", (output_dir / "mtg001_summary.md").read_text())
 
     def test_restores_folder_membership(self):
         with tempfile.TemporaryDirectory() as tmp:

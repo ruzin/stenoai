@@ -49,17 +49,17 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_sidecar(tmp)
             result, _ = self._run(
-                ["mtg001", "mic", "SPEAKER_00", "--person-id", "x", "--new-person", "Max"], tmp,
+                ["mtg001", "mic", "SPEAKER_00", "--person-id", "x", "--new-person", "Person Gamma"], tmp,
             )
             self.assertNotEqual(result.exit_code, 0)
 
     def test_new_person_creates_profile_and_prototype(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_sidecar(tmp)
-            result, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["display_name"], "Max")
+            self.assertEqual(data["display_name"], "Person Gamma")
             self.assertEqual(data["hard_negatives_added_against"], [])
 
             profile = cfg.get_person_profile(data["person_id"])
@@ -74,7 +74,7 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_sidecar(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            existing = cfg.create_person_profile("Max")
+            existing = cfg.create_person_profile("Person Gamma")
             result, cfg = self._run(
                 ["mtg001", "mic", "SPEAKER_00", "--person-id", existing["person_id"]], tmp, cfg=cfg,
             )
@@ -88,9 +88,9 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_sidecar(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            cfg.create_person_profile("Max")
+            cfg.create_person_profile("Person Gamma")
             result, cfg = self._run(
-                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg,
+                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp, cfg=cfg,
             )
             self.assertNotEqual(result.exit_code, 0)
             data = _last_json(result.output)
@@ -111,13 +111,13 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
     def test_missing_sidecar_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "output").mkdir(parents=True, exist_ok=True)
-            result, _ = self._run(["mtg_nonexistent", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg_nonexistent", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             self.assertNotEqual(result.exit_code, 0)
 
     def test_unknown_cluster_id_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_sidecar(tmp)
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_99", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_99", "--new-person", "Person Gamma"], tmp)
             self.assertNotEqual(result.exit_code, 0)
 
     def test_second_confirmation_in_same_meeting_creates_mutual_hard_negatives(self):
@@ -125,18 +125,18 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
             self._seed_sidecar(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
 
-            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp, cfg=cfg)
             max_id = _last_json(result1.output)["person_id"]
 
             result2, cfg = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Sarah"], tmp, cfg=cfg)
             data2 = _last_json(result2.output)
             sarah_id = data2["person_id"]
-            self.assertEqual(data2["hard_negatives_added_against"], ["Max"])
+            self.assertEqual(data2["hard_negatives_added_against"], ["Person Gamma"])
 
             max_profile = cfg.get_person_profile(max_id)
             sarah_profile = cfg.get_person_profile(sarah_id)
 
-            # Max has one positive prototype (his own cluster) and one
+            # Person Gamma has one positive prototype (his own cluster) and one
             # hard-negative (Sarah's cluster) -- and vice versa.
             self.assertEqual(len(max_profile["prototypes"]), 1)
             self.assertEqual(max_profile["prototypes"][0]["embedding_mean"], [1.0, 0.0])
@@ -525,7 +525,7 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
                 },
             })
             cfg = Config(config_path=Path(tmp) / "config.json")
-            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
+            result1, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp, cfg=cfg)
             result2, cfg = self._run(["mtg001", "system", "SPEAKER_00", "--new-person", "RemoteGuest"], tmp, cfg=cfg)
             data2 = _last_json(result2.output)
             # Same meeting, but a DIFFERENT channel -- must not be treated
@@ -675,13 +675,13 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             result, _ = self._run(
-                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Max", "--relabel-transcript"], tmp,
+                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma", "--relabel-transcript"], tmp,
             )
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             self.assertEqual(data["relabeled_lines"], 1)
             text = transcript_path.read_text()
-            self.assertIn("[00:05] [Max] hello there", text)
+            self.assertIn("[00:05] [Person Gamma] hello there", text)
             self.assertIn("[00:20] [You] hi back", text)  # untouched
 
     def test_relabel_transcript_uses_exact_matching_when_sidecar_has_manifest(self):
@@ -717,7 +717,7 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             result, _ = self._run(
-                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Max", "--relabel-transcript"], tmp,
+                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma", "--relabel-transcript"], tmp,
             )
             data = _last_json(result.output)
             self.assertTrue(data["success"])
@@ -752,12 +752,12 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             result, _ = self._run(
-                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Max", "--relabel-transcript"], tmp,
+                ["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma", "--relabel-transcript"], tmp,
             )
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             self.assertEqual(data["relabeled_lines"], 1)
-            self.assertIn("[00:05] [Max] hello there", transcript_path.read_text())
+            self.assertIn("[00:05] [Person Gamma] hello there", transcript_path.read_text())
 
     def test_without_relabel_flag_transcript_is_untouched(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -781,7 +781,7 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
                 "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Speaker 2] hello there"
             )
             transcript_path.write_text(original, encoding="utf-8")
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             self.assertEqual(data["relabeled_lines"], 0)
@@ -805,7 +805,7 @@ class ConfirmSpeakerCliTests(unittest.TestCase):
                     },
                 },
             })
-            result, cfg = self._run(["mtg001", "system", "SPEAKER_2", "--new-person", "Julian"], tmp)
+            result, cfg = self._run(["mtg001", "system", "SPEAKER_2", "--new-person", "Person Alpha"], tmp)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             # SPEAKER_2 has less duration than SPEAKER_0 -> SPEAKER_0 is
@@ -853,13 +853,13 @@ class ConfirmSpeakerUpdatesParticipantsTests(unittest.TestCase):
             summary_path = output_dir / "mtg001_summary.json"
             summary_path.write_text(json.dumps({"session_info": {}, "participants": []}), encoding="utf-8")
 
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["participants_updated"], ["Max"])
+            self.assertEqual(data["participants_updated"], ["Person Gamma"])
 
             on_disk = json.loads(summary_path.read_text())
-            self.assertEqual(on_disk["participants"], ["Max"])
+            self.assertEqual(on_disk["participants"], ["Person Gamma"])
 
     def test_inserts_participants_section_into_markdown_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -870,11 +870,11 @@ class ConfirmSpeakerUpdatesParticipantsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             self.assertTrue(_last_json(result.output)["success"])
 
             text = summary_path.read_text()
-            self.assertIn("## Participants\n\nMax", text)
+            self.assertIn("## Participants\n\nPerson Gamma", text)
             # Inserted after Summary, before Key Points -- and Key Points
             # itself is untouched.
             self.assertLess(text.index("## Summary"), text.index("## Participants"))
@@ -891,12 +891,12 @@ class ConfirmSpeakerUpdatesParticipantsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             self.assertTrue(_last_json(result.output)["success"])
 
             text = summary_path.read_text()
             self.assertEqual(text.count("## Participants"), 1)
-            self.assertIn("## Participants\n\nMax", text)
+            self.assertIn("## Participants\n\nPerson Gamma", text)
             self.assertNotIn("OldName", text)
             self.assertIn("- a point", text)
 
@@ -907,20 +907,20 @@ class ConfirmSpeakerUpdatesParticipantsTests(unittest.TestCase):
             summary_path.write_text("---\ntitle: \"Mtg\"\n---\n\n## Summary\n\nSome notes.\n", encoding="utf-8")
             cfg = Config(config_path=Path(tmp) / "config.json")
 
-            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp, cfg=cfg)
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Julian"], tmp, cfg=cfg)
+            _, cfg = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp, cfg=cfg)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_01", "--new-person", "Person Alpha"], tmp, cfg=cfg)
             self.assertTrue(_last_json(result.output)["success"])
 
             text = summary_path.read_text()
-            self.assertIn("## Participants\n\nMax, Julian", text)
+            self.assertIn("## Participants\n\nPerson Gamma, Person Alpha", text)
 
     def test_noops_when_no_summary_file_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_sidecar(tmp)  # no _summary.json/.md written at all
-            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Max"], tmp)
+            result, _ = self._run(["mtg001", "mic", "SPEAKER_00", "--new-person", "Person Gamma"], tmp)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["participants_updated"], ["Max"])  # computed fine, just nothing to write to
+            self.assertEqual(data["participants_updated"], ["Person Gamma"])  # computed fine, just nothing to write to
 
 
 if __name__ == "__main__":

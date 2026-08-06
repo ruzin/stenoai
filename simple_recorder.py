@@ -5554,7 +5554,7 @@ def mark_speaker_cluster(meeting_stem, channel, diarization_speaker_id, multiple
             cleared_from.append(person["display_name"])
             # Restricted to THIS cluster's ids, same as the loop below. A
             # person's negatives in this meeting are earned one cluster at a
-            # time -- "that voice over there is not Julian" is evidence about
+            # time -- "that voice over there is not Person Alpha" is evidence about
             # that other cluster, and marking this one does not touch it.
             # Clearing them all destroyed evidence silently, and the only
             # symptom would have been a worse suggestion months later.
