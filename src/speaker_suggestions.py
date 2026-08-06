@@ -90,7 +90,7 @@ SUGGESTION_MIN_SEGMENT_COUNT = 3
 # against the user's real meeting library: every false-positive suggestion
 # found (8 clusters, all confirmed-not-that-person by the user) had an
 # average turn of 1.525s or less; the weakest genuine confirmed match (an
-# actual Julian anchor prototype) sits at 1.61s. Set with margin on both
+# a representative anchor prototype) sits at 1.61s. Set with margin on both
 # sides of that gap.
 SUGGESTION_MIN_AVG_TURN_SECONDS = 1.55
 # A person needs evidence from at least this many DISTINCT meetings -- not
@@ -1308,7 +1308,7 @@ def record_original_labels(
     name standing in the artefact that feeds the summary and every export.
 
     FIRST WRITE WINS. Confirming the same cluster twice -- the review UI's
-    "Change" flow does exactly that -- must not record "Julian" as the
+    "Change" flow does exactly that -- must not record "Person Alpha" as the
     original, or the restore would put a person's name back on lines the
     app has just decided are not theirs.
 

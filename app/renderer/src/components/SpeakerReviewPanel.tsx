@@ -880,7 +880,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
           <Input
             value={newPersonName}
             onChange={(e) => setNewPersonName(e.target.value)}
-            placeholder="e.g. Julian"
+            placeholder="e.g. Person Alpha"
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter' && newPersonRow && newPersonName.trim() && !duplicateProfile) {

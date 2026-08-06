@@ -102,10 +102,10 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
 
   const result = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Julian' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Person Alpha' },
   );
   expect(result.success).toBe(true);
-  expect(result.display_name).toBe('Julian');
+  expect(result.display_name).toBe('Person Alpha');
   expect(result.relabeled_lines).toBe(1);
 
   // The PersonProfile landed in config.json with one confirmed prototype.
@@ -113,32 +113,32 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
   await expect.poll(() => {
     const cfg = readJson(configPath);
     const profiles = (cfg.person_profiles ?? []) as Array<{ display_name: string; prototypes: unknown[] }>;
-    return profiles.find((p) => p.display_name === 'Julian')?.prototypes.length;
+    return profiles.find((p) => p.display_name === 'Person Alpha')?.prototypes.length;
   }).toBe(1);
 
   // The saved transcript now shows the real name at the confirmed segment's
   // timestamp, and the untouched "You" line is unaffected.
   await expect.poll(() => readFileSync(transcriptFile, 'utf8')).toEqual(
-    expect.stringContaining('[00:05] [Julian] hello there'),
+    expect.stringContaining('[00:05] [Person Alpha] hello there'),
   );
   expect(readFileSync(transcriptFile, 'utf8')).toContain('[00:20] [You] hi back');
 
   // A second confirm of the SAME cluster (the review UI's "Change"
   // correction) REASSIGNS it: the transcript re-labels idempotently rather
-  // than duplicating lines, and Julian's superseded prototype is removed
+  // than duplicating lines, and Person Alpha's superseded prototype is removed
   // so the mis-confirm can't keep poisoning cross-meeting matching.
   const secondResult = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Max' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Person Gamma' },
   );
   expect(secondResult.success).toBe(true);
-  expect(secondResult.reassigned_from).toEqual(['Julian']);
+  expect(secondResult.reassigned_from).toEqual(['Person Alpha']);
   await expect.poll(() => readFileSync(transcriptFile, 'utf8')).toEqual(
-    expect.stringContaining('[00:05] [Max] hello there'),
+    expect.stringContaining('[00:05] [Person Gamma] hello there'),
   );
-  expect(readFileSync(transcriptFile, 'utf8')).not.toContain('[Julian]');
+  expect(readFileSync(transcriptFile, 'utf8')).not.toContain('[Person Alpha]');
 
-  // On disk: Julian keeps his (now evidence-less) profile, Max owns the
+  // On disk: Person Alpha keeps his (now evidence-less) profile, Person Gamma owns the
   // cluster with a prototype marked as a correction.
   await expect.poll(() => {
     const cfg = readJson(configPath);
@@ -146,21 +146,21 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
       display_name: string;
       prototypes: Array<{ created_from: string; channel?: string }>;
     }>;
-    const julian = profiles.find((p) => p.display_name === 'Julian');
-    const max = profiles.find((p) => p.display_name === 'Max');
+    const personAlpha = profiles.find((p) => p.display_name === 'Person Alpha');
+    const personGamma = profiles.find((p) => p.display_name === 'Person Gamma');
     return {
-      julianPrototypes: julian?.prototypes.length,
-      maxCreatedFrom: max?.prototypes[0]?.created_from,
-      maxChannel: max?.prototypes[0]?.channel,
+      alphaPrototypes: personAlpha?.prototypes.length,
+      gammaCreatedFrom: personGamma?.prototypes[0]?.created_from,
+      gammaChannel: personGamma?.prototypes[0]?.channel,
     };
-  }).toEqual({ julianPrototypes: 0, maxCreatedFrom: 'user_corrected', maxChannel: 'system' });
+  }).toEqual({ alphaPrototypes: 0, gammaCreatedFrom: 'user_corrected', gammaChannel: 'system' });
 
   // Re-running suggest-speakers reflects the corrected state. Status is
   // "possible", not "confirmed" -- SUGGESTION_MIN_CONFIRMED_MEETINGS (=2)
-  // caps any person with evidence from only ONE meeting there, and Max
+  // caps any person with evidence from only ONE meeting there, and Person Gamma
   // only has this single meeting confirmed so far. suggested_name is
-  // still set at "possible" tier (see suggest_speaker). Julian has no
-  // prototypes left, so he can't out-rank Max the way his stale
+  // still set at "possible" tier (see suggest_speaker). Person Alpha has no
+  // prototypes left, so he can't out-rank Person Gamma the way his stale
   // same-cluster prototype used to before the reassignment fix.
   const suggestions = await page.evaluate(
     (meetingStem) => (window as StenoWindow).stenoai.speakers.suggestForMeeting(meetingStem),
@@ -168,16 +168,16 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
   );
   expect(suggestions.success).toBe(true);
   expect(suggestions.channels.system.SPEAKER_0.status).toBe('possible');
-  expect(suggestions.channels.system.SPEAKER_0.suggested_name).toBe('Max');
+  expect(suggestions.channels.system.SPEAKER_0.suggested_name).toBe('Person Gamma');
   // The identification anchor (where to go listen) computed end-to-end by
   // the real backend from the sidecar's seeded segment ({start: 5.0}).
   expect(suggestions.channels.system.SPEAKER_0.first_timestamp).toBe('00:05');
   // confirmed_by_user is real, persisted evidence (a matching
   // SpeakerPrototype), not the transient panel-only feedback line -- it
   // survives a completely fresh process (this IS a fresh suggest-speakers
-  // call, not a cached value). After the reassignment it names Max --
-  // Julian's superseded prototype no longer exists to be found.
-  expect(suggestions.channels.system.SPEAKER_0.confirmed_by_user).toBe('Max');
+  // call, not a cached value). After the reassignment it names Person Gamma --
+  // Person Alpha's superseded prototype no longer exists to be found.
+  expect(suggestions.channels.system.SPEAKER_0.confirmed_by_user).toBe('Person Gamma');
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
@@ -285,7 +285,7 @@ test('duplicate person names are rejected, and delete-person-profile removes a p
 
   const first = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'mic', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Julian' },
+    { meetingStem: stem, channel: 'mic', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Person Alpha' },
   );
   expect(first.success).toBe(true);
 
@@ -294,7 +294,7 @@ test('duplicate person names are rejected, and delete-person-profile removes a p
   // one real person must not get split across two person_ids.
   const duplicate = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'mic', diarizationSpeakerId: 'SPEAKER_1', newPersonName: '  julian ' },
+    { meetingStem: stem, channel: 'mic', diarizationSpeakerId: 'SPEAKER_1', newPersonName: '  person alpha ' },
   );
   expect(duplicate.success).toBe(false);
   expect(duplicate.error).toContain('already exists');
@@ -310,12 +310,12 @@ test('duplicate person names are rejected, and delete-person-profile removes a p
   // delete-person-profile removes them entirely.
   const listed = await page.evaluate(() => (window as StenoWindow).stenoai.speakers.listProfiles());
   expect(listed.success).toBe(true);
-  const julian = listed.person_profiles?.find((p) => p.display_name === 'Julian');
-  expect(julian).toBeDefined();
+  const personAlpha = listed.person_profiles?.find((p) => p.display_name === 'Person Alpha');
+  expect(personAlpha).toBeDefined();
 
   const deleted = await page.evaluate(
     (id) => (window as StenoWindow).stenoai.speakers.deleteProfile(id),
-    julian!.person_id,
+    personAlpha!.person_id,
   );
   expect(deleted.success).toBe(true);
 

@@ -209,20 +209,20 @@ test('a marked cluster is withheld from naming, refused by confirm, and raises t
   // can reach config.json to degrade suggestions in unrelated meetings.
   const refused = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Julian' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Person Alpha' },
   );
   expect(refused.success).toBe(false);
   expect(refused.error).toContain('more than one person');
 
   const configPath = path.join(userDataDir, 'config.json');
   const profiles = (readJson(configPath).person_profiles ?? []) as Array<{ display_name: string }>;
-  expect(profiles.find((p) => p.display_name === 'Julian')).toBeUndefined();
+  expect(profiles.find((p) => p.display_name === 'Person Alpha')).toBeUndefined();
 
   // The unmarked neighbour is unaffected -- marking one row must not cost
   // the others their naming.
   const accepted = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Max' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Person Gamma' },
   );
   expect(accepted.success).toBe(true);
 
@@ -256,14 +256,14 @@ test('marking a cluster that was already confirmed withdraws the name and its vo
   // later excerpt and realise the cluster is mixed.
   const confirmed = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Julian' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', newPersonName: 'Person Alpha' },
   );
   expect(confirmed.success).toBe(true);
   await expect.poll(() => {
     const profiles = (readJson(configPath).person_profiles ?? []) as Array<{
       display_name: string; prototypes: unknown[];
     }>;
-    return profiles.find((p) => p.display_name === 'Julian')?.prototypes.length;
+    return profiles.find((p) => p.display_name === 'Person Alpha')?.prototypes.length;
   }).toBe(1);
 
   const marked = await page.evaluate(
@@ -271,24 +271,24 @@ test('marking a cluster that was already confirmed withdraws the name and its vo
     { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_0', containsMultipleSpeakers: true },
   );
   expect(marked.success).toBe(true);
-  expect(marked.cleared_confirmation_from).toEqual(['Julian']);
+  expect(marked.cleared_confirmation_from).toEqual(['Person Alpha']);
 
   // If marking only blocked FUTURE confirms, this blended two-voice
-  // embedding would stay enrolled as Julian -- the exact state the marking
+  // embedding would stay enrolled as Person Alpha -- the exact state the marking
   // exists to prevent, and still reachable from enroll-self-from-person
   // and from every future suggestion scored against his profile.
   await expect.poll(() => {
     const profiles = (readJson(configPath).person_profiles ?? []) as Array<{
       display_name: string; prototypes: unknown[];
     }>;
-    return profiles.find((p) => p.display_name === 'Julian')?.prototypes.length;
+    return profiles.find((p) => p.display_name === 'Person Alpha')?.prototypes.length;
   }).toBe(0);
 
   // Confirming the neighbour afterwards must not pick up negative evidence
   // derived from that mixed cluster.
   const neighbour = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Max' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Person Gamma' },
   );
   expect(neighbour.success).toBe(true);
   const profiles = (readJson(configPath).person_profiles ?? []) as Array<{
@@ -400,7 +400,7 @@ test('deleting a meeting reports its unnamed speakers and removes its voice-embe
   // hearing it and the delete takes the audio.
   await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
-    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Max' },
+    { meetingStem: stem, channel: 'system', diarizationSpeakerId: 'SPEAKER_1', newPersonName: 'Person Gamma' },
   );
   await expect.poll(async () =>
     (await page.evaluate(
@@ -429,13 +429,13 @@ test('deleting a meeting reports its unnamed speakers and removes its voice-embe
   );
   await expect.poll(() => existsSync(sidecarPath)).toBe(false);
 
-  // Max's voice profile deliberately SURVIVES: it is bound to the person,
+  // Person Gamma's voice profile deliberately SURVIVES: it is bound to the person,
   // not the meeting, and is what makes recognition work across recordings.
   const profiles = (readJson(path.join(userDataDir, 'config.json')).person_profiles ?? []) as Array<{
     display_name: string;
     prototypes: unknown[];
   }>;
-  expect(profiles.find((p) => p.display_name === 'Max')?.prototypes).toHaveLength(1);
+  expect(profiles.find((p) => p.display_name === 'Person Gamma')?.prototypes).toHaveLength(1);
 
   expect(fileSig(realUserDataDir())).toEqual(realDirBefore);
 });

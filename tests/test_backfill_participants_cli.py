@@ -57,13 +57,13 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 "---\ntitle: \"Mtg\"\n---\n\n## Summary\n\nNotes.\n", encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
+            self._confirm(cfg, "Person Gamma", "mtg001")
 
             result = self._run([], tmp, cfg)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
-            self.assertEqual(data["meetings_updated"], [{"meeting_id": "mtg001", "participants": ["Max"]}])
-            self.assertIn("## Participants\n\nMax", (output_dir / "mtg001_summary.md").read_text())
+            self.assertEqual(data["meetings_updated"], [{"meeting_id": "mtg001", "participants": ["Person Gamma"]}])
+            self.assertIn("## Participants\n\nPerson Gamma", (output_dir / "mtg001_summary.md").read_text())
 
     def test_covers_every_meeting_across_multiple_people(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -74,19 +74,19 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                     json.dumps({"session_info": {}, "participants": []}), encoding="utf-8",
                 )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001")
-            self._confirm(cfg, "Julian", "mtg002")
+            self._confirm(cfg, "Person Gamma", "mtg001")
+            self._confirm(cfg, "Person Alpha", "mtg002")
 
             result = self._run([], tmp, cfg)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             by_id = {m["meeting_id"]: m["participants"] for m in data["meetings_updated"]}
-            self.assertEqual(by_id, {"mtg001": ["Max"], "mtg002": ["Julian"]})
+            self.assertEqual(by_id, {"mtg001": ["Person Gamma"], "mtg002": ["Person Alpha"]})
             self.assertEqual(
-                json.loads((output_dir / "mtg001_summary.json").read_text())["participants"], ["Max"],
+                json.loads((output_dir / "mtg001_summary.json").read_text())["participants"], ["Person Gamma"],
             )
             self.assertEqual(
-                json.loads((output_dir / "mtg002_summary.json").read_text())["participants"], ["Julian"],
+                json.loads((output_dir / "mtg002_summary.json").read_text())["participants"], ["Person Alpha"],
             )
 
     def test_no_person_profiles_is_a_noop(self):
@@ -118,7 +118,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
             original = "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Speaker 2] hello there"
             transcript_path.write_text(original, encoding="utf-8")
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Gamma", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run([], tmp, cfg)
             data = _last_json(result.output)
@@ -150,14 +150,14 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Gamma", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             self.assertEqual(data["transcripts_relabeled"], {"mtg001": 1})
             text = transcript_path.read_text()
-            self.assertIn("[00:05] [Max] hello there", text)
+            self.assertIn("[00:05] [Person Gamma] hello there", text)
             self.assertIn("[00:20] [You] hi back", text)  # never touches You
 
     def test_relabel_transcripts_uses_exact_matching_when_sidecar_has_manifest(self):
@@ -191,7 +191,7 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Gamma", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -228,13 +228,13 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Gamma", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
             self.assertTrue(data["success"])
             self.assertEqual(data["transcripts_relabeled"], {"mtg001": 1})
-            self.assertIn("[00:05] [Max] hello there", transcript_path.read_text())
+            self.assertIn("[00:05] [Person Gamma] hello there", transcript_path.read_text())
 
     def test_relabel_transcripts_is_idempotent_on_already_relabeled_meeting(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -257,11 +257,11 @@ class BackfillParticipantsCliTests(unittest.TestCase):
             # Already relabeled (e.g. confirmed via the UI, which always
             # passes --relabel-transcript at confirm time already).
             transcript_path.write_text(
-                "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Max] hello there",
+                "Session: mtg001\n\n" + "=" * 60 + "\n\n[00:05] [Person Gamma] hello there",
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Max", "mtg001", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Gamma", "mtg001", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)
@@ -307,8 +307,8 @@ class BackfillParticipantsCliTests(unittest.TestCase):
                 encoding="utf-8",
             )
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm(cfg, "Valentin Weyer", "mtg001", sid="SPEAKER_00", recording_type="in_person", run_id=self._run_id(tmp))
-            self._confirm(cfg, "Inga Hahn", "mtg001", sid="SPEAKER_00", recording_type="remote", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Alpha", "mtg001", sid="SPEAKER_00", recording_type="in_person", run_id=self._run_id(tmp))
+            self._confirm(cfg, "Person Beta", "mtg001", sid="SPEAKER_00", recording_type="remote", run_id=self._run_id(tmp))
 
             result = self._run(["--relabel-transcripts"], tmp, cfg)
             data = _last_json(result.output)

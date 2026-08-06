@@ -945,6 +945,20 @@ def _run_steno_diarize(
     return merged, embeddings
 
 
+def _worst_window_coverage(*results: Optional[dict]) -> Optional[float]:
+    """Lowest reported window coverage across the channels that reported one.
+
+    Returns None when nothing reported -- a backend that does no windowing
+    of its own cannot lose a window, but it also cannot vouch for the file,
+    so "unknown" stays distinct from "complete"."""
+    values = [
+        float(r["window_coverage"])
+        for r in results
+        if isinstance(r, dict) and r.get("window_coverage") is not None
+    ]
+    return min(values) if values else None
+
+
 def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Optional[dict[str, str]]:
     """Map each diarizer speaker id in diar_segments to either the channel's
     legacy label (the cluster with the most total speaking time) or a
@@ -1584,6 +1598,12 @@ class WhisperTranscriber:
             "duration_seconds": result.get("duration_seconds"),
             "detected_language": result.get("detected_language"),
             "detected_language_probability": result.get("detected_language_probability"),
+            # Fraction of transcription windows that came back usable, or None
+            # where the backend does no windowing of its own. Only the onnx
+            # backend can lose a window silently (parakeet-mlx has no per-chunk
+            # except, so a bad window fails the whole call loudly) -- but the
+            # key travels on both paths so callers never have to branch.
+            "window_coverage": result.get("window_coverage"),
         }
 
     def _convert_to_16khz(self, audio_filepath: Path) -> tuple[Path, Optional[float]]:
@@ -2014,6 +2034,11 @@ class WhisperTranscriber:
             mic_empty_on_energy = False
             system_empty_on_energy = False
             empty_error: Optional[str] = None
+            # A channel the energy gate skipped never gets a result -- bind
+            # both up front so anything reading them after the branches (the
+            # window-coverage roll-up at the end) can't hit an unbound name.
+            mic_result: Optional[dict] = None
+            sys_result: Optional[dict] = None
 
             # Split channels are already 16 kHz mono + high-passed by the
             # split ffmpeg pass above — skip the mono pre-processing pass.
@@ -2273,6 +2298,12 @@ class WhisperTranscriber:
                 # list[{"start", "channel", "diarization_speaker_id"}], one
                 # per turn -- see comment above turn_manifest's construction.
                 "turn_manifest": turn_manifest,
+                # Worst channel wins: a meeting is only as complete as the
+                # side that lost the most. None when no channel reported a
+                # figure (whisper.cpp, parakeet-mlx, or a file short enough
+                # to need no windowing) -- absence means "unknown", never
+                # "complete", so callers must not read it as a pass.
+                "window_coverage": _worst_window_coverage(mic_result, sys_result),
             }
         finally:
             # Clean up temp channel files

@@ -145,7 +145,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                 },
             })
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0],
                 recording_type="remote", meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
@@ -158,7 +158,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
             )
             result = self._run(["mtg001"], tmp, cfg=cfg)
             data = _last_json(result.output)
-            self.assertEqual(data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"], "Julian")
+            self.assertEqual(data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"], "Person Alpha")
 
     def test_confirmed_by_user_is_null_when_never_confirmed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -195,7 +195,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                 },
             })
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Valentin")
+            person = cfg.create_person_profile("Person Alpha")
             cfg.add_speaker_prototype(
                 person["person_id"], [1.0, 0.0],
                 recording_type="in_person", meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
@@ -204,7 +204,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
             )
             result = self._run(["mtg001"], tmp, cfg=cfg)
             data = _last_json(result.output)
-            self.assertEqual(data["channels"]["mic"]["SPEAKER_0"]["confirmed_by_user"], "Valentin")
+            self.assertEqual(data["channels"]["mic"]["SPEAKER_0"]["confirmed_by_user"], "Person Alpha")
             self.assertIsNone(data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"])
 
     def test_confirmed_by_user_resolves_through_merged_fragments(self):
@@ -225,7 +225,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
                 },
             })
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = cfg.create_person_profile("Julian")
+            person = cfg.create_person_profile("Person Alpha")
             # Confirmed via the non-primary fragment id (SPEAKER_2) -- same
             # real shape as confirm-speaker's own id-resolution.
             cfg.add_speaker_prototype(
@@ -240,7 +240,7 @@ class SuggestSpeakersCliTests(unittest.TestCase):
             # confirmation must still be found via merged_from.
             merged = data["channels"]["system"]["SPEAKER_0"]
             self.assertEqual(merged["merged_from"], ["SPEAKER_2"])
-            self.assertEqual(merged["confirmed_by_user"], "Julian")
+            self.assertEqual(merged["confirmed_by_user"], "Person Alpha")
 
     def test_sample_text_quotes_the_transcript_at_the_longest_segment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -632,7 +632,7 @@ class SuggestSpeakersRunScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            person = self._confirm_by_hand(cfg, "Person Alpha", "SPEAKER_0", self._run_id(tmp))
             self._rediarize(tmp)
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
             cluster = data["channels"]["system"]["SPEAKER_0"]
@@ -640,17 +640,17 @@ class SuggestSpeakersRunScopeTests(unittest.TestCase):
             self.assertIsNone(cluster["confirmed_person_id"])
             self.assertEqual(
                 data["stale_assignments"],
-                [{"person_id": person["person_id"], "display_name": "Julian"}],
+                [{"person_id": person["person_id"], "display_name": "Person Alpha"}],
             )
 
     def test_a_confirmation_from_this_run_is_reported_and_is_not_stale(self):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            person = self._confirm_by_hand(cfg, "Person Alpha", "SPEAKER_0", self._run_id(tmp))
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
             cluster = data["channels"]["system"]["SPEAKER_0"]
-            self.assertEqual(cluster["confirmed_by_user"], "Julian")
+            self.assertEqual(cluster["confirmed_by_user"], "Person Alpha")
             self.assertEqual(cluster["confirmed_person_id"], person["person_id"])
             self.assertEqual(data["stale_assignments"], [])
 
@@ -662,10 +662,10 @@ class SuggestSpeakersRunScopeTests(unittest.TestCase):
             self._seed(tmp)
             self._make_legacy(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", None)
+            self._confirm_by_hand(cfg, "Person Alpha", "SPEAKER_0", None)
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
             self.assertEqual(
-                data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"], "Julian",
+                data["channels"]["system"]["SPEAKER_0"]["confirmed_by_user"], "Person Alpha",
             )
             self.assertEqual(data["stale_assignments"], [])
 
@@ -673,7 +673,7 @@ class SuggestSpeakersRunScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            person = self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            person = self._confirm_by_hand(cfg, "Person Alpha", "SPEAKER_0", self._run_id(tmp))
             cfg.add_speaker_prototype(
                 person["person_id"], [0.0, 1.0], recording_type="remote",
                 meeting_id="mtg001", diarization_speaker_id="SPEAKER_1",
@@ -684,7 +684,7 @@ class SuggestSpeakersRunScopeTests(unittest.TestCase):
             self._rediarize(tmp)
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)
             self.assertEqual(len(data["stale_assignments"]), 1)
-            self.assertEqual(data["stale_assignments"][0]["display_name"], "Julian")
+            self.assertEqual(data["stale_assignments"][0]["display_name"], "Person Alpha")
 
     def test_a_cluster_someone_has_since_confirmed_reports_no_stale_owner(self):
         # The notice has to be able to go away. Nothing deletes a
@@ -695,7 +695,7 @@ class SuggestSpeakersRunScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
-            self._confirm_by_hand(cfg, "Julian", "SPEAKER_0", self._run_id(tmp))
+            self._confirm_by_hand(cfg, "Person Alpha", "SPEAKER_0", self._run_id(tmp))
             new_run = self._rediarize(tmp)
             self._confirm_by_hand(cfg, "Sarah", "SPEAKER_0", new_run, embedding=(0.0, 1.0))
             data = _last_json(self._run(["mtg001"], tmp, cfg=cfg).output)

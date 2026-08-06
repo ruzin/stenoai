@@ -46,6 +46,7 @@ from src.transcriber import (
     _tag_channel_segments,
     _token_jaccard,
     _voiceprint_distance,
+    _worst_window_coverage,
 )
 
 
@@ -896,6 +897,28 @@ class MergeCloseDiarSegmentsTests(unittest.TestCase):
         segments = [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0"}]
         _merge_close_diar_segments(segments, STENO_DIARIZE_MERGE_GAP_S)
         self.assertEqual(segments, [{"start": 0.0, "end": 1.0, "speaker": "SPEAKER_0"}])
+
+
+class WorstWindowCoverageTests(unittest.TestCase):
+    def test_takes_the_worst_reporting_channel(self):
+        self.assertEqual(
+            _worst_window_coverage({"window_coverage": 1.0}, {"window_coverage": 0.4}), 0.4
+        )
+
+    def test_ignores_channels_that_report_nothing(self):
+        # A silent channel never runs and never reports. It must not drag the
+        # meeting's figure down, and it must not stand in for the other one.
+        self.assertEqual(_worst_window_coverage(None, {"window_coverage": 0.6}), 0.6)
+        self.assertEqual(_worst_window_coverage({}, {"window_coverage": 0.6}), 0.6)
+
+    def test_nothing_reported_is_unknown_not_complete(self):
+        # whisper.cpp and parakeet-mlx do no windowing of their own. Absence
+        # of a figure must never read as a clean bill of health.
+        self.assertIsNone(_worst_window_coverage(None, None))
+        self.assertIsNone(_worst_window_coverage({"window_coverage": None}, {}))
+
+    def test_zero_coverage_is_kept_not_treated_as_missing(self):
+        self.assertEqual(_worst_window_coverage({"window_coverage": 0.0}, None), 0.0)
 
 
 class ClampOverlappingDiarSegmentsTests(unittest.TestCase):

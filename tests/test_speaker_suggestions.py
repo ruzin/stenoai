@@ -142,7 +142,7 @@ class BuildClustersFromDiarizationTests(unittest.TestCase):
 
 class ScoreCandidatesTests(unittest.TestCase):
     def test_prefers_same_context_prototypes(self):
-        profiles = [_profile("p1", "Max", prototypes=[
+        profiles = [_profile("p1", "Person Gamma", prototypes=[
             _prototype([1.0, 0.0], recording_type="remote"),   # far from query, wrong context
             _prototype([0.0, 1.0], recording_type="in_person"),  # close to query, right context
         ])]
@@ -151,7 +151,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.assertAlmostEqual(candidates[0].distance, 0.0, places=6)
 
     def test_falls_back_to_cross_context_when_none_match(self):
-        profiles = [_profile("p1", "Max", prototypes=[
+        profiles = [_profile("p1", "Person Gamma", prototypes=[
             _prototype([0.0, 1.0], recording_type="remote"),
         ])]
         context = _stable_context(recording_type="in_person")
@@ -160,13 +160,13 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.assertAlmostEqual(candidates[0].distance, 0.0, places=6)
 
     def test_person_with_no_prototypes_at_all_is_skipped(self):
-        profiles = [_profile("p1", "Max", prototypes=[])]
+        profiles = [_profile("p1", "Person Gamma", prototypes=[])]
         candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(candidates, [])
 
     def test_flags_hard_negative_conflict(self):
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=[_prototype([1.0, 0.0])],
             hard_negatives=[_prototype([1.0, 0.0])],  # query will land right on this too
         )]
@@ -175,7 +175,7 @@ class ScoreCandidatesTests(unittest.TestCase):
 
     def test_no_hard_negative_conflict_when_query_far_from_negatives(self):
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=[_prototype([1.0, 0.0])],
             hard_negatives=[_prototype([0.0, 1.0])],  # orthogonal, far
         )]
@@ -188,7 +188,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         # an ordinary cross-speaker distance, which every colleague's
         # confirm adds. The old absolute rule suppressed exactly these.
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=[_prototype([1.0, 0.0])],
             hard_negatives=[_prototype([0.7, 0.714])],  # distance ~0.3 from query
         )]
@@ -200,7 +200,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         # Positive at ~0.25, negative at ~0.3: the negative evidence rivals
         # the positive (within SUGGESTION_CONFIDENCE_MARGIN), so suppress.
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=[_prototype([0.75, 0.661])],   # distance ~0.25 from query
             hard_negatives=[_prototype([0.7, 0.714])],  # distance ~0.3 from query
         )]
@@ -211,7 +211,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         # A negative past HARD_NEGATIVE_DISTANCE_THRESHOLD is not
         # meaningful evidence at all, however weak the positive is.
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=[_prototype([0.75, 0.661])],  # distance ~0.25
             hard_negatives=[_prototype([0.5, 0.866])],  # distance ~0.5, beyond 0.40
         )]
@@ -219,7 +219,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.assertFalse(candidates[0].hard_negative_conflict)
 
     def test_negative_distance_is_none_without_negatives(self):
-        profiles = [_profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])])]
+        profiles = [_profile("p1", "Person Gamma", prototypes=[_prototype([1.0, 0.0])])]
         candidates = score_candidates([1.0, 0.0], _stable_context(), profiles)
         self.assertIsNone(candidates[0].negative_distance)
 
@@ -232,7 +232,7 @@ class ScoreCandidatesTests(unittest.TestCase):
         self.assertEqual([c.display_name for c in candidates], ["Close", "Far"])
 
     def test_confirmed_meeting_count_counts_distinct_meeting_ids_in_pool(self):
-        profiles = [_profile("p1", "Max", prototypes=[
+        profiles = [_profile("p1", "Person Gamma", prototypes=[
             _prototype([1.0, 0.0], meeting_id="mtg_a"),
             _prototype([0.9, 0.1], meeting_id="mtg_a"),  # same meeting again
             _prototype([0.8, 0.2], meeting_id="mtg_b"),
@@ -243,14 +243,14 @@ class ScoreCandidatesTests(unittest.TestCase):
 
 class SuggestSpeakerTests(unittest.TestCase):
     def test_confirmed_when_threshold_margin_and_stability_all_clear(self):
-        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.98, 0.01]))]
+        profiles = [_profile("p1", "Person Gamma", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.98, 0.01]))]
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "confirmed")
-        self.assertEqual(result.suggested_name, "Max")
+        self.assertEqual(result.suggested_name, "Person Gamma")
         self.assertEqual(result.suggested_person_id, "p1")
 
     def test_possible_when_threshold_clears_but_stability_does_not(self):
-        profiles = [_profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])])]
+        profiles = [_profile("p1", "Person Gamma", prototypes=[_prototype([1.0, 0.0])])]
         weak_context = ClusterContext(
             meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
             recording_type="in_person",
@@ -259,18 +259,18 @@ class SuggestSpeakerTests(unittest.TestCase):
         )
         result = suggest_speaker([1.0, 0.0], weak_context, profiles)
         self.assertEqual(result.status, "possible")
-        self.assertEqual(result.suggested_name, "Max")
+        self.assertEqual(result.suggested_name, "Person Gamma")
 
     def test_possible_when_margin_too_close(self):
         profiles = [
-            _profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])]),
+            _profile("p1", "Person Gamma", prototypes=[_prototype([1.0, 0.0])]),
             _profile("p2", "Sam", prototypes=[_prototype([0.99, 0.02])]),  # near-tie
         ]
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "possible")
 
     def test_none_when_below_distance_threshold(self):
-        profiles = [_profile("p1", "Max", prototypes=[_prototype([-1.0, 0.0])])]  # orthogonal/opposite
+        profiles = [_profile("p1", "Person Gamma", prototypes=[_prototype([-1.0, 0.0])])]  # orthogonal/opposite
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "none")
         self.assertIsNone(result.suggested_name)
@@ -282,7 +282,7 @@ class SuggestSpeakerTests(unittest.TestCase):
 
     def test_hard_negative_conflict_suppresses_even_strong_match(self):
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=[_prototype([1.0, 0.0])],
             hard_negatives=[_prototype([1.0, 0.0])],
         )]
@@ -295,17 +295,17 @@ class SuggestSpeakerTests(unittest.TestCase):
         # "confirmed" even though a stored negative sits at ~0.3 (an
         # ordinary cross-speaker distance).
         profiles = [_profile(
-            "p1", "Max",
+            "p1", "Person Gamma",
             prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.98, 0.01]),
             hard_negatives=[_prototype([0.7, 0.714])],  # distance ~0.3 from query
         )]
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "confirmed")
-        self.assertEqual(result.suggested_name, "Max")
+        self.assertEqual(result.suggested_name, "Person Gamma")
 
     def test_never_raises_on_malformed_profile(self):
         # Missing "prototypes" key entirely shouldn't crash scoring.
-        profiles = [{"person_id": "p1", "display_name": "Max"}]
+        profiles = [{"person_id": "p1", "display_name": "Person Gamma"}]
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "none")
 
@@ -316,7 +316,7 @@ class SuggestSpeakerTests(unittest.TestCase):
         # real speech -- duration/segment-count gates alone don't catch it.
         # Reproduces the exact shape of a confirmed false positive found
         # this session: 56 turns, 85.4s total, ~1.53s/turn average.
-        profiles = [_profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])])]
+        profiles = [_profile("p1", "Person Gamma", prototypes=[_prototype([1.0, 0.0])])]
         fragmented_context = ClusterContext(
             meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
             recording_type="in_person",
@@ -325,7 +325,7 @@ class SuggestSpeakerTests(unittest.TestCase):
         )
         result = suggest_speaker([1.0, 0.0], fragmented_context, profiles)
         self.assertEqual(result.status, "possible")
-        self.assertEqual(result.suggested_name, "Max")
+        self.assertEqual(result.suggested_name, "Person Gamma")
 
     def test_confirmed_when_avg_turn_clears_threshold_even_with_many_short_turns(self):
         # A real conversation can have many short turns (quick back-and-forth)
@@ -334,7 +334,7 @@ class SuggestSpeakerTests(unittest.TestCase):
         # above SUGGESTION_MIN_SEGMENT_COUNT and total duration well above
         # SUGGESTION_MIN_DURATION_SECONDS so only the avg-turn gate is
         # actually under test here.
-        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.98, 0.01]))]
+        profiles = [_profile("p1", "Person Gamma", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.98, 0.01]))]
         context = ClusterContext(
             meeting_id="mtg001", diarization_speaker_id="SPEAKER_0",
             recording_type="in_person",
@@ -348,17 +348,17 @@ class SuggestSpeakerTests(unittest.TestCase):
         # Even with a perfect distance/margin/duration/avg-turn, a person
         # with evidence from only ONE meeting must not auto-fill -- their
         # profile hasn't demonstrated it generalizes across sessions yet.
-        profiles = [_profile("p1", "Max", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg_only")])]
+        profiles = [_profile("p1", "Person Gamma", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg_only")])]
         result = suggest_speaker([1.0, 0.0], _stable_context(), profiles)
         self.assertEqual(result.status, "possible")
-        self.assertEqual(result.suggested_name, "Max")
+        self.assertEqual(result.suggested_name, "Person Gamma")
 
     def test_possible_when_two_prototypes_are_from_the_same_meeting(self):
         # Two prototypes confirmed from fragments of the SAME meeting (the
         # exact real-world shape found this session: a diarizer-split voice
         # confirmed twice within one call) must NOT count as two distinct
         # confirmed meetings.
-        profiles = [_profile("p1", "Max", prototypes=[
+        profiles = [_profile("p1", "Person Gamma", prototypes=[
             _prototype([1.0, 0.0], meeting_id="mtg_shared"),
             _prototype([0.99, 0.02], meeting_id="mtg_shared"),
         ])]
@@ -366,7 +366,7 @@ class SuggestSpeakerTests(unittest.TestCase):
         self.assertEqual(result.status, "possible")
 
     def test_confirmed_when_two_distinct_meetings_confirmed(self):
-        profiles = [_profile("p1", "Max", prototypes=[
+        profiles = [_profile("p1", "Person Gamma", prototypes=[
             _prototype([1.0, 0.0], meeting_id="mtg_a"),
             _prototype([0.99, 0.02], meeting_id="mtg_b"),
         ])]
@@ -410,10 +410,10 @@ class PrototypeRunMatchesTests(unittest.TestCase):
 
 class SuggestSpeakersForMeetingTests(unittest.TestCase):
     def test_same_person_not_suggested_for_two_clusters(self):
-        # Two clusters both plausibly Max; only the closer one should claim
+        # Two clusters both plausibly Person Gamma; only the closer one should claim
         # the confirmed match — port of the removed auto-matcher's
         # usedNames behaviour.
-        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
+        profiles = [_profile("p1", "Person Gamma", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
         channel_clusters = {"mic": {
             "SPEAKER_0": ([1.0, 0.0], _stable_context(sid="SPEAKER_0")),  # exact match
             "SPEAKER_1": ([0.95, 0.05], _stable_context(sid="SPEAKER_1")),  # also plausible
@@ -422,13 +422,13 @@ class SuggestSpeakersForMeetingTests(unittest.TestCase):
         statuses = {sid: r.status for sid, r in results.items()}
         names = {sid: r.suggested_name for sid, r in results.items()}
         self.assertEqual(statuses["SPEAKER_0"], "confirmed")
-        self.assertEqual(names["SPEAKER_0"], "Max")
-        # SPEAKER_1 can't also claim Max -- no profiles left to match.
-        self.assertNotEqual(names.get("SPEAKER_1"), "Max")
+        self.assertEqual(names["SPEAKER_0"], "Person Gamma")
+        # SPEAKER_1 can't also claim Person Gamma -- no profiles left to match.
+        self.assertNotEqual(names.get("SPEAKER_1"), "Person Gamma")
 
     def test_independent_clusters_each_get_their_own_person(self):
         profiles = [
-            _profile("p1", "Max", prototypes=[_prototype([1.0, 0.0])]),
+            _profile("p1", "Person Gamma", prototypes=[_prototype([1.0, 0.0])]),
             _profile("p2", "Sarah", prototypes=[_prototype([0.0, 1.0])]),
         ]
         channel_clusters = {"mic": {
@@ -436,37 +436,37 @@ class SuggestSpeakersForMeetingTests(unittest.TestCase):
             "SPEAKER_1": ([0.0, 1.0], _stable_context(sid="SPEAKER_1")),
         }}
         results = suggest_speakers_for_meeting(channel_clusters, profiles)["mic"]
-        self.assertEqual(results["SPEAKER_0"].suggested_name, "Max")
+        self.assertEqual(results["SPEAKER_0"].suggested_name, "Person Gamma")
         self.assertEqual(results["SPEAKER_1"].suggested_name, "Sarah")
 
     def test_person_cannot_be_confirmed_on_both_channels(self):
         # Exclusivity is meeting-wide, not per-channel: a cross-channel
         # double match is echo/bleed, not the same person twice. The closer
-        # (system) cluster claims Max; the mic one must not also get him.
-        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
+        # (system) cluster claims Person Gamma; the mic one must not also get him.
+        profiles = [_profile("p1", "Person Gamma", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
         channel_clusters = {
             "mic": {"SPEAKER_0": ([0.95, 0.05], _stable_context(sid="SPEAKER_0"))},
             "system": {"SPEAKER_0": ([1.0, 0.0], _stable_context(sid="SPEAKER_0", recording_type="remote"))},
         }
         results = suggest_speakers_for_meeting(channel_clusters, profiles)
         self.assertEqual(results["system"]["SPEAKER_0"].status, "confirmed")
-        self.assertEqual(results["system"]["SPEAKER_0"].suggested_name, "Max")
-        self.assertNotEqual(results["mic"]["SPEAKER_0"].suggested_name, "Max")
+        self.assertEqual(results["system"]["SPEAKER_0"].suggested_name, "Person Gamma")
+        self.assertNotEqual(results["mic"]["SPEAKER_0"].suggested_name, "Person Gamma")
 
     def test_better_matching_later_cluster_wins_the_person(self):
         # Clusters are assigned in best-distance order, not sorted-id
-        # order: SPEAKER_1 matches Max exactly, so a merely-plausible
+        # order: SPEAKER_1 matches Person Gamma exactly, so a merely-plausible
         # SPEAKER_0 must not claim him first just by sorting earlier
         # (the old per-channel sorted-sid behaviour).
-        profiles = [_profile("p1", "Max", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
+        profiles = [_profile("p1", "Person Gamma", prototypes=_multi_meeting_prototypes([1.0, 0.0], [0.97, 0.03]))]
         channel_clusters = {"mic": {
             "SPEAKER_0": ([0.8, 0.6], _stable_context(sid="SPEAKER_0")),  # distance ~0.2, would confirm alone
             "SPEAKER_1": ([1.0, 0.0], _stable_context(sid="SPEAKER_1")),  # exact match
         }}
         results = suggest_speakers_for_meeting(channel_clusters, profiles)["mic"]
         self.assertEqual(results["SPEAKER_1"].status, "confirmed")
-        self.assertEqual(results["SPEAKER_1"].suggested_name, "Max")
-        self.assertNotEqual(results["SPEAKER_0"].suggested_name, "Max")
+        self.assertEqual(results["SPEAKER_1"].suggested_name, "Person Gamma")
+        self.assertNotEqual(results["SPEAKER_0"].suggested_name, "Person Gamma")
 
     def test_every_input_cluster_appears_in_results(self):
         channel_clusters = {
@@ -556,7 +556,7 @@ class MergeSameChannelFragmentsTests(unittest.TestCase):
     def test_does_not_merge_deliberately_different_voices(self):
         # Same real person, deliberately different vocal performance --
         # should NOT collapse (that's a human judgment call, not automatic).
-        # Modeled on this session's real "3 Julian voices" finding: distinct
+        # Three distinct voices must not collapse into one person's profile:
         # enough acoustically to sit outside the strict merge threshold.
         clusters = {
             "SPEAKER_0": ([1.0, 0.0], _ctx("SPEAKER_0", 300)),
@@ -690,11 +690,11 @@ class ConfirmedParticipantNamesTests(unittest.TestCase):
         self.assertEqual(confirmed_participant_names("mtg001", []), [])
 
     def test_person_with_prototype_for_meeting_is_included(self):
-        profiles = [_profile("p1", "Julian", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg001")])]
-        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Julian"])
+        profiles = [_profile("p1", "Person Alpha", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg001")])]
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Person Alpha"])
 
     def test_person_with_prototype_for_different_meeting_is_excluded(self):
-        profiles = [_profile("p1", "Julian", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg002")])]
+        profiles = [_profile("p1", "Person Alpha", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg002")])]
         self.assertEqual(confirmed_participant_names("mtg001", profiles), [])
 
     def test_hard_negative_only_is_excluded(self):
@@ -703,7 +703,7 @@ class ConfirmedParticipantNamesTests(unittest.TestCase):
         # never count as a confirmed participant -- hard_negatives is a
         # structurally separate list from prototypes.
         profiles = [_profile(
-            "p1", "Julian",
+            "p1", "Person Alpha",
             prototypes=[],
             hard_negatives=[_prototype([1.0, 0.0], meeting_id="mtg001")],
         )]
@@ -711,17 +711,17 @@ class ConfirmedParticipantNamesTests(unittest.TestCase):
 
     def test_two_people_confirmed_in_same_meeting_both_included_in_order(self):
         profiles = [
-            _profile("p1", "Julian", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg001")]),
-            _profile("p2", "Christian", prototypes=[_prototype([0.0, 1.0], meeting_id="mtg001")]),
+            _profile("p1", "Person Alpha", prototypes=[_prototype([1.0, 0.0], meeting_id="mtg001")]),
+            _profile("p2", "Person Beta", prototypes=[_prototype([0.0, 1.0], meeting_id="mtg001")]),
         ]
-        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Julian", "Christian"])
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Person Alpha", "Person Beta"])
 
     def test_multiple_prototypes_same_meeting_counts_person_once(self):
-        profiles = [_profile("p1", "Julian", prototypes=[
+        profiles = [_profile("p1", "Person Alpha", prototypes=[
             _prototype([1.0, 0.0], meeting_id="mtg001"),
             _prototype([0.9, 0.1], meeting_id="mtg001"),
         ])]
-        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Julian"])
+        self.assertEqual(confirmed_participant_names("mtg001", profiles), ["Person Alpha"])
 
 
 class RelabelTranscriptSpeakerTests(unittest.TestCase):
@@ -736,21 +736,21 @@ class RelabelTranscriptSpeakerTests(unittest.TestCase):
     def test_relabels_line_within_segment_range(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 1)
-            self.assertIn("[00:05] [Julian] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Alpha] hello there", path.read_text())
 
     def test_does_not_relabel_line_outside_segment_range(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:50] [Speaker 2] hello there")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 0)
             self.assertIn("[00:50] [Speaker 2] hello there", path.read_text())
 
     def test_never_relabels_you(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [You] hello there")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 0)
             self.assertIn("[00:05] [You] hello there", path.read_text())
 
@@ -761,31 +761,31 @@ class RelabelTranscriptSpeakerTests(unittest.TestCase):
         # be relabelable, not skipped like "You" is.
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Others] hello there")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 1)
-            self.assertIn("[00:05] [Julian] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Alpha] hello there", path.read_text())
 
     def test_tolerance_allows_slight_boundary_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:04] [Speaker 2] hello there")
             # Line timestamp (4.0s, from integer-second [MM:SS] truncation)
             # is just outside [4.3, 6.0] but within the 0.5s tolerance.
-            changed = relabel_transcript_speaker(path, [{"start": 4.3, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.3, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 1)
 
     def test_idempotent_rerun_with_different_name_overwrites(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
-            relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Max")
+            relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Gamma")
             self.assertEqual(changed, 1)
-            self.assertIn("[00:05] [Max] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Gamma] hello there", path.read_text())
 
     def test_rerun_with_same_name_is_a_noop(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
-            relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 0)
 
     def test_multiple_pooled_segments_from_merged_fragments(self):
@@ -795,12 +795,12 @@ class RelabelTranscriptSpeakerTests(unittest.TestCase):
                 "[00:05] [Speaker 2] first fragment\n\n[05:00] [Speaker 3] second fragment",
             )
             changed = relabel_transcript_speaker(
-                path, [{"start": 4.0, "end": 6.0}, {"start": 299.0, "end": 301.0}], "Julian",
+                path, [{"start": 4.0, "end": 6.0}, {"start": 299.0, "end": 301.0}], "Person Alpha",
             )
             self.assertEqual(changed, 2)
             text = path.read_text()
-            self.assertIn("[00:05] [Julian] first fragment", text)
-            self.assertIn("[05:00] [Julian] second fragment", text)
+            self.assertIn("[00:05] [Person Alpha] first fragment", text)
+            self.assertIn("[05:00] [Person Alpha] second fragment", text)
 
     def test_untouched_lines_and_header_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -808,7 +808,7 @@ class RelabelTranscriptSpeakerTests(unittest.TestCase):
                 tmp, "[00:05] [Speaker 2] hello\n\n[00:10] [You] hi back",
             )
             before = path.read_text()
-            relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             after = path.read_text()
             self.assertIn("Session: mtg001", after)
             self.assertIn("[00:10] [You] hi back", after)
@@ -817,28 +817,28 @@ class RelabelTranscriptSpeakerTests(unittest.TestCase):
     def test_returns_zero_when_transcript_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "nonexistent_transcript.txt"
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 0)
 
     def test_returns_zero_when_no_segments(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
-            changed = relabel_transcript_speaker(path, [], "Julian")
+            changed = relabel_transcript_speaker(path, [], "Person Alpha")
             self.assertEqual(changed, 0)
 
     def test_handles_hour_scale_timestamp(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[1:02:33] [Speaker 2] hello there")
             changed = relabel_transcript_speaker(
-                path, [{"start": 3752.0, "end": 3754.0}], "Julian",
+                path, [{"start": 3752.0, "end": 3754.0}], "Person Alpha",
             )
             self.assertEqual(changed, 1)
-            self.assertIn("[1:02:33] [Julian] hello there", path.read_text())
+            self.assertIn("[1:02:33] [Person Alpha] hello there", path.read_text())
 
     def test_malformed_line_does_not_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "not a diarised line at all")
-            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Julian")
+            changed = relabel_transcript_speaker(path, [{"start": 4.0, "end": 6.0}], "Person Alpha")
             self.assertEqual(changed, 0)
 
 
@@ -862,10 +862,10 @@ class RelabelTranscriptMultiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
             changed, skipped = relabel_transcript_multi(
-                path, [("mic", "Julian", [{"start": 4.0, "end": 6.0}])],
+                path, [("mic", "Person Alpha", [{"start": 4.0, "end": 6.0}])],
             )
             self.assertEqual((changed, skipped), (1, 0))
-            self.assertIn("[00:05] [Julian] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Alpha] hello there", path.read_text())
 
     def test_skips_line_claimed_by_two_different_channels(self):
         # A mic-channel assignment and a system-channel assignment both
@@ -875,8 +875,8 @@ class RelabelTranscriptMultiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
             changed, skipped = relabel_transcript_multi(path, [
-                ("mic", "Valentin Weyer", [{"start": 4.0, "end": 6.0}]),
-                ("system", "Inga Hahn", [{"start": 4.5, "end": 5.5}]),
+                ("mic", "Person Alpha", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Person Beta", [{"start": 4.5, "end": 5.5}]),
             ])
             self.assertEqual((changed, skipped), (0, 1))
             self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
@@ -888,19 +888,19 @@ class RelabelTranscriptMultiTests(unittest.TestCase):
         # later assignment (by position in `assignments`, expected to be
         # sorted oldest-first by the caller) must win.
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_transcript(tmp, "[00:05] [Julian] hello there")
+            path = self._write_transcript(tmp, "[00:05] [Person Alpha] hello there")
             changed, skipped = relabel_transcript_multi(path, [
-                ("system", "Julian", [{"start": 4.0, "end": 6.0}]),
-                ("system", "Max Prechtl", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Person Alpha", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Person Gamma", [{"start": 4.0, "end": 6.0}]),
             ])
             self.assertEqual((changed, skipped), (1, 0))
-            self.assertIn("[00:05] [Max Prechtl] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Gamma] hello there", path.read_text())
 
     def test_never_relabels_you_even_when_claimed(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [You] hello there")
             changed, skipped = relabel_transcript_multi(
-                path, [("mic", "Julian", [{"start": 4.0, "end": 6.0}])],
+                path, [("mic", "Person Alpha", [{"start": 4.0, "end": 6.0}])],
             )
             self.assertEqual((changed, skipped), (0, 0))
             self.assertIn("[00:05] [You] hello there", path.read_text())
@@ -915,7 +915,7 @@ class RelabelTranscriptMultiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "nonexistent_transcript.txt"
             changed, skipped = relabel_transcript_multi(
-                path, [("mic", "Julian", [{"start": 4.0, "end": 6.0}])],
+                path, [("mic", "Person Alpha", [{"start": 4.0, "end": 6.0}])],
             )
             self.assertEqual((changed, skipped), (0, 0))
 
@@ -923,8 +923,8 @@ class RelabelTranscriptMultiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:50] [Speaker 2] hello there")
             changed, skipped = relabel_transcript_multi(path, [
-                ("mic", "Valentin Weyer", [{"start": 4.0, "end": 6.0}]),
-                ("system", "Inga Hahn", [{"start": 4.0, "end": 6.0}]),
+                ("mic", "Person Alpha", [{"start": 4.0, "end": 6.0}]),
+                ("system", "Person Beta", [{"start": 4.0, "end": 6.0}]),
             ])
             self.assertEqual((changed, skipped), (0, 0))
             self.assertIn("[00:50] [Speaker 2] hello there", path.read_text())
@@ -948,15 +948,15 @@ class RelabelTranscriptExactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha")
             self.assertEqual(changed, 1)
-            self.assertIn("[00:05] [Julian] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Alpha] hello there", path.read_text())
 
     def test_does_not_relabel_line_whose_manifest_entry_is_a_different_cluster(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha")
             self.assertEqual(changed, 0)
             self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
 
@@ -968,7 +968,7 @@ class RelabelTranscriptExactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
             manifest = [{"start": 5.2, "channel": "system", "diarization_speaker_id": "SPEAKER_1"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha")
             self.assertEqual(changed, 0)
             self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
 
@@ -976,7 +976,7 @@ class RelabelTranscriptExactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [You] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha")
             self.assertEqual(changed, 0)
             self.assertIn("[00:05] [You] hello there", path.read_text())
 
@@ -993,44 +993,44 @@ class RelabelTranscriptExactTests(unittest.TestCase):
                 {"start": 20.4, "channel": "system", "diarization_speaker_id": "SPEAKER_2"},
             ]
             changed = relabel_transcript_exact(
-                path, manifest, {("system", "SPEAKER_0"), ("system", "SPEAKER_2")}, "Julian",
+                path, manifest, {("system", "SPEAKER_0"), ("system", "SPEAKER_2")}, "Person Alpha",
             )
             self.assertEqual(changed, 2)
             text = path.read_text()
-            self.assertIn("[00:05] [Julian] first fragment", text)
-            self.assertIn("[00:20] [Julian] second fragment", text)
+            self.assertIn("[00:05] [Person Alpha] first fragment", text)
+            self.assertIn("[00:20] [Person Alpha] second fragment", text)
 
     def test_returns_zero_when_manifest_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
-            self.assertEqual(relabel_transcript_exact(path, [], {("mic", "SPEAKER_1")}, "Julian"), 0)
+            self.assertEqual(relabel_transcript_exact(path, [], {("mic", "SPEAKER_1")}, "Person Alpha"), 0)
 
     def test_returns_zero_when_target_ids_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
-            self.assertEqual(relabel_transcript_exact(path, manifest, set(), "Julian"), 0)
+            self.assertEqual(relabel_transcript_exact(path, manifest, set(), "Person Alpha"), 0)
 
     def test_returns_zero_when_transcript_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "nonexistent_transcript.txt"
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
-            self.assertEqual(relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian"), 0)
+            self.assertEqual(relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha"), 0)
 
     def test_idempotent_rerun_with_same_name_is_a_noop(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_transcript(tmp, "[00:05] [Julian] hello there")
+            path = self._write_transcript(tmp, "[00:05] [Person Alpha] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha")
             self.assertEqual(changed, 0)
 
     def test_rerun_with_different_name_overwrites_a_change_correction(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_transcript(tmp, "[00:05] [Julian] hello there")
+            path = self._write_transcript(tmp, "[00:05] [Person Alpha] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Max Prechtl")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Gamma")
             self.assertEqual(changed, 1)
-            self.assertIn("[00:05] [Max Prechtl] hello there", path.read_text())
+            self.assertIn("[00:05] [Person Gamma] hello there", path.read_text())
 
     def test_matches_by_position_not_by_timestamp_collision(self):
         # The real bug found this session in an EARLIER version of this
@@ -1051,11 +1051,11 @@ class RelabelTranscriptExactTests(unittest.TestCase):
                 {"start": 5.1, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
                 {"start": 5.9, "channel": "system", "diarization_speaker_id": "SPEAKER_0"},
             ]
-            changed = relabel_transcript_exact(path, manifest, {("system", "SPEAKER_0")}, "Inga Hahn")
+            changed = relabel_transcript_exact(path, manifest, {("system", "SPEAKER_0")}, "Person Beta")
             self.assertEqual(changed, 1)
             text = path.read_text()
             self.assertIn("[00:05] [Speaker 2] first", text)  # untouched -- position 0, mic
-            self.assertIn("[00:05] [Inga Hahn] second", text)  # relabeled -- position 1, system
+            self.assertIn("[00:05] [Person Beta] second", text)  # relabeled -- position 1, system
 
     def test_a_stale_manifest_of_the_same_length_refuses_and_returns_zero(self):
         # The length check was the only check, so a manifest describing a
@@ -1074,7 +1074,7 @@ class RelabelTranscriptExactTests(unittest.TestCase):
                 {"start": 5.1, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
                 {"start": 42.0, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"},
             ]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_0")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_0")}, "Person Alpha")
             self.assertEqual(changed, 0)
             text = path.read_text()
             self.assertIn("[00:05] [Speaker 2] first", text)
@@ -1087,7 +1087,7 @@ class RelabelTranscriptExactTests(unittest.TestCase):
         # reaches straight for entry.get(...).
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [Speaker 2] hello there")
-            changed = relabel_transcript_exact(path, [None], {("mic", "SPEAKER_0")}, "Julian")
+            changed = relabel_transcript_exact(path, [None], {("mic", "SPEAKER_0")}, "Person Alpha")
             self.assertEqual(changed, 0)
             self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
 
@@ -1097,7 +1097,7 @@ class RelabelTranscriptExactTests(unittest.TestCase):
                 tmp, "[00:05] [Speaker 2] first\n\n[00:10] [Speaker 3] second",
             )
             manifest = [{"start": 5.1, "channel": "mic", "diarization_speaker_id": "SPEAKER_0"}]
-            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_0")}, "Julian")
+            changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_0")}, "Person Alpha")
             self.assertEqual(changed, 0)
             text = path.read_text()
             self.assertIn("[00:05] [Speaker 2] first", text)
