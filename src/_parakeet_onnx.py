@@ -286,12 +286,20 @@ def _result_to_dict(result: Any, language: Optional[str]) -> dict:
         duration = float(_ts_end(last_ts))
 
     detected_language = language if (language and language != "auto") else None
+    # None when the result came from a single non-windowed pass (onnx-asr's
+    # own TimestampedResult, or a file shorter than one window) -- there is
+    # no windowing there, so there is nothing that could have been lost.
+    attempted = int(getattr(result, "windows_attempted", 0) or 0)
+    recognized = int(getattr(result, "windows_recognized", 0) or 0)
+    coverage = (recognized / attempted) if attempted > 0 else None
+
     return {
         "text": text or None,
         "segments": segments,
         "duration_seconds": duration,
         "detected_language": detected_language,
         "detected_language_probability": None,
+        "window_coverage": coverage,
     }
 
 
@@ -406,10 +414,19 @@ class _SimpleResult:
     ``_group_tokens_into_sentences`` read — ``text``, ``tokens``,
     ``timestamps`` — so a merged multi-window transcript flows through the
     exact same shaping path as a single-window TimestampedResult.
+
+    ``windows_attempted`` / ``windows_recognized`` carry how much of the file
+    actually made it through. A window whose ``recognize`` raises is skipped
+    on purpose (one bad window shouldn't fail a whole meeting), but the
+    resulting transcript then covers less audio than the recording holds, and
+    nothing downstream could tell. onnx-asr's own TimestampedResult has no
+    such fields, so every reader goes through ``getattr`` with a default.
     """
     text: str
     tokens: list
     timestamps: list
+    windows_attempted: int = 0
+    windows_recognized: int = 0
 
 
 def _load_wav_16k_mono(audio_path: Path):
@@ -539,4 +556,18 @@ def _transcribe_windows(ts_model: Any, samples) -> _SimpleResult:
     text = "".join(
         tok if isinstance(tok, str) else str(tok) for tok in merged_tokens
     ).strip()
-    return _SimpleResult(text=text, tokens=merged_tokens, timestamps=merged_timestamps)
+    if windows_recognized < windows_attempted:
+        logger.warning(
+            "ONNX transcription covered %d of %d windows (%d failed) — the "
+            "transcript is missing roughly %.0fs of audio",
+            windows_recognized, windows_attempted,
+            windows_attempted - windows_recognized,
+            (windows_attempted - windows_recognized) * PARAKEET_CHUNK_DURATION_S,
+        )
+    return _SimpleResult(
+        text=text,
+        tokens=merged_tokens,
+        timestamps=merged_timestamps,
+        windows_attempted=windows_attempted,
+        windows_recognized=windows_recognized,
+    )
