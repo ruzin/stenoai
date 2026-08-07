@@ -56,6 +56,7 @@ const { createDebugLog } = require('./debug-log');
 const { createTeardownRegistry } = require('./teardown');
 const { registerFoldersIpc } = require('./folders-ipc');
 const { registerSettingsIpc } = require('./settings-ipc');
+const { registerPersonSampleIpc } = require('./person-sample-ipc');
 const { registerObsidianSync } = require('./obsidian-sync');
 const { registerObsidianIpc } = require('./obsidian-ipc');
 const { isSafeToAutoInstall } = require('./update-idle-gate');
@@ -7970,8 +7971,18 @@ ipcMain.handle('list-person-profiles', async () => {
 });
 
 ipcMain.handle('suggest-speakers', async (_e, meetingStem) => {
+  const safeStem = path.basename(String(meetingStem || ''));
+  if (!safeStem) {
+    return {
+      success: true,
+      meeting_id: safeStem,
+      recording_available: false,
+      minimum_speaker_count: 0,
+      channels: {},
+    };
+  }
   try {
-    const out = await runPythonScript('simple_recorder.py', ['suggest-speakers', meetingStem]);
+    const out = await runPythonScript('simple_recorder.py', ['suggest-speakers', safeStem]);
     return JSON.parse(out);
   } catch (error) {
     return { success: false, error: error.message };
@@ -8348,6 +8359,7 @@ ipcMain.handle('pull-parakeet-model', async (event, modelId) => {
 // handlers coupled to another domain (telemetry, models, mic-monitor, calendar,
 // tray) deliberately stay in main.js until that domain's own extraction.
 registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog });
+registerPersonSampleIpc({ ipcMain, runPythonScript });
 
 // Fired by the renderer's silence detector. The renderer has already
 // asked main to stop the recording via pause/stop; this just surfaces

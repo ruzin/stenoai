@@ -41,6 +41,19 @@ class SuggestSpeakersCliTests(unittest.TestCase):
             result = CliRunner().invoke(simple_recorder.suggest_speakers, args)
         return result
 
+    def test_missing_sidecar_is_an_empty_successful_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(["missing"], tmp)
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(_last_json(result.output), {
+                "success": True,
+                "meeting_id": "missing",
+                "recording_available": False,
+                "minimum_speaker_count": 0,
+                "channels": {},
+            })
+
     def test_includes_duration_segment_count_and_first_timestamp(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp) / "output"

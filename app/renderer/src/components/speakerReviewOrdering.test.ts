@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { orderProfilesForRow } from './SpeakerReviewPanel';
+import { orderProfilesForRow, filterProfilesByQuery } from './SpeakerReviewPanel';
 
 const p = (display_name: string) => ({ display_name, person_id: `id-${display_name.toLowerCase()}` });
 
@@ -42,5 +42,71 @@ describe('orderProfilesForRow identity', () => {
     const other = { display_name: 'Alex', person_id: 'id-b' };
     const ordered = orderProfilesForRow([other, assigned], new Set(['id-a']));
     expect(ordered.map((x) => x.person_id)).toEqual(['id-a', 'id-b']);
+  });
+});
+
+describe('filterProfilesByQuery', () => {
+  it('matches anywhere in the name, not just the start', () => {
+    const found = filterProfilesByQuery([p('Jens Lindemann'), p('Marie Kutza')], 'linde');
+    expect(found.map((x) => x.display_name)).toEqual(['Jens Lindemann']);
+  });
+
+  it('ignores case', () => {
+    const found = filterProfilesByQuery([p('Ludger Dierkes')], 'DIERKES');
+    expect(found.map((x) => x.display_name)).toEqual(['Ludger Dierkes']);
+  });
+
+  it('uses the same case folding regardless of the operating-system locale', () => {
+    const nativeLocaleLower = String.prototype.toLocaleLowerCase;
+    const localeSpy = vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(
+      function forceTurkishLocale(this: string) {
+        return nativeLocaleLower.call(this, 'tr');
+      },
+    );
+    try {
+      const found = filterProfilesByQuery([p('Irmak')], 'irmak');
+      expect(found.map((x) => x.display_name)).toEqual(['Irmak']);
+    } finally {
+      localeSpy.mockRestore();
+    }
+  });
+
+  it('finds an accented name typed without accents', () => {
+    // A user on a keyboard that cannot produce the character otherwise has
+    // no path to that person at all.
+    const found = filterProfilesByQuery([p('Müller'), p('Mahler')], 'muller');
+    expect(found.map((x) => x.display_name)).toEqual(['Müller']);
+  });
+
+  it('finds an unaccented name typed with accents', () => {
+    const found = filterProfilesByQuery([p('Muller')], 'müller');
+    expect(found.map((x) => x.display_name)).toEqual(['Muller']);
+  });
+
+  it('returns everything for an empty or whitespace-only query', () => {
+    const all = [p('Zoe'), p('Alice')];
+    expect(filterProfilesByQuery(all, '')).toHaveLength(2);
+    expect(filterProfilesByQuery(all, '   ')).toHaveLength(2);
+  });
+
+  it('returns nothing when no name matches', () => {
+    expect(filterProfilesByQuery([p('Zoe'), p('Alice')], 'qqq')).toEqual([]);
+  });
+
+  it('preserves the order it was given, so "here" people stay on top', () => {
+    // Composed with orderProfilesForRow in the picker: filtering must not
+    // re-sort, or the already-in-this-meeting people lose their position.
+    const ordered = orderProfilesForRow(
+      [p('Anna Bauer'), p('Bea Bauer'), p('Zoe Bauer')],
+      new Set(['id-zoe bauer']),
+    );
+    const found = filterProfilesByQuery(ordered, 'bauer');
+    expect(found.map((x) => x.display_name)).toEqual(['Zoe Bauer', 'Anna Bauer', 'Bea Bauer']);
+  });
+
+  it('does not mutate the list it was given', () => {
+    const input = [p('Zoe'), p('Alice')];
+    filterProfilesByQuery(input, 'zoe');
+    expect(input.map((x) => x.display_name)).toEqual(['Zoe', 'Alice']);
   });
 });

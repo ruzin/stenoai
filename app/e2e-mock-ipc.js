@@ -202,6 +202,25 @@ const SPEAKER_SEED_MEETING = {
   discussion_areas: [],
 };
 
+// The sidecar can retain several clusters even where the transcript correctly
+// keeps its legacy non-diarised labels. This test-only mode exercises that
+// distinction with the same multi-cluster payload as the normal speaker seed.
+const seededSpeakerMeeting = () =>
+  process.env.STENOAI_E2E_SEED_SPEAKER_SIDECAR === '1'
+    ? { ...SPEAKER_SEED_MEETING, is_diarised: false }
+    : SPEAKER_SEED_MEETING;
+
+const MANY_PERSON_PROFILES = [
+  { person_id: 'p-alex', display_name: 'Alex Morgan', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-bao', display_name: 'Bao Nguyen', prototype_counts: { in_person: 2 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-daria', display_name: 'Daria Novak', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-emil', display_name: 'Emil Fischer', prototype_counts: { in_person: 1 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-fatima', display_name: 'Fatima Rahman', prototype_counts: { remote: 2 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-greta', display_name: 'Greta Silva', prototype_counts: { in_person: 1 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-hugo', display_name: 'Hugo Costa', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
+  { person_id: 'p-zora', display_name: 'Zora Quinn', prototype_counts: {}, hard_negative_counts: {}, updated_at: 0 },
+];
+
 /**
  * Carried-over segments for the resume/continue case, keyed off
  * STENOAI_E2E_SEED_PRIOR_SEGMENTS: `1` is one earlier recording, `twice` is a
@@ -309,12 +328,17 @@ function install({ ipcMain }) {
   // "6b. Speakers" section). Mutated by confirm/create/rename/delete so a
   // spec can click a real action and assert the panel re-renders from the
   // (mocked) refetch, the same way org-login/org-status do for org state.
-  const seedSpeakers = process.env.STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS === '1';
+  const seedSpeakers =
+    process.env.STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS === '1'
+    || process.env.STENOAI_E2E_SEED_SPEAKER_SIDECAR === '1'
+    || process.env.STENOAI_E2E_SEED_SPEAKER_SINGLE_CLUSTER === '1'
+    || process.env.STENOAI_E2E_SEED_MANY_PEOPLE === '1';
   const speakerState = {
     personProfiles: seedSpeakers
       ? [
-          { person_id: 'p-alpha', display_name: 'Person Alpha', prototype_counts: { remote: 2 }, hard_negative_counts: {}, updated_at: 0 },
-          { person_id: 'p-beta', display_name: 'Person Beta', prototype_counts: { remote: 1 }, hard_negative_counts: {}, updated_at: 0 },
+          { person_id: 'p-alpha', display_name: 'Person Alpha', prototype_counts: { remote: 2 }, hard_negative_counts: {}, sample_available: true, updated_at: 0 },
+          { person_id: 'p-beta', display_name: 'Person Beta', prototype_counts: { remote: 1 }, hard_negative_counts: {}, sample_available: false, updated_at: 0 },
+          ...(process.env.STENOAI_E2E_SEED_MANY_PEOPLE === '1' ? MANY_PERSON_PROFILES : []),
         ]
       : [],
     // channels -> { diarization_speaker_id: SpeakerSuggestion }
@@ -403,6 +427,14 @@ function install({ ipcMain }) {
           },
         }
       : {},
+  };
+
+  const speakerSuggestionsForResponse = () => {
+    if (process.env.STENOAI_E2E_SEED_SPEAKER_SINGLE_CLUSTER !== '1') {
+      return speakerState.suggestions;
+    }
+    const firstCluster = speakerState.suggestions.mic?.SPEAKER_0;
+    return firstCluster ? { mic: { SPEAKER_0: firstCluster } } : {};
   };
 
   // Mirrors Config._person_name_taken's case/whitespace-insensitive
@@ -591,7 +623,7 @@ function install({ ipcMain }) {
         return { success: true, meetings: [PROCESSING_MEETING] };
       }
       if (seedSpeakers) {
-        return { success: true, meetings: [SPEAKER_SEED_MEETING] };
+        return { success: true, meetings: [seededSpeakerMeeting()] };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         return { success: true, meetings: [seededMeeting()] };
@@ -630,7 +662,7 @@ function install({ ipcMain }) {
         return { success: true, meeting: applyOverlay(PROCESSING_MEETING) };
       }
       if (seedSpeakers) {
-        return { success: true, meeting: SPEAKER_SEED_MEETING };
+        return { success: true, meeting: seededSpeakerMeeting() };
       }
       if (process.env.STENOAI_E2E_SEED_MEETING === '1') {
         // seededMeeting() carries main's optional template-report; applyOverlay
@@ -829,21 +861,24 @@ function install({ ipcMain }) {
 
     'list-person-profiles': async () => ({ success: true, person_profiles: speakerState.personProfiles }),
 
-    'suggest-speakers': async (_event, meetingStem) => ({
-      success: true,
-      meeting_id: meetingStem,
-      recording_available: seedSpeakers,
-      // Same derivation as the real minimum_speaker_count: every cluster is
-      // at least one person, every cluster marked as mixed is at least two.
-      minimum_speaker_count: Object.values(speakerState.suggestions).reduce(
-        (sum, clusters) =>
-          sum
-          + Object.keys(clusters).length
-          + Object.values(clusters).filter((c) => c.contains_multiple_speakers).length,
-        0,
-      ),
-      channels: speakerState.suggestions,
-    }),
+    'suggest-speakers': async (_event, meetingStem) => {
+      const channels = speakerSuggestionsForResponse();
+      return {
+        success: true,
+        meeting_id: meetingStem,
+        recording_available: seedSpeakers,
+        // Same derivation as the real minimum_speaker_count: every cluster is
+        // at least one person, every cluster marked as mixed is at least two.
+        minimum_speaker_count: Object.values(channels).reduce(
+          (sum, clusters) =>
+            sum
+            + Object.keys(clusters).length
+            + Object.values(clusters).filter((c) => c.contains_multiple_speakers).length,
+          0,
+        ),
+        channels,
+      };
+    },
 
     // Marks/clears "this cluster holds more than one person". Mirrors the
     // real CLI's effect on a later suggest-speakers refetch, which is what
@@ -947,6 +982,17 @@ function install({ ipcMain }) {
       // A real (if silent/empty) minimal 16-bit mono WAV -- so the renderer's
       // blob: URL construction + <audio> playback path is exercised with
       // valid audio data, not just a placeholder string.
+      return { success: true, audio_base64: MINIMAL_WAV_BASE64 };
+    },
+
+    'get-person-sample-audio': async (_event, personId) => {
+      const profile = speakerState.personProfiles.find((person) => person.person_id === personId);
+      if (!profile?.sample_available) {
+        return { success: false, error: 'voice sample unavailable' };
+      }
+      if (process.env.STENOAI_E2E_PERSON_SAMPLE_FAIL === '1') {
+        return { success: false, error: 'simulated private backend detail' };
+      }
       return { success: true, audio_base64: MINIMAL_WAV_BASE64 };
     },
 
@@ -1056,6 +1102,9 @@ function install({ ipcMain }) {
     // confirmed_by_user from person_profiles on every call, so a deleted
     // person's references disappear from any cluster that pointed at them.
     'delete-person-profile': async (_event, id) => {
+      if (process.env.STENOAI_E2E_DELETE_PERSON_FAIL === '1') {
+        return { success: false, error: 'simulated delete failure' };
+      }
       const before = speakerState.personProfiles.length;
       speakerState.personProfiles = speakerState.personProfiles.filter((p) => p.person_id !== id);
       const deleted = speakerState.personProfiles.length < before;

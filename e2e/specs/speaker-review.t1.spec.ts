@@ -13,12 +13,45 @@ import type { Page } from '@playwright/test';
 
 const SUMMARY_FILE = 'speaker-review-mtg_summary.json';
 
-async function openDetail(page: Page) {
+async function navigateToDetail(page: Page) {
   await page.evaluate((f) => {
     window.location.hash = `#/meetings/${encodeURIComponent(f)}`;
   }, SUMMARY_FILE);
+  await expect(page.getByTestId('meeting-detail-title')).toContainText('Speaker Review Meeting');
+}
+
+async function openDetail(page: Page) {
+  await navigateToDetail(page);
   await expect(page.getByTestId('speaker-review-panel')).toBeVisible();
 }
+
+test('sidecar has multiple clusters opens review even when the transcript is not diarised', async ({
+  launchApp,
+}) => {
+  // This catches a gate based only on is_diarised: the sidecar's separate
+  // clusters are still actionable even though their transcript labels stay
+  // generic.
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SIDECAR: '1' },
+  });
+
+  await openDetail(page);
+  await expect(page.locator('[data-testid^="speaker-row-"]').nth(1)).toBeVisible();
+});
+
+test('a single sidecar cluster remains reviewable when the transcript is diarised', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SINGLE_CLUSTER: '1' },
+  });
+
+  await openDetail(page);
+  await expect(page.getByTestId('speaker-row-mic:SPEAKER_0')).toBeVisible();
+  await expect(page.locator('[data-testid^="speaker-row-"]').nth(1)).toHaveCount(0);
+});
 
 test('Approve confirms the suggested person for a "confirmed"-tier row', async ({ launchApp }) => {
   const { page } = await launchApp({
@@ -108,7 +141,35 @@ test('New person blocks creating a duplicate of an existing person', async ({ la
   await expect(page.getByTestId('speaker-new-person-submit')).toBeEnabled();
 });
 
-test('a person profile can be deleted from the Change popover, unwinding any row confirmed as them', async ({
+test('searches a large people library without exposing deletion in the meeting picker', async ({
+  launchApp,
+}) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1',
+      STENOAI_E2E_SEED_MANY_PEOPLE: '1',
+    },
+  });
+  await openDetail(page);
+
+  const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  await row.getByRole('button', { name: 'Change' }).click();
+
+  const search = page.getByTestId('speaker-person-search-mic:SPEAKER_0');
+  await expect(search).toBeVisible();
+  await expect(page.locator('[data-testid^="speaker-pick-person-"]')).toHaveCount(10);
+  await expect(page.locator('[data-testid^="speaker-delete-person-"]')).toHaveCount(0);
+
+  await search.fill('Zora');
+  await expect(page.getByRole('button', { name: 'Zora Quinn', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Person Alpha', exact: true })).toHaveCount(0);
+
+  await search.fill('not in this library');
+  await expect(page.getByTestId('speaker-person-no-match')).toHaveText('No match');
+});
+
+test('People settings deletion unwinds a confirmed meeting row', async ({
   launchApp,
 }) => {
   const { page } = await launchApp({
@@ -121,23 +182,151 @@ test('a person profile can be deleted from the Change popover, unwinding any row
   await row.getByRole('button', { name: 'Approve' }).click();
   await expect(row).toContainText('✓ Confirmed as Person Alpha');
 
-  await row.getByRole('button', { name: 'Change' }).click();
-  await page.getByTestId('speaker-delete-person-p-alpha').click();
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+  await expect(page.getByText('Deleting someone here removes their voice profile from every meeting.')).toBeVisible();
+  await page.getByTestId('people-delete-p-alpha').click();
 
   const confirmDialog = page.locator('[data-confirm-dialog]');
   await expect(confirmDialog).toContainText('Delete Person Alpha?');
+  await expect(confirmDialog).toContainText("This removes them from every meeting's speaker suggestions");
+  await expect(confirmDialog).toContainText("This can't be undone.");
   await confirmDialog.getByRole('button', { name: 'Delete' }).click();
   await expect(confirmDialog).toHaveCount(0);
 
-  // The deleted person's evidence is gone -- the cluster that was
-  // confirmed as them reverts to unidentified, not left pointing at a
-  // person that no longer exists.
-  await expect(row).toContainText('Unidentified speaker');
-  await expect(row).not.toContainText('Person Alpha');
+  await openDetail(page);
+  await page.getByTestId('speaker-toggle-filtered').click();
+  const revertedRow = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  await expect(revertedRow).toBeVisible();
+  await expect(revertedRow).toContainText('Unidentified speaker');
+  await expect(revertedRow).not.toContainText('Person Alpha');
+});
 
-  // And they're gone from the Change list too.
-  await row.getByRole('button', { name: 'Change' }).click();
-  await expect(page.getByRole('button', { name: 'Person Alpha', exact: true })).toHaveCount(0);
+test('People settings delete buttons identify the affected person', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+
+  await expect(page.getByRole('button', { name: 'Delete Person Alpha', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete Person Beta', exact: true })).toBeVisible();
+});
+
+test('People settings plays one representative voice sample', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+
+  const play = page.getByRole('button', { name: 'Play voice sample for Person Alpha' });
+  await expect(play).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Play voice sample for Person Beta' }),
+  ).toHaveCount(0);
+
+  await play.click();
+  const stop = page.getByRole('button', { name: 'Stop voice sample for Person Alpha' });
+  await expect(stop).toBeVisible();
+  await stop.click();
+  await expect(play).toBeVisible();
+});
+
+test('People settings returns to Play without an error when a voice sample ends', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+
+  const play = page.getByRole('button', { name: 'Play voice sample for Person Alpha' });
+  await play.click();
+  await expect(page.getByRole('button', { name: 'Stop voice sample for Person Alpha' })).toBeVisible();
+  await expect(play).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByTestId('people-play-error-p-alpha')).toHaveCount(0);
+});
+
+test('People settings reports a media error after playback has started', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+  await page.evaluate(() => {
+    HTMLMediaElement.prototype.play = function () {
+      window.setTimeout(() => this.dispatchEvent(new Event('error')), 50);
+      return Promise.resolve();
+    };
+  });
+
+  await page.getByRole('button', { name: 'Play voice sample for Person Alpha' }).click();
+  await expect(page.getByTestId('people-play-error-p-alpha')).toHaveText(
+    'Could not play this voice sample. Try again.',
+  );
+});
+
+test('People settings keeps voice sample failures private', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1',
+      STENOAI_E2E_PERSON_SAMPLE_FAIL: '1',
+    },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+  await page.getByTestId('people-play-p-alpha').click();
+
+  await expect(page.getByTestId('people-play-error-p-alpha')).toHaveText(
+    'Could not play this voice sample. Try again.',
+  );
+  await expect(page.getByText('simulated private backend detail')).toHaveCount(0);
+});
+
+test('People settings deletion failure stays visible and keeps the profile', async ({ launchApp }) => {
+  const { page } = await launchApp({
+    mockIpc: true,
+    env: {
+      STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1',
+      STENOAI_E2E_DELETE_PERSON_FAIL: '1',
+    },
+  });
+
+  await page.evaluate(() => {
+    window.location.hash = '#/settings?tab=people';
+  });
+  await expect(page.getByTestId('people-tab')).toBeVisible();
+  await page.getByTestId('people-delete-p-alpha').click();
+
+  const confirmDialog = page.locator('[data-confirm-dialog]');
+  await confirmDialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(confirmDialog).toBeVisible();
+  await expect(page.getByTestId('people-delete-error')).toHaveText(
+    'Could not delete this person. Try again.',
+  );
+  await expect(page.getByTestId('people-tab')).toContainText('Person Alpha');
 });
 
 // Replaces 'Keep generic dismisses the row locally, no confirm call needed',
@@ -326,7 +515,7 @@ test('confirming one row disables every OTHER row\'s actions too, not just the o
   await expect(rowB.getByRole('button', { name: 'Change' })).toBeEnabled();
 });
 
-test('a likely-artifact row is hidden by default, reachable via the filtered-rows toggle', async ({
+test('filtered rows remain reachable through the filtered-rows toggle', async ({
   launchApp,
 }) => {
   const { page } = await launchApp({
@@ -335,16 +524,19 @@ test('a likely-artifact row is hidden by default, reachable via the filtered-row
   });
   await openDetail(page);
 
+  await expect(page.getByTestId('speaker-row-mic:SPEAKER_3')).toHaveCount(0);
   await expect(page.getByTestId('speaker-row-mic:SPEAKER_4')).toHaveCount(0);
 
   const toggle = page.getByTestId('speaker-toggle-filtered');
-  await expect(toggle).toHaveText('Show 1 filtered row');
+  await expect(toggle).toHaveText('Show 2 filtered rows');
   await toggle.click();
 
+  await expect(page.getByTestId('speaker-row-mic:SPEAKER_3')).toBeVisible();
   await expect(page.getByTestId('speaker-row-mic:SPEAKER_4')).toBeVisible();
   await expect(toggle).toHaveText('Hide filtered rows');
 
   await toggle.click();
+  await expect(page.getByTestId('speaker-row-mic:SPEAKER_3')).toHaveCount(0);
   await expect(page.getByTestId('speaker-row-mic:SPEAKER_4')).toHaveCount(0);
 });
 

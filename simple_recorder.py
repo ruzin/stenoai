@@ -4860,8 +4860,9 @@ def list_person_profiles():
     Testing surface for the human-confirmed speaker-suggestion feature
     (see src.speaker_suggestions) before any approval UI exists — mirrors
     the existing template/voiceprint CLI commands in shape."""
-    from src.config import get_config
+    from src.config import get_config, get_data_dirs
     profiles = get_config().get_person_profiles()
+    dirs = get_data_dirs()
 
     def _counts_by_context(entries):
         counts: dict = {}
@@ -4877,11 +4878,178 @@ def list_person_profiles():
                 "display_name": p.get("display_name"),
                 "prototype_counts": _counts_by_context(p.get("prototypes") or []),
                 "hard_negative_counts": _counts_by_context(p.get("hard_negatives") or []),
+                "sample_available": _resolve_person_sample(p, dirs) is not None,
                 "updated_at": p.get("updated_at"),
             }
             for p in profiles
         ],
     }))
+
+
+def _resolve_person_sample(profile: dict, dirs: dict) -> Optional[dict]:
+    """Return the best currently playable positive prototype for a person.
+
+    The returned provenance stays inside Python. Renderer-facing profile
+    listings expose only whether a sample is available, and the playback
+    command resolves this again at click time so a deleted recording or a
+    replaced diarization run cannot be played through stale UI state.
+    """
+    from src.speaker_suggestions import (
+        clusters_from_sidecar_channel,
+        merge_same_channel_fragments,
+        prototype_run_matches,
+        read_speakers_sidecar,
+    )
+
+    if not isinstance(profile, dict):
+        return None
+
+    prototypes = profile.get("prototypes") or []
+    if not isinstance(prototypes, list):
+        return None
+
+    candidates = []
+    for prototype in prototypes:
+        if not isinstance(prototype, dict):
+            continue
+        meeting_id = prototype.get("meeting_id")
+        channel = prototype.get("channel")
+        speaker_id = prototype.get("diarization_speaker_id")
+        if not all(isinstance(value, str) and value for value in (meeting_id, channel, speaker_id)):
+            continue
+
+        sidecar = read_speakers_sidecar(Path(dirs["output"]), meeting_id)
+        if not isinstance(sidecar, dict):
+            continue
+        diarization_run = sidecar.get("diarization_run") or {}
+        if not isinstance(diarization_run, dict):
+            continue
+        sidecar_run_id = diarization_run.get("run_id")
+        if not prototype_run_matches(prototype, sidecar_run_id):
+            continue
+
+        channels = sidecar.get("channels") or {}
+        if not isinstance(channels, dict):
+            continue
+        channel_data = channels.get(channel)
+        if not isinstance(channel_data, dict):
+            continue
+        raw_clusters_by_id = channel_data.get("clusters") or {}
+        if not isinstance(raw_clusters_by_id, dict):
+            continue
+        valid_clusters = {
+            sid: cluster
+            for sid, cluster in raw_clusters_by_id.items()
+            if isinstance(sid, str)
+            and isinstance(cluster, dict)
+            and isinstance(cluster.get("embedding"), list)
+            and bool(cluster["embedding"])
+            and all(isinstance(value, (int, float)) for value in cluster["embedding"])
+        }
+        safe_channel_data = {**channel_data, "clusters": valid_clusters}
+        raw_clusters = clusters_from_sidecar_channel(meeting_id, safe_channel_data)
+        if speaker_id not in raw_clusters:
+            continue
+        try:
+            clusters, id_resolution = merge_same_channel_fragments(raw_clusters)
+        except (IndexError, TypeError, ValueError, ZeroDivisionError):
+            continue
+        resolved_id = id_resolution.get(speaker_id)
+        if resolved_id not in clusters:
+            continue
+        context = clusters[resolved_id][1]
+
+        pooled_segments = [
+            segment
+            for fragment_id in [resolved_id, *context.merged_from]
+            for segment in (raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
+            if isinstance(segment, dict)
+            and isinstance(segment.get("start"), (int, float))
+            and isinstance(segment.get("end"), (int, float))
+            and segment["end"] > segment["start"]
+        ]
+        if not pooled_segments:
+            continue
+
+        recording_path = _find_recording_file(Path(dirs["recordings"]), meeting_id)
+        if recording_path is None:
+            continue
+
+        def _number(value) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        candidates.append({
+            "meeting_id": meeting_id,
+            "channel": channel,
+            "diarization_speaker_id": speaker_id,
+            "recording_path": recording_path,
+            "pooled_segments": pooled_segments,
+            "quality_score": _number(prototype.get("quality_score")),
+            "created_at": _number(prototype.get("created_at")),
+        })
+
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda candidate: (
+            -candidate["quality_score"],
+            -candidate["created_at"],
+            candidate["meeting_id"],
+            candidate["channel"],
+            candidate["diarization_speaker_id"],
+        ),
+    )
+
+
+@cli.command(name="get-person-sample-audio")
+@click.argument("person_id")
+def get_person_sample_audio(person_id):
+    """Return one representative, currently playable clip for a person.
+
+    Profile provenance stays private to the backend. Missing people, stale
+    sidecars, removed recordings, and extraction failures intentionally share
+    one fixed response so local meeting and filesystem details cannot leak to
+    the renderer through an error message.
+    """
+    import base64
+    import tempfile
+
+    from src.config import get_config, get_data_dirs
+    from src.speaker_suggestions import extract_speaker_sample_audio
+
+    profile = get_config().get_person_profile(person_id)
+    sample = _resolve_person_sample(profile, get_data_dirs()) if profile else None
+    if sample is None:
+        print(json.dumps({"success": False, "error": "voice sample unavailable"}))
+        return
+
+    output_path = (
+        Path(tempfile.gettempdir())
+        / f"steno_person_sample_{os.getpid()}_{time.time_ns()}.wav"
+    )
+    try:
+        ok = extract_speaker_sample_audio(
+            sample["recording_path"],
+            sample["channel"],
+            sample["pooled_segments"],
+            output_path,
+        )
+        if not ok:
+            print(json.dumps({"success": False, "error": "voice sample unavailable"}))
+            return
+        audio_bytes = output_path.read_bytes()
+        print(json.dumps({
+            "success": True,
+            "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
+        }))
+    except (OSError, ValueError):
+        print(json.dumps({"success": False, "error": "voice sample unavailable"}))
+    finally:
+        output_path.unlink(missing_ok=True)
 
 
 @cli.command(name='create-person-profile')
@@ -5743,11 +5911,13 @@ def suggest_speakers(meeting_stem):
     sidecar = read_speakers_sidecar(dirs["output"], meeting_stem)
     if sidecar is None:
         print(json.dumps({
-            "success": False,
-            "error": f"No speakers sidecar found for {meeting_stem!r} — run the backfill "
-                     "command first, or record a new meeting.",
+            "success": True,
+            "meeting_id": meeting_stem,
+            "recording_available": False,
+            "minimum_speaker_count": 0,
+            "channels": {},
         }))
-        sys.exit(1)
+        return
 
     # Whether a play button can appear at all -- checked once per meeting,
     # not per cluster, since it's the same source recording either way.

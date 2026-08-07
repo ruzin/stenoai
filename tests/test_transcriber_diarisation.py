@@ -36,6 +36,7 @@ from src.transcriber import (
     _assign_asr_segments_to_diar_segments,
     _clamp_overlapping_diar_segments,
     _cluster_channel_labels,
+    _cluster_channel_label_plan,
     _diarised_split_timeout,
     _format_timestamp,
     _merge_close_diar_segments,
@@ -1277,6 +1278,55 @@ class ClusterChannelLabelsTests(unittest.TestCase):
         ]
         self.assertIsNotNone(_cluster_channel_labels(segments, "You"))
 
+    def test_sustained_minorities_stay_distinct_while_short_blip_folds_to_dominant(self):
+        # A long channel with 95.2% dominant speech can still contain two
+        # speakers with enough speech to deserve their own transcript labels.
+        segments = [
+            {"start": 0.0, "end": 3487.4, "speaker": "SPEAKER_0"},
+            {"start": 3487.4, "end": 3598.5, "speaker": "SPEAKER_1"},
+            {"start": 3598.5, "end": 3659.7, "speaker": "SPEAKER_2"},
+            {"start": 3659.7, "end": 3662.3, "speaker": "SPEAKER_3"},
+        ]
+        expected_labels = {
+            "SPEAKER_0": "You",
+            "SPEAKER_1": "__diar__You__SPEAKER_1",
+            "SPEAKER_2": "__diar__You__SPEAKER_2",
+            "SPEAKER_3": "You",
+        }
+
+        labels, eligible_speaker_ids = _cluster_channel_label_plan(segments, "You")
+
+        self.assertEqual(labels, expected_labels)
+        self.assertEqual(eligible_speaker_ids, {"SPEAKER_0", "SPEAKER_1", "SPEAKER_2"})
+        self.assertEqual(_cluster_channel_labels(segments, "You"), expected_labels)
+
+    def test_dominant_channel_with_11_84_second_minority_remains_collapsed(self):
+        segments = [
+            {"start": 0.0, "end": 180.0, "speaker": "SPEAKER_0"},
+            {"start": 180.0, "end": 191.84, "speaker": "SPEAKER_1"},
+        ]
+
+        labels, _eligible_speaker_ids = _cluster_channel_label_plan(segments, "Others")
+
+        self.assertIsNone(labels)
+        self.assertIsNone(_cluster_channel_labels(segments, "Others"))
+
+    def test_fragmented_minority_above_duration_floor_remains_collapsed(self):
+        segments = [{"start": 0.0, "end": 300.0, "speaker": "SPEAKER_0"}]
+        segments.extend(
+            {
+                "start": 300.0 + index * 0.6,
+                "end": 300.6 + index * 0.6,
+                "speaker": "SPEAKER_1",
+            }
+            for index in range(30)
+        )
+
+        labels, eligible_speaker_ids = _cluster_channel_label_plan(segments, "You")
+
+        self.assertIsNone(labels)
+        self.assertEqual(eligible_speaker_ids, set())
+
 
 class ResolveSpeakerPlaceholdersTests(unittest.TestCase):
     def test_legacy_labels_are_untouched(self):
@@ -1595,6 +1645,77 @@ class ApplyVoiceprintMatchesTests(unittest.TestCase):
             )
         self.assertEqual(result["SPEAKER_1"], "You")
         self.assertEqual(result["SPEAKER_0"], "__diar__You__SPEAKER_0")
+
+    def test_self_match_reanchors_sustained_minority_without_promoting_folded_blip(self):
+        # SPEAKER_3 is a short folded blip with the closest owner embedding.
+        # It must be excluded from matching, so SPEAKER_1 becomes "You" and
+        # the blip stays attached to SPEAKER_0's replacement placeholder,
+        # even though the blip appears first in the label mapping.
+        cluster_labels = {
+            "SPEAKER_3": "You",
+            "SPEAKER_0": "You",
+            "SPEAKER_1": "__diar__You__SPEAKER_1",
+            "SPEAKER_2": "__diar__You__SPEAKER_2",
+        }
+        speaker_embeddings = {
+            "SPEAKER_3": [0.0, 1.0],
+            "SPEAKER_0": [1.0, 0.0],
+            "SPEAKER_1": [0.1, 0.995],
+            "SPEAKER_2": [-1.0, 0.0],
+        }
+        voiceprints = [
+            {"name": "ignored", "centroid": [0.0, 1.0], "embeddings": [], "is_self": True},
+        ]
+        with patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = voiceprints
+            result = _apply_voiceprint_matches(
+                speaker_embeddings,
+                cluster_labels,
+                "You",
+                allow_self_match=True,
+                eligible_speaker_ids={"SPEAKER_0", "SPEAKER_1", "SPEAKER_2"},
+            )
+
+        self.assertEqual(result["SPEAKER_1"], "You")
+        self.assertEqual(result["SPEAKER_0"], "__diar__You__SPEAKER_0")
+        self.assertEqual(result["SPEAKER_2"], "__diar__You__SPEAKER_2")
+        self.assertEqual(result["SPEAKER_3"], "__diar__You__SPEAKER_0")
+
+    def test_self_match_on_dominant_keeps_folded_blip_folded(self):
+        # A sustained minority keeps the channel split, while SPEAKER_2 is
+        # a short blip folded into SPEAKER_0. A self match already on that
+        # dominant cluster must leave both of their labels untouched.
+        segments = [
+            {"start": 0.0, "end": 300.0, "speaker": "SPEAKER_0"},
+            {"start": 300.0, "end": 320.0, "speaker": "SPEAKER_1"},
+            {"start": 320.0, "end": 322.0, "speaker": "SPEAKER_2"},
+        ]
+        cluster_labels, eligible_speaker_ids = _cluster_channel_label_plan(segments, "You")
+        expected_labels = {
+            "SPEAKER_0": "You",
+            "SPEAKER_1": "__diar__You__SPEAKER_1",
+            "SPEAKER_2": "You",
+        }
+        speaker_embeddings = {
+            "SPEAKER_0": [0.0, 1.0],
+            "SPEAKER_1": [1.0, 0.0],
+            "SPEAKER_2": [0.0, 1.0],
+        }
+        voiceprints = [
+            {"name": "ignored", "centroid": [0.0, 1.0], "embeddings": [], "is_self": True},
+        ]
+        with patch("src.config.get_config") as mock_get_config:
+            mock_get_config.return_value.get_voiceprints.return_value = voiceprints
+            result = _apply_voiceprint_matches(
+                speaker_embeddings,
+                cluster_labels,
+                "You",
+                allow_self_match=True,
+                eligible_speaker_ids=eligible_speaker_ids,
+            )
+
+        self.assertEqual(cluster_labels, expected_labels)
+        self.assertEqual(result, expected_labels)
 
     def test_self_match_ignored_when_not_allowed(self):
         # System-audio channel (allow_self_match=False): matching is skipped
