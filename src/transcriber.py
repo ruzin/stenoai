@@ -42,7 +42,11 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 from src._heartbeat import _emit_heartbeat
-from src.speaker_suggestions import build_clusters_from_diarization, determine_recording_type
+from src.speaker_suggestions import (
+    SUGGESTION_MIN_AVG_TURN_SECONDS,
+    build_clusters_from_diarization,
+    determine_recording_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,14 +142,14 @@ STENO_DIARIZE_MERGE_GAP_S = 0.3
 STENO_DIARIZE_TIMEOUT_FLOOR_S = 120
 
 # If one diarizer cluster holds this share (or more) of a channel's total
-# speaking time, the channel is treated as single-speaker — any other
-# cluster is almost certainly a brief misdiarization blip (observed
-# empirically: short/overlapping noise segments from Sortformer on
-# single-mic audio), not a real second speaker. Gates both the legacy
-# "Speaker N" placeholder path (_cluster_channel_labels) and voiceprint
-# matching, since a spurious cluster shouldn't get embedded and matched
-# either.
+# speaking time, short minority clusters are folded into the dominant
+# speaker's transcript label. Sustained minority clusters still remain
+# distinct after clearing both the cumulative-duration floor and the existing
+# calibrated average-turn floor used by speaker suggestions. This keeps many
+# tiny echo/crosstalk fragments from adding up to a false additional speaker.
 CHANNEL_DOMINANCE_THRESHOLD = 0.92
+CHANNEL_DOMINANCE_MIN_MINOR_SPEECH_SECONDS = 15.0
+CHANNEL_DOMINANCE_MIN_AVG_TURN_SECONDS = SUGGESTION_MIN_AVG_TURN_SECONDS
 
 # Sentinel text substituted when transcription produces no usable output
 # (genuine silence or all-hallucination). Callers compare against this to
@@ -959,32 +963,69 @@ def _worst_window_coverage(*results: Optional[dict]) -> Optional[float]:
     return min(values) if values else None
 
 
-def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Optional[dict[str, str]]:
-    """Map each diarizer speaker id in diar_segments to either the channel's
-    legacy label (the cluster with the most total speaking time) or a
-    placeholder key for every other cluster, later resolved to "Speaker N"
-    by _resolve_speaker_placeholders.
+def _cluster_channel_label_plan(
+    diar_segments: list[dict], legacy_label: str,
+) -> tuple[Optional[dict[str, str]], set[str]]:
+    """Return transcript labels and clusters eligible for self matching.
 
-    Returns None when diar_segments contains a single (or zero) distinct
-    speaker, OR when one cluster's share of total speaking time is at or
-    above CHANNEL_DOMINANCE_THRESHOLD — the byte-identical-to-legacy fast
-    path, since a barely-there second cluster is almost certainly
-    misdiarization noise rather than a real second speaker.
+    A channel at or beyond the dominance ratio remains legacy-labeled unless
+    at least one minority cluster has enough total speech and a sufficiently
+    long average turn to be a sustained second speaker. Short or fragmented
+    clusters fold into the dominant label and are excluded from self-voiceprint
+    matching, so diarization artifacts cannot re-anchor the channel or acquire
+    their own speaker label.
     """
-    speaker_ids = {s["speaker"] for s in diar_segments}
-    if len(speaker_ids) <= 1:
-        return None
-    totals: dict[str, float] = {sid: 0.0 for sid in speaker_ids}
+    totals: dict[str, float] = {}
+    turn_counts: dict[str, int] = {}
     for s in diar_segments:
-        totals[s["speaker"]] += s["end"] - s["start"]
+        sid = s["speaker"]
+        totals[sid] = totals.get(sid, 0.0) + s["end"] - s["start"]
+        turn_counts[sid] = turn_counts.get(sid, 0) + 1
+    if len(totals) <= 1:
+        return None, set()
+
     dominant = max(totals, key=totals.get)
     total_time = sum(totals.values())
-    if total_time > 0 and totals[dominant] / total_time >= CHANNEL_DOMINANCE_THRESHOLD:
-        return None
-    return {
-        sid: (legacy_label if sid == dominant else f"__diar__{legacy_label}__{sid}")
-        for sid in speaker_ids
+    if total_time <= 0 or totals[dominant] / total_time < CHANNEL_DOMINANCE_THRESHOLD:
+        return (
+            {
+                sid: (legacy_label if sid == dominant else f"__diar__{legacy_label}__{sid}")
+                for sid in totals
+            },
+            set(totals),
+        )
+
+    sustained_minorities = {
+        sid
+        for sid, speech_seconds in totals.items()
+        if sid != dominant
+        and speech_seconds >= CHANNEL_DOMINANCE_MIN_MINOR_SPEECH_SECONDS
+        and speech_seconds / turn_counts[sid] >= CHANNEL_DOMINANCE_MIN_AVG_TURN_SECONDS
     }
+    if not sustained_minorities:
+        return None, set()
+
+    return (
+        {
+            sid: (
+                legacy_label
+                if sid == dominant or sid not in sustained_minorities
+                else f"__diar__{legacy_label}__{sid}"
+            )
+            for sid in totals
+        },
+        {dominant, *sustained_minorities},
+    )
+
+
+def _cluster_channel_labels(diar_segments: list[dict], legacy_label: str) -> Optional[dict[str, str]]:
+    """Return the transcript-label portion of _cluster_channel_label_plan.
+
+    This public compatibility wrapper preserves callers that only need the
+    cluster-to-label mapping; new diarization code also consumes the plan's
+    self-voiceprint eligibility set.
+    """
+    return _cluster_channel_label_plan(diar_segments, legacy_label)[0]
 
 
 # Cosine-distance threshold + confidence margin for voiceprint matching
@@ -1022,6 +1063,7 @@ def _apply_voiceprint_matches(
     cluster_labels: dict[str, str],
     legacy_label: str,
     allow_self_match: bool,
+    eligible_speaker_ids: Optional[set[str]] = None,
 ) -> dict[str, str]:
     """Override cluster_labels with a self-voiceprint match where found.
 
@@ -1069,17 +1111,33 @@ def _apply_voiceprint_matches(
 
     best_sid, best_dist = None, VOICEPRINT_DISTANCE_THRESHOLD
     for sid, emb in speaker_embeddings.items():
+        if eligible_speaker_ids is not None and sid not in eligible_speaker_ids:
+            continue
         dist = _voiceprint_distance(emb, self_vp)
         if dist < best_dist:
             best_sid, best_dist = sid, dist
     you_cluster = best_sid
 
     if you_cluster is not None:
+        old_dominant = next(
+            (
+                sid
+                for sid, label in updated.items()
+                if label == legacy_label
+                and (eligible_speaker_ids is None or sid in eligible_speaker_ids)
+            ),
+            None,
+        )
+        old_dominant_placeholder = (
+            f"__diar__{legacy_label}__{old_dominant}" if old_dominant is not None else None
+        )
+        if you_cluster == old_dominant:
+            return updated
         for sid in updated:
             if sid == you_cluster:
                 updated[sid] = legacy_label
             elif updated[sid] == legacy_label:
-                updated[sid] = f"__diar__{legacy_label}__{sid}"
+                updated[sid] = old_dominant_placeholder or f"__diar__{legacy_label}__{sid}"
 
     return updated
 
@@ -1127,10 +1185,11 @@ def _tag_channel_segments(
     diarizer's own segment boundaries (with ASR sentences reassigned into
     them via _assign_asr_segments_to_diar_segments). The cluster with the
     most total speaking time keeps the channel's legacy label
-    ("You"/"Others"); every other cluster gets a placeholder resolved to
-    "Speaker N" later — unless the self voiceprint matches a different
-    cluster, in which case the legacy label re-anchors onto that cluster
-    instead (see _apply_voiceprint_matches; mic channel only). NAMED
+    ("You"/"Others"). Other clusters get a placeholder resolved to
+    "Speaker N" later, except short minority clusters in a dominant channel,
+    which fold into the dominant label. A self voiceprint can re-anchor the
+    legacy label onto a different eligible cluster instead (see
+    _apply_voiceprint_matches; mic channel only). NAMED
     (non-self) speaker identification does not happen automatically here —
     see src.speaker_suggestions for the human-confirmed suggestion flow.
     ANY failure — missing binary, timeout, bad JSON, a single-cluster
@@ -1150,10 +1209,9 @@ def _tag_channel_segments(
         return []
 
     # Set below whenever diarization ran and produced real diar_segments
-    # but _cluster_channel_labels decided NOT to split the transcript
-    # (single real speaker, or multiple ids where one dominates >=
-    # CHANNEL_DOMINANCE_THRESHOLD -- a normal 1:1 call's remote side is
-    # very often exactly this shape). legacy_tagged below still looks up
+    # but _cluster_channel_label_plan decided NOT to split the transcript
+    # (a single real speaker, or no sustained minority in a channel at or
+    # beyond CHANNEL_DOMINANCE_THRESHOLD). legacy_tagged below still looks up
     # each ASR segment's OWN nearest diar segment for exact per-line
     # provenance -- unlike single_raw_sid's earlier, cruder approach
     # (claiming ONE id for the whole legacy-labeled span), this stays
@@ -1174,10 +1232,16 @@ def _tag_channel_segments(
                 diarize_result = _run_steno_diarize(channel_path, timeout, progress_sink=_progress_sink)
             if diarize_result:
                 diar_segments, speaker_embeddings = diarize_result
-                cluster_labels = _cluster_channel_labels(diar_segments, legacy_label)
+                cluster_labels, eligible_speaker_ids = _cluster_channel_label_plan(
+                    diar_segments, legacy_label,
+                )
                 if cluster_labels:
                     cluster_labels = _apply_voiceprint_matches(
-                        speaker_embeddings, cluster_labels, legacy_label, allow_self_match,
+                        speaker_embeddings,
+                        cluster_labels,
+                        legacy_label,
+                        allow_self_match,
+                        eligible_speaker_ids,
                     )
                     unplaceable = _assign_asr_segments_to_diar_segments(asr_segments, diar_segments)
                     diar_tagged = []
@@ -1211,11 +1275,11 @@ def _tag_channel_segments(
                             )
                         return diar_tagged
                 else:
-                    # _cluster_channel_labels returned None: either a
-                    # genuinely single distinct diarizer id, or multiple
-                    # ids where one dominates >= CHANNEL_DOMINANCE_THRESHOLD
-                    # (a barely-there second cluster, treated as noise) --
-                    # not a diarization failure either way. The TRANSCRIPT
+                    # _cluster_channel_label_plan returned no labels: either
+                    # a genuinely single distinct diarizer id, or no
+                    # sustained minority in a channel at or beyond
+                    # CHANNEL_DOMINANCE_THRESHOLD -- not a diarization
+                    # failure either way. The TRANSCRIPT
                     # correctly falls back to plain legacy_label (no
                     # "Speaker N" split needed for one continuous voice) --
                     # but real diar_segments exist, so legacy_tagged below

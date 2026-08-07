@@ -141,6 +141,18 @@ export function useGetSpeakerSampleAudio() {
   });
 }
 
+/** Fetch one representative clip for a known person on demand.
+ *
+ * The backend resolves private meeting/cluster provenance at click time and
+ * returns only audio bytes, so the renderer never caches local source details.
+ */
+export function useGetPersonSampleAudio() {
+  return useMutation({
+    mutationFn: async (personId: string) =>
+      unwrap(await ipc().speakers.getPersonSampleAudio(personId)),
+  });
+}
+
 /** Marking a cluster as holding more than one person. Invalidates the whole
  * speakers tree rather than just this meeting's suggestions: the marking
  * withdraws the cluster from meeting-wide person exclusivity, so ANOTHER

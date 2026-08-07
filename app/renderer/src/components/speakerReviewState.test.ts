@@ -4,6 +4,7 @@ import {
   isKeptGeneric,
   showsKeepGenericButton,
   showsNamingActions,
+  shouldShowSpeakerReview,
   staleAssignmentNotice,
 } from './SpeakerReviewPanel';
 
@@ -25,6 +26,27 @@ const suggestion = (over: Record<string, unknown> = {}) =>
     confirmed_by_user: null,
     ...over,
   }) as never;
+
+describe('shouldShowSpeakerReview', () => {
+  it('opens a non-diarised transcript only when its sidecar has multiple clusters', () => {
+    expect(shouldShowSpeakerReview('meeting', false, true, 2)).toBe(true);
+    expect(shouldShowSpeakerReview('meeting', false, true, 1)).toBe(false);
+    expect(shouldShowSpeakerReview('meeting', false, true, 0)).toBe(false);
+  });
+
+  it('preserves a one-cluster panel for a diarised transcript', () => {
+    expect(shouldShowSpeakerReview('meeting', true, true, 1)).toBe(true);
+  });
+
+  it('hides a diarised transcript when no speaker rows exist', () => {
+    expect(shouldShowSpeakerReview('meeting', true, true, 0)).toBe(false);
+  });
+
+  it('waits for a meeting stem and a completed suggestion response', () => {
+    expect(shouldShowSpeakerReview(null, true, true, 2)).toBe(false);
+    expect(shouldShowSpeakerReview('meeting', true, false, 2)).toBe(false);
+  });
+});
 
 describe('isKeptGeneric', () => {
   it('reads the marking out of the query payload, not component state', () => {

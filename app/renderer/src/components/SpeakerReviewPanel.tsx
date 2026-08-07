@@ -1,10 +1,9 @@
 import * as React from 'react';
 import {
-  Check, ChevronDown, ChevronRight, Loader2, Play, Square, Trash2, Undo2, Users, UserPlus, X,
+  Check, ChevronDown, ChevronRight, Loader2, Play, Square, Undo2, Users, UserPlus, X,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -12,12 +11,11 @@ import {
   usePersonProfiles,
   useConfirmSpeaker,
   useGetSpeakerSampleAudio,
-  useDeletePersonProfile,
   useMarkSpeakerCluster,
   useSetClusterReviewState,
   meetingStemFromSummaryFile,
 } from '@/hooks/useSpeakerSuggestions';
-import type { PersonProfile, SpeakerSuggestion, StaleAssignment } from '@/lib/ipc';
+import type { SpeakerSuggestion, StaleAssignment } from '@/lib/ipc';
 
 interface SpeakerReviewPanelProps {
   summaryFile: string;
@@ -83,6 +81,51 @@ export function orderProfilesForRow<T extends { display_name: string; person_id:
     if (aHere !== bHere) return aHere ? -1 : 1;
     return a.display_name.localeCompare(b.display_name);
   });
+}
+
+/** Above this many people the picker grows a search box.
+ *
+ *  The list is ordered "already in this meeting" first, which carries a small
+ *  library on its own -- a search box under a handful of names is a control to
+ *  tab past, not a help. It stops carrying one as soon as the answer is not on
+ *  screen, which is what this threshold marks. */
+export const PERSON_SEARCH_THRESHOLD = 8;
+
+/** Substring match on the display name, case- and diacritic-insensitive.
+ *
+ *  Order is preserved, so the "already in this meeting" people stay on top of
+ *  a filtered list too. An empty or whitespace-only query matches everything
+ *  rather than nothing -- the box starts empty on every open, and a query of
+ *  spaces is someone mid-typing, not someone asking for no results.
+ *
+ *  NFD + combining-mark strip so a library written with umlauts stays
+ *  reachable from an ASCII keyboard: typing "Mullen" has to find "Müllen",
+ *  because the alternative for a user who cannot produce the character is no
+ *  path to that person at all. */
+function foldForSearch(value: string): string {
+  return value.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
+}
+
+export function filterProfilesByQuery<T extends { display_name: string }>(
+  profiles: T[],
+  query: string,
+): T[] {
+  const needle = foldForSearch(query.trim());
+  if (!needle) return profiles;
+  return profiles.filter((p) => foldForSearch(p.display_name).includes(needle));
+}
+
+export function shouldShowSpeakerReview(
+  meetingStem: string | null,
+  isDiarised: boolean,
+  hasSuggestionData: boolean,
+  rowCount: number,
+): meetingStem is string {
+  return Boolean(
+    meetingStem
+    && hasSuggestionData
+    && rowCount > (isDiarised ? 0 : 1),
+  );
 }
 
 /** Did a human look at this row and choose to leave it unnamed?
@@ -270,14 +313,14 @@ function PlaySampleButton({
  * generic actions. Lives inside MeetingDetail's content flow, gated on
  * `is_diarised` -- see the speaker_identification plan doc's Phase 4.
  *
- * Rows with status "none" AND zero candidates (nothing actionable at all --
- * in practice this is almost always the device owner's own mic-channel
- * cluster, which never matches a named PersonProfile) are hidden entirely.
- * Rows flagged `is_likely_artifact` (the real-data-validated echo/crosstalk
- * pattern -- see SUGGESTION_MIN_AVG_TURN_SECONDS) are hidden BY DEFAULT but
- * still reachable via a "Show N filtered rows" toggle -- never silently
- * dropped, since a human might legitimately want to review one (e.g. a
- * real quiet third participant).
+ * Two kinds of row are hidden BY DEFAULT but stay reachable via the "Show N
+ * filtered rows" toggle -- never silently dropped, since a human might
+ * legitimately want to review either: rows with status "none" AND zero
+ * candidates (nothing actionable at all -- in practice almost always the
+ * device owner's own mic-channel cluster, and the shape a row takes on after
+ * the person it pointed at is deleted), and rows flagged `is_likely_artifact`
+ * (the real-data-validated echo/crosstalk pattern -- see
+ * SUGGESTION_MIN_AVG_TURN_SECONDS).
  */
 /** `action` names what the person actually clicked. Without it every
  * failure on this row read "Couldn't confirm", including a failed
@@ -287,27 +330,21 @@ type ConfirmFeedback = { message: string; action?: 'confirm' | 'mark' | 'unmark'
 
 export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPanelProps) {
   const meetingStem = meetingStemFromSummaryFile(summaryFile);
-  const suggestionsQuery = useSpeakerSuggestions(isDiarised ? meetingStem : null);
+  const suggestionsQuery = useSpeakerSuggestions(meetingStem);
   const profilesQuery = usePersonProfiles();
   const confirmSpeaker = useConfirmSpeaker();
-  const deleteProfile = useDeletePersonProfile();
   const markCluster = useMarkSpeakerCluster();
   const setReviewState = useSetClusterReviewState();
 
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [changeOpenFor, setChangeOpenFor] = React.useState<string | null>(null);
+  // Search query of the open "Change" picker. One piece of state rather than
+  // one per row: only a single picker can be open at a time (changeOpenFor),
+  // and it is cleared on every open/close.
+  const [personQuery, setPersonQuery] = React.useState('');
   const [newPersonRow, setNewPersonRow] = React.useState<Row | null>(null);
   const [newPersonName, setNewPersonName] = React.useState('');
   const [showFiltered, setShowFiltered] = React.useState(false);
-  const [deleteTarget, setDeleteTarget] = React.useState<PersonProfile | null>(null);
-  // Rows with status "none" and zero candidates are normally hidden as
-  // "nothing actionable" (in practice almost always the device owner's own
-  // mic-channel cluster). But deleting a person clears suggested_person_id/
-  // candidates for any cluster that pointed at them, which would otherwise
-  // make that row -- which the user was just looking at -- vanish with no
-  // way to give it a new name. Force those specific rows to stay visible
-  // for the rest of this session once that's happened.
-  const [keepVisible, setKeepVisible] = React.useState<Set<string>>(new Set());
   // Error acknowledgment only -- a SUCCESSFUL confirm needs no separate
   // feedback state: useConfirmSpeaker's onSuccess awaits the suggestions
   // refetch before resolving, so by the time this fires the row's own
@@ -317,26 +354,20 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   // confirm attempt starts on that row.
   const [feedback, setFeedback] = React.useState<Map<string, ConfirmFeedback>>(new Map());
 
-  if (!isDiarised || !meetingStem) return null;
-
   const rows: Row[] = [];
   const channels = suggestionsQuery.data?.channels ?? {};
   for (const channel of Object.keys(channels)) {
     for (const [diarizationSpeakerId, suggestion] of Object.entries(channels[channel])) {
-      const key = rowKey({ channel, diarizationSpeakerId });
-      // A MARKED cluster is deliberately status "none" with zero
-      // candidates, which is exactly the "nothing actionable" shape hidden
-      // below -- so without this it would disappear the moment it was
-      // marked, taking the only way to undo a misclick with it. Marking is
-      // a statement about the recording, not a dismissal.
-      const nothingActionable =
-        suggestion.status === 'none'
-        && suggestion.candidates.length === 0
-        && !suggestion.contains_multiple_speakers;
-      if (nothingActionable && !keepVisible.has(key)) continue;
       rows.push({ channel, diarizationSpeakerId, suggestion });
     }
   }
+
+  if (!shouldShowSpeakerReview(
+    meetingStem,
+    isDiarised,
+    Boolean(suggestionsQuery.data),
+    rows.length,
+  )) return null;
   // Most speaking time first. Reviewing is voluntary and can be abandoned at
   // any point, so the order decides how much of the transcript the first
   // couple of decisions actually cover -- and the more the diarizer splits a
@@ -371,17 +402,35 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   // behind a toggle the user has no reason to open. Same for a row kept
   // generic: the marking IS a deliberate action, and its undo lives on the
   // row itself.
+  // "Nothing actionable at all" -- no suggestion, nobody to pick from. In
+  // practice almost always the device owner's own mic-channel cluster, which
+  // never matches a named person.
+  //
+  // Demoted into the filtered list rather than dropped outright. Deleting a
+  // person puts a row into exactly this shape (the backend recomputes
+  // candidates from the profiles, so the cluster that pointed at them is left
+  // with none), and until now the only thing keeping such a row on screen was
+  // a session-scoped `keepVisible` set the panel's own delete button filled.
+  // With deletion moved to Settings there is no such moment to hook into, and
+  // dropping the row would leave the cluster the user just detached from a
+  // person unreachable -- no way to give it a new name, no way to even see it.
+  // A reachable row behind the existing toggle survives a remount, which the
+  // old set never did.
+  const nothingActionable = (row: Row) =>
+    row.suggestion.status === 'none' && row.suggestion.candidates.length === 0;
+  // A row a human has explicitly marked or kept generic is never filtered:
+  // marking is a statement about the recording, not a dismissal, and its undo
+  // lives on the row itself -- burying that behind a toggle would hide the
+  // only way back from a misclick.
   const isFiltered = (row: Row) =>
-    row.suggestion.is_likely_artifact
+    (row.suggestion.is_likely_artifact || nothingActionable(row))
     && !row.suggestion.contains_multiple_speakers
     && !isKeptGeneric(row.suggestion);
-  const artifactRows = rows.filter(isFiltered);
+  const filteredRows = rows.filter(isFiltered);
   const primaryRows = rows.filter((row) => !isFiltered(row));
   const visibleRows = showFiltered ? rows : primaryRows;
   const recordingAvailable = suggestionsQuery.data?.recording_available ?? false;
   const staleNotice = staleAssignmentNotice(suggestionsQuery.data?.stale_assignments);
-
-  if (!suggestionsQuery.data || rows.length === 0) return null;
 
   const duplicateProfile = newPersonName.trim()
     ? (profilesQuery.data ?? []).find((p) => namesCollide(p.display_name, newPersonName))
@@ -618,7 +667,13 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   )}
                 <Popover
                   open={changeOpenFor === key}
-                  onOpenChange={(open) => setChangeOpenFor(open ? key : null)}
+                  onOpenChange={(open) => {
+                    setChangeOpenFor(open ? key : null);
+                    // Each opening starts a fresh search. Carrying the last
+                    // query over would silently hide most of the list on a
+                    // picker the user just opened.
+                    setPersonQuery('');
+                  }}
                 >
                   <PopoverTrigger asChild>
                     <Button
@@ -631,60 +686,85 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                       <ChevronDown className="size-[13px]" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-[200px] p-1">
+                  <PopoverContent align="end" className="w-[240px] p-1">
                     {(profilesQuery.data ?? []).length === 0 ? (
                       <div className="px-2 py-1.5 text-[12.5px]" style={{ color: 'var(--fg-2)' }}>
                         No known people yet
                       </div>
                     ) : (
-                      orderProfilesForRow(profilesQuery.data ?? [], alreadyInMeeting).map((profile) => (
-                        <div key={profile.person_id} className="flex items-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setChangeOpenFor(null);
-                              confirm(row, { personId: profile.person_id });
-                            }}
-                            className="flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
-                            style={{ color: 'var(--fg-1)' }}
-                            data-testid={`speaker-pick-person-${profile.person_id}`}
-                          >
-                            <span className="truncate">{profile.display_name}</span>
-                            {alreadyInMeeting.has(profile.person_id) && (
-                              // The diarizer splits one voice across several
-                              // clusters routinely, so "this is the person I
-                              // already named above" is a frequent, correct
-                              // answer -- and one that has to be visibly
-                              // available, because the alternative a hurried
-                              // user reaches for is "New person", which
-                              // records the same voice as two people and
-                              // makes them a hard negative against
-                              // themselves.
-                              <span
-                                className="shrink-0 text-[11px]"
-                                style={{ color: 'var(--fg-2)' }}
-                                title="Already assigned in this meeting"
-                              >
-                                here
-                              </span>
+                      (() => {
+                        const ordered = orderProfilesForRow(
+                          profilesQuery.data ?? [],
+                          alreadyInMeeting,
+                        );
+                        const matches = filterProfilesByQuery(ordered, personQuery);
+                        return (
+                          <>
+                            {/* Below the threshold the whole list is visible at
+                                a glance and a search box is just a control to
+                                skip past. The list itself scrolls regardless --
+                                the cap is what keeps a large library from
+                                growing a popover taller than the window. */}
+                            {ordered.length >= PERSON_SEARCH_THRESHOLD && (
+                              <div className="p-1">
+                                <Input
+                                  value={personQuery}
+                                  onChange={(e) => setPersonQuery(e.target.value)}
+                                  placeholder="Search people…"
+                                  aria-label="Search people"
+                                  className="h-[28px] text-[13px]"
+                                  data-testid={`speaker-person-search-${key}`}
+                                />
+                              </div>
                             )}
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Delete ${profile.display_name}`}
-                            title={`Delete ${profile.display_name}`}
-                            onClick={() => {
-                              setChangeOpenFor(null);
-                              setDeleteTarget(profile);
-                            }}
-                            className="flex shrink-0 items-center rounded-md p-1.5 transition-colors hover:bg-[color:var(--surface-hover)]"
-                            style={{ color: 'var(--fg-2)' }}
-                            data-testid={`speaker-delete-person-${profile.person_id}`}
-                          >
-                            <Trash2 className="size-[13px]" />
-                          </button>
-                        </div>
-                      ))
+                            <div className="max-h-[280px] overflow-y-auto">
+                              {matches.length === 0 ? (
+                                <div
+                                  className="px-2 py-1.5 text-[12.5px]"
+                                  style={{ color: 'var(--fg-2)' }}
+                                  data-testid="speaker-person-no-match"
+                                >
+                                  No match
+                                </div>
+                              ) : (
+                                matches.map((profile) => (
+                                  <button
+                                    key={profile.person_id}
+                                    type="button"
+                                    onClick={() => {
+                                      setChangeOpenFor(null);
+                                      confirm(row, { personId: profile.person_id });
+                                    }}
+                                    className="flex w-full min-w-0 items-center gap-1.5 truncate rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-[color:var(--surface-hover)]"
+                                    style={{ color: 'var(--fg-1)' }}
+                                    data-testid={`speaker-pick-person-${profile.person_id}`}
+                                  >
+                                    <span className="truncate">{profile.display_name}</span>
+                                    {alreadyInMeeting.has(profile.person_id) && (
+                                      // The diarizer splits one voice across
+                                      // several clusters routinely, so "this is
+                                      // the person I already named above" is a
+                                      // frequent, correct answer -- and one that
+                                      // has to be visibly available, because the
+                                      // alternative a hurried user reaches for is
+                                      // "New person", which records the same
+                                      // voice as two people and makes them a hard
+                                      // negative against themselves.
+                                      <span
+                                        className="shrink-0 text-[11px]"
+                                        style={{ color: 'var(--fg-2)' }}
+                                        title="Already assigned in this meeting"
+                                      >
+                                        here
+                                      </span>
+                                    )}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()
                     )}
                   </PopoverContent>
                 </Popover>
@@ -855,7 +935,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
         })}
       </div>
 
-      {artifactRows.length > 0 && (
+      {filteredRows.length > 0 && (
         <button
           type="button"
           onClick={() => setShowFiltered((prev) => !prev)}
@@ -865,7 +945,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
         >
           {showFiltered
             ? 'Hide filtered rows'
-            : `Show ${artifactRows.length} filtered row${artifactRows.length === 1 ? '' : 's'}`}
+            : `Show ${filteredRows.length} filtered row${filteredRows.length === 1 ? '' : 's'}`}
         </button>
       )}
 
@@ -914,30 +994,6 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={deleteTarget ? `Delete ${deleteTarget.display_name}?` : ''}
-        description="This removes them from every meeting's speaker suggestions and deletes their voice profile. This can't be undone."
-        confirmLabel="Delete"
-        destructive
-        isPending={deleteProfile.isPending}
-        onConfirm={async () => {
-          if (!deleteTarget) return;
-          const affectedKeys = rows
-            .filter((r) => r.suggestion.suggested_person_id === deleteTarget.person_id)
-            .map(rowKey);
-          await deleteProfile.mutateAsync(deleteTarget.person_id);
-          if (affectedKeys.length > 0) {
-            setKeepVisible((prev) => {
-              const next = new Set(prev);
-              affectedKeys.forEach((k) => next.add(k));
-              return next;
-            });
-          }
-          setDeleteTarget(null);
-        }}
-      />
     </section>
   );
 }

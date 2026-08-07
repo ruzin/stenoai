@@ -437,6 +437,7 @@ export interface PersonProfile {
   display_name: string;
   prototype_counts: Record<string, number>;
   hard_negative_counts: Record<string, number>;
+  sample_available: boolean;
   updated_at: number;
 }
 export type ListPersonProfilesResponse = Result<{ person_profiles: PersonProfile[] }>;
@@ -1154,6 +1155,7 @@ export interface StenoaiBridge {
       [meetingStem: string, channel: string, diarizationSpeakerId: string, segmentIndex?: number],
       GetSpeakerSampleAudioResponse
     >;
+    getPersonSampleAudio: RequestFn<[id: string], GetSpeakerSampleAudioResponse>;
     markCluster: RequestFn<[params: MarkSpeakerClusterParams], MarkSpeakerClusterResponse>;
     setClusterReviewState: RequestFn<
       [params: SetClusterReviewStateParams],

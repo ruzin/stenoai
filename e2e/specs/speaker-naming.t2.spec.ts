@@ -41,6 +41,7 @@ type StenoWindow = Window & {
       suggestForMeeting: (meetingStem: string) => Promise<{
         success: boolean;
         recording_available?: boolean;
+        minimum_speaker_count?: number;
         channels: Record<
           string,
           Record<
@@ -71,6 +72,25 @@ type StenoWindow = Window & {
 };
 
 const readJson = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
+
+test('a meeting without a speaker sidecar returns an empty result without backend failure', async ({
+  launchApp,
+}) => {
+  const realDirBefore = fileSig(realUserDataDir());
+  const { page } = await launchApp();
+
+  const suggestions = await page.evaluate(() =>
+    (window as StenoWindow).stenoai.speakers.suggestForMeeting('e2e-no-speaker-sidecar'),
+  );
+
+  expect(suggestions).toMatchObject({
+    success: true,
+    recording_available: false,
+    minimum_speaker_count: 0,
+    channels: {},
+  });
+  expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
 
 test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels the saved transcript', async ({
   launchApp,
