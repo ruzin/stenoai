@@ -1159,6 +1159,11 @@ def _identity_matching_enabled() -> bool:
         return True
 
 
+def _has_spoken_content(text: Optional[str]) -> bool:
+    """Whether ASR text contains a letter or number, not just punctuation."""
+    return any(char.isalnum() for char in (text or ""))
+
+
 def _tag_channel_segments(
     asr_segments: list[dict],
     channel_path: Optional[Path],
@@ -1208,6 +1213,21 @@ def _tag_channel_segments(
     if not asr_segments:
         return []
 
+    # ASR can emit punctuation-only tail content for digital silence
+    # (observed as a standalone "." after macOS `say` speech). Treating any
+    # non-empty string as speech lets that artifact acquire its own diarizer
+    # cluster and creates a phantom "Speaker N" transcript line. A real
+    # utterance always contains at least one Unicode letter or number. Apply
+    # this once before diarization and again below because word-level speaker
+    # assignment can split a valid "Thanks ." input into "Thanks" and ".".
+    asr_segments = [
+        segment
+        for segment in asr_segments
+        if _has_spoken_content(segment.get("text"))
+    ]
+    if not asr_segments:
+        return []
+
     # Set below whenever diarization ran and produced real diar_segments
     # but _cluster_channel_label_plan decided NOT to split the transcript
     # (a single real speaker, or no sustained minority in a channel at or
@@ -1247,7 +1267,7 @@ def _tag_channel_segments(
                     diar_tagged = []
                     for segment in diar_segments:
                         text = (segment.get("text") or "").strip()
-                        if text:
+                        if _has_spoken_content(text):
                             diar_tagged.append((
                                 segment["start"], cluster_labels[segment["speaker"]], text,
                                 segment["speaker"],
@@ -1259,7 +1279,7 @@ def _tag_channel_segments(
                     # real speech; naming a speaker for it would invent one.
                     for asr_segment in unplaceable:
                         text = (asr_segment.get("text") or "").strip()
-                        if text:
+                        if _has_spoken_content(text):
                             diar_tagged.append((
                                 float(asr_segment.get("start") or 0.0), legacy_label, text, None,
                             ))
@@ -1307,7 +1327,7 @@ def _tag_channel_segments(
     legacy_tagged: list[tuple[float, str, str, Optional[str]]] = []
     for s in asr_segments:
         text = (s.get("text") or "").strip()
-        if not text:
+        if not _has_spoken_content(text):
             continue
         start = float(s.get("start") or 0.0)
         raw_sid = None

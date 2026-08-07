@@ -29,8 +29,6 @@ from src.transcriber import (
     DIARISED_SPLIT_TIMEOUT_S,
     MIN_RMS_THRESHOLD,
     STENO_DIARIZE_MERGE_GAP_S,
-    VOICEPRINT_CONFIDENCE_MARGIN,
-    VOICEPRINT_DISTANCE_THRESHOLD,
     WhisperTranscriber,
     _apply_voiceprint_matches,
     _assign_asr_segments_to_diar_segments,
@@ -1362,6 +1360,36 @@ class TagChannelSegmentsTests(unittest.TestCase):
         # No diarization at all -> no raw cluster id to record.
         self.assertEqual(result, [(0.0, "You", "Hi.", None)])
 
+    def test_punctuation_only_asr_segment_does_not_create_a_speaker_turn(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        channel_path = Path(d.name) / "system.wav"
+        channel_path.write_bytes(b"stub")
+
+        diar_segments = [
+            {"start": 0.0, "end": 4.0, "speaker": "SPEAKER_0"},
+            {"start": 4.0, "end": 6.0, "speaker": "SPEAKER_1"},
+        ]
+        # Parakeet can return the spoken word and a silence-tail full stop as
+        # one ASR segment. Speaker-boundary assignment then splits that input,
+        # so filtering only the original segment is too early.
+        asr_segments = [
+            {
+                "text": "Thanks .",
+                "start": 0.2,
+                "end": 5.2,
+                "tokens": [
+                    {"text": " Thanks", "start": 0.2, "end": 1.0},
+                    {"text": ".", "start": 5.0, "end": 5.1},
+                ],
+            },
+        ]
+
+        with patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, {})):
+            result = _tag_channel_segments(asr_segments, channel_path, 6.0, "Others")
+
+        self.assertEqual(result, [(0.0, "Others", "Thanks", "SPEAKER_0")])
+
     def test_single_dominant_speaker_still_populates_clusters_out(self):
         # _cluster_channel_labels returns None for a single real speaker
         # (or one that overwhelmingly dominates) -- correctly NOT a
@@ -1479,7 +1507,7 @@ class TagChannelSegmentsTests(unittest.TestCase):
         with patch("sys.stdout", buf), \
              patch("src.transcriber._run_steno_diarize", return_value=(diar_segments, embeddings)):
             _tag_channel_segments(asr_segments, channel_path, 5.0, "You")
-        lines = [l for l in buf.getvalue().splitlines() if l.startswith("PROGRESS:diarize:")]
+        lines = [line for line in buf.getvalue().splitlines() if line.startswith("PROGRESS:diarize:")]
         self.assertEqual(lines, ["PROGRESS:diarize:You:start", "PROGRESS:diarize:You:done"])
 
     def test_prints_progress_diarize_done_even_when_diarization_fails(self):
@@ -1496,7 +1524,7 @@ class TagChannelSegmentsTests(unittest.TestCase):
         with patch("sys.stdout", buf), \
              patch("src.transcriber._run_steno_diarize", return_value=None):
             result = _tag_channel_segments(asr_segments, channel_path, 5.0, "You")
-        lines = [l for l in buf.getvalue().splitlines() if l.startswith("PROGRESS:diarize:")]
+        lines = [line for line in buf.getvalue().splitlines() if line.startswith("PROGRESS:diarize:")]
         self.assertEqual(lines, ["PROGRESS:diarize:You:start", "PROGRESS:diarize:You:done"])
         self.assertEqual(result, [(0.5, "You", "Hello there.", None)])
 
@@ -1525,7 +1553,7 @@ class TagChannelSegmentsTests(unittest.TestCase):
         with patch("sys.stdout", buf), \
              patch("src.transcriber._run_steno_diarize", side_effect=_fake_run_steno_diarize):
             _tag_channel_segments(asr_segments, channel_path, 5.0, "You")
-        lines = [l for l in buf.getvalue().splitlines() if l.startswith("PROGRESS:diarize:")]
+        lines = [line for line in buf.getvalue().splitlines() if line.startswith("PROGRESS:diarize:")]
         self.assertEqual(
             lines,
             [
@@ -1563,7 +1591,7 @@ class HeartbeatWhileWaitingTests(unittest.TestCase):
                     if buf.getvalue().count("HEARTBEAT:diarize:You") >= 2:
                         break
                     time.sleep(0.01)
-        lines = [l for l in buf.getvalue().splitlines() if l == "HEARTBEAT:diarize:You"]
+        lines = [line for line in buf.getvalue().splitlines() if line == "HEARTBEAT:diarize:You"]
         self.assertGreaterEqual(len(lines), 2)
 
     def test_background_thread_stops_when_context_exits(self):
