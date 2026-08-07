@@ -47,13 +47,13 @@ describe('orderProfilesForRow identity', () => {
 
 describe('filterProfilesByQuery', () => {
   it('matches anywhere in the name, not just the start', () => {
-    const found = filterProfilesByQuery([p('Jens Lindemann'), p('Marie Kutza')], 'linde');
-    expect(found.map((x) => x.display_name)).toEqual(['Jens Lindemann']);
+    const found = filterProfilesByQuery([p('Zora Quinn'), p('Marie Kutza')], 'quinn');
+    expect(found.map((x) => x.display_name)).toEqual(['Zora Quinn']);
   });
 
   it('ignores case', () => {
-    const found = filterProfilesByQuery([p('Ludger Dierkes')], 'DIERKES');
-    expect(found.map((x) => x.display_name)).toEqual(['Ludger Dierkes']);
+    const found = filterProfilesByQuery([p('Mira Novak')], 'NOVAK');
+    expect(found.map((x) => x.display_name)).toEqual(['Mira Novak']);
   });
 
   it('uses the same case folding regardless of the operating-system locale', () => {
