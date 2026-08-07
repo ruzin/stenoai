@@ -255,7 +255,18 @@ class PersonSampleCliTests(unittest.TestCase):
     def test_get_person_sample_audio_returns_valid_wav_base64(self):
         profile = self._seed_playable_person()
 
-        result = self._run(simple_recorder.get_person_sample_audio, [profile["person_id"]])
+        def fake_extract(_recording_path, _channel, _segments, output_path):
+            _write_wav(Path(output_path), seconds=0.25)
+            return True
+
+        with mock.patch(
+            "src.speaker_suggestions.extract_speaker_sample_audio",
+            side_effect=fake_extract,
+        ) as extract:
+            result = self._run(
+                simple_recorder.get_person_sample_audio,
+                [profile["person_id"]],
+            )
 
         self.assertEqual(result.exit_code, 0)
         payload = json.loads(result.output)
@@ -263,6 +274,7 @@ class PersonSampleCliTests(unittest.TestCase):
         audio = base64.b64decode(payload["audio_base64"])
         self.assertEqual(audio[:4], b"RIFF")
         self.assertEqual(audio[8:12], b"WAVE")
+        extract.assert_called_once()
 
     def test_missing_person_returns_fixed_failure_without_provenance(self):
         result = self._run(simple_recorder.get_person_sample_audio, ["missing"])
