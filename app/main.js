@@ -105,6 +105,7 @@ const os = require('os');
 const { URL, URLSearchParams } = require('url');
 const crypto = require('crypto');
 const { EXPORT_CANCELED } = require('./ipc-sentinels');
+const { mayExposeMainWindow } = require('./e2e-window-visibility');
 const { PostHog } = require('posthog-node');
 const { initMain } = require('electron-audio-loopback');
 const { autoUpdater } = require('electron-updater');
@@ -113,11 +114,13 @@ const { autoUpdater } = require('electron-updater');
 //   STENOAI_USER_DATA_DIR — per-test temp userData dir (must be set before app.whenReady)
 //   STENOAI_E2E=1         — skip tray, auto-updater, PostHog telemetry
 //   STENOAI_E2E_MOCK_IPC=1 — install deterministic mock IPC handlers
+//   STENOAI_E2E_HEADLESS=1 - keep the main window rendered but never visible/focused
 if (process.env.STENOAI_USER_DATA_DIR) {
   app.setPath('userData', process.env.STENOAI_USER_DATA_DIR);
 }
 const IS_E2E = process.env.STENOAI_E2E === '1';
 const IS_E2E_MOCK_IPC = process.env.STENOAI_E2E_MOCK_IPC === '1';
+const IS_E2E_HEADLESS = IS_E2E && process.env.STENOAI_E2E_HEADLESS === '1';
 
 // Global (system-wide) accelerator to toggle recording. CommandOrControl
 // resolves to Cmd on macOS and Ctrl on Windows/Linux, so no manual
@@ -479,6 +482,20 @@ let launchedByShortcut = false;
 // suppress the first window show so Steno starts hidden in the tray/menu bar,
 // and we tag telemetry so background opens don't inflate DAU/funnels.
 let launchedHidden = false;
+
+/**
+ * The only route through which the main window may be exposed.
+ * Playwright can fully drive a hidden BrowserWindow, so E2E runs use the same
+ * renderer without repeatedly stealing focus from the host desktop.
+ */
+function exposeMainWindow({ focus = true } = {}) {
+  if (!mayExposeMainWindow({ isE2EHeadless: IS_E2E_HEADLESS })) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  if (focus) mainWindow.focus();
+  return true;
+}
 
 // SHORTCUT_PROTOCOL and the pure deep-link parsing/sanitizing helpers
 // (extractShortcutUrlFromArgv, sanitizeShortcutUrlForLogs, parseShortcutUrl,
@@ -1646,9 +1663,7 @@ function createWindow(options = {}) {
     if (launchedHidden) {
       return;
     }
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.show();
-    }
+    exposeMainWindow({ focus: false });
   };
 
   mainWindow.once('ready-to-show', () => {
@@ -1722,10 +1737,7 @@ function updateTrayIcon(recording) {
 }
 
 function showAndFocusWindow() {
-  if (mainWindow) {
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  exposeMainWindow();
 }
 
 function updateTrayMenu() {
@@ -1848,11 +1860,7 @@ if (!gotSingleInstanceLock) {
       }
     }
 
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    exposeMainWindow();
   });
 
   // Sends the custom in-app quit dialog to the renderer and waits for a response.
@@ -1861,8 +1869,7 @@ if (!gotSingleInstanceLock) {
   // preserve any active recording rather than killing it silently.
   async function showCustomQuitDialog(type, jobCount) {
     if (!mainWindow || mainWindow.isDestroyed()) return true;
-    mainWindow.show();
-    mainWindow.focus();
+    exposeMainWindow();
     mainWindow.webContents.send('show-quit-dialog', { type, jobCount });
     return new Promise((resolve) => {
       const handler = (_event, data) => {
@@ -2359,8 +2366,7 @@ if (!gotSingleInstanceLock) {
       // Only show if the window has finished its initial load.
       // On first launch, windowReadyToShow is false until React mounts.
       if (windowReadyToShow) {
-        mainWindow.show();
-        mainWindow.focus();
+        exposeMainWindow();
       }
       launchedByShortcut = false;
     } else {
@@ -2400,11 +2406,7 @@ if (!gotSingleInstanceLock) {
 
 // Focus window handler (used by notification click to bring app to foreground)
 ipcMain.on('focus-window', () => {
-    if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.show();
-        mainWindow.focus();
-    }
+    exposeMainWindow();
 });
 
 ipcMain.on('shortcut-renderer-ready', () => {
@@ -7028,8 +7030,7 @@ function requestAutoRecord(appName, originatingEvt, calEvent) {
   // explicit tap does.) The renderer's auto-record handler then starts the
   // recording and opens the live-note editor.
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (!mainWindow.isVisible()) mainWindow.show();
-    mainWindow.focus();
+    exposeMainWindow();
     mainWindow.webContents.send('auto-record-requested', { sessionName, appName });
   }
 }
@@ -8389,8 +8390,7 @@ ipcMain.handle('show-silence-auto-stop-notification', async (_event, payload) =>
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
+        exposeMainWindow();
       }
     });
     trackNotificationLifecycle(notif, 'silence_auto_stop');
@@ -8417,8 +8417,7 @@ ipcMain.handle('show-system-audio-mic-only-notification', async () => {
     });
     notif.on('click', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        if (!mainWindow.isVisible()) mainWindow.show();
-        mainWindow.focus();
+        exposeMainWindow();
         mainWindow.webContents.send('tray-open-settings');
       }
     });
@@ -8447,8 +8446,7 @@ async function showNoteReadyNotification(payload) {
   const notif = new Notification({ title, body, iconType });
   notif.on('click', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
+      exposeMainWindow();
       if (summaryFile) mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
     }
   });
@@ -8493,8 +8491,7 @@ async function showTranscriptReadyNotification(payload) {
   // kick off generation.
   const startSummarise = () => {
     if (mainWindow && !mainWindow.isDestroyed() && summaryFile) {
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
+      exposeMainWindow();
       mainWindow.webContents.send('navigate-to-meeting', { summaryFile });
       mainWindow.webContents.send('generate-notes-requested', { summaryFile, name });
     }
@@ -10381,8 +10378,7 @@ function startGoogleAuth() {
         // Notify renderer and bring app to foreground
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('google-auth-changed');
-          mainWindow.show();
-          mainWindow.focus();
+          exposeMainWindow();
         }
 
         resolve({ success: true });
@@ -10796,8 +10792,7 @@ function startOutlookAuth() {
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('outlook-auth-changed');
-          mainWindow.show();
-          mainWindow.focus();
+          exposeMainWindow();
         }
 
         resolve({ success: true });

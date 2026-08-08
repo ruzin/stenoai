@@ -152,10 +152,10 @@ function TranscriptionSection() {
 
       <SettingRow
         label="Speaker identification"
-        description="Match a diarized speaker's voice against people you've previously confirmed, across meetings. Turning this off stops speaker embeddings from being extracted or stored; per-meeting speaker splitting (Speaker 2, Speaker 3, ...) is unaffected."
+        description="Optional and off by default. When enabled, Steno stores numerical biometric voice profiles on this device to suggest people across meetings. Anonymous per-meeting speaker splitting (Speaker 2, Speaker 3, ...) remains available when this is off."
       >
         <Switch
-          checked={identityMatchingEnabled.data ?? true}
+          checked={identityMatchingEnabled.data ?? false}
           onCheckedChange={(v) => setIdentityMatchingEnabled.mutate(v)}
           disabled={identityMatchingEnabled.data === undefined}
         />

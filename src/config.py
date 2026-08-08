@@ -352,6 +352,7 @@ class Config:
         self._migrate_transcription_engine()
         self._migrate_language_zh()
         self._migrate_privacy_notice_seen()
+        self._migrate_identity_matching_privacy_default()
         self._normalize_templates()
         self._seed_sample_template()
         self._normalize_voiceprints()
@@ -447,6 +448,76 @@ class Config:
             )
         except Exception as e:
             logger.error(f"Error persisting privacy notice migration: {e}")
+
+    IDENTITY_MATCHING_PRIVACY_DEFAULT_VERSION = 1
+
+    def _migrate_identity_matching_privacy_default(self) -> None:
+        """Disable the former implicit opt-in exactly once.
+
+        Older releases stored identity matching as enabled by default, so an
+        on-disk True value does not prove that the user chose biometric voice
+        profiles. Configurations without the version marker are moved to the
+        privacy-safe disabled state. Once marked, later user choices survive.
+        """
+        if self._load_failed:
+            return
+        if not self._existed_at_load:
+            return
+
+        current_version = self._config.get(
+            "identity_matching_privacy_default_version", 0
+        )
+        if not isinstance(current_version, int):
+            current_version = 0
+        if current_version >= self.IDENTITY_MATCHING_PRIVACY_DEFAULT_VERSION:
+            return
+
+        self._config["identity_matching_enabled"] = False
+        self._config[
+            "identity_matching_privacy_default_version"
+        ] = self.IDENTITY_MATCHING_PRIVACY_DEFAULT_VERSION
+        if self._persist_identity_matching_privacy_default_migration():
+            self._snapshot["identity_matching_enabled"] = self._config[
+                "identity_matching_enabled"
+            ]
+            self._snapshot[
+                "identity_matching_privacy_default_version"
+            ] = self._config["identity_matching_privacy_default_version"]
+
+    def _persist_identity_matching_privacy_default_migration(self) -> bool:
+        """Persist the one-time privacy default with a locked compare-and-set."""
+        lock_path = str(self.config_path) + ".lock"
+        try:
+            with filelock.FileLock(lock_path, timeout=self._SAVE_LOCK_TIMEOUT):
+                base = self._read_disk_for_merge()
+                if base is None:
+                    return False
+                version = base.get("identity_matching_privacy_default_version", 0)
+                if not isinstance(version, int):
+                    version = 0
+                if version >= self.IDENTITY_MATCHING_PRIVACY_DEFAULT_VERSION:
+                    adopted = base.get("identity_matching_enabled") is True
+                    self._config["identity_matching_enabled"] = adopted
+                    self._config["identity_matching_privacy_default_version"] = version
+                    return True
+                base["identity_matching_enabled"] = False
+                base[
+                    "identity_matching_privacy_default_version"
+                ] = self.IDENTITY_MATCHING_PRIVACY_DEFAULT_VERSION
+                _atomic_write_json(self.config_path, base)
+                return True
+        except filelock.Timeout:
+            logger.warning(
+                "Timed out acquiring config lock for speaker-identification "
+                "privacy migration; will retry on next load"
+            )
+            return False
+        except Exception as e:
+            logger.error(
+                "Error persisting speaker-identification privacy migration: "
+                f"{e}"
+            )
+            return False
 
     def _migrate_whisper_model(self) -> None:
         """Map any out-of-current-list whisper model to the supported one.
@@ -773,15 +844,19 @@ class Config:
             # notification is unchanged; this only removes the manual click,
             # and main.js keeps autoInstallOnAppQuit as the safe fallback.
             "auto_install_when_idle": True,
-            # Default ON — cross-recording speaker identification (matching
-            # a diarized voice against stored person profiles/voiceprints).
-            # Independent of diarization itself: turning this off stops per-
-            # meeting speaker embeddings from ever being extracted/stored/
-            # suggested, but "Speaker N" splitting within a meeting is
+            # Default OFF: cross-recording speaker identification creates and
+            # stores biometric voice profiles. The user must enable it before
+            # Steno extracts or stores speaker embeddings.
+            #
+            # This is independent of diarization itself. When it is off,
+            # per-meeting speaker embeddings are not extracted, stored, or
+            # matched, but "Speaker N" splitting within a meeting is
             # unaffected (it only depends on diarizer segments, not
             # embeddings). See src.transcriber's allow_self_match/
             # clusters_out gating.
-            "identity_matching_enabled": True,
+            "identity_matching_enabled": False,
+            "identity_matching_privacy_default_version":
+                self.IDENTITY_MATCHING_PRIVACY_DEFAULT_VERSION,
             "whisper_model": "large-v3-turbo",
             "transcription_engine": "parakeet",
             "version": "1.0"
@@ -1626,10 +1701,10 @@ class Config:
 
     def get_identity_matching_enabled(self) -> bool:
         """Get whether cross-recording speaker identification is enabled.
-        Default on. Independent of diarization itself -- see the module
+        Default off. Independent of diarization itself -- see the module
         comment above the default-config `identity_matching_enabled` entry
         for what turning this off actually stops."""
-        return self._config.get("identity_matching_enabled", True)
+        return self._config.get("identity_matching_enabled", False)
 
     def set_identity_matching_enabled(self, enabled: bool) -> bool:
         """Set whether cross-recording speaker identification is enabled."""

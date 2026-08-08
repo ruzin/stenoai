@@ -41,7 +41,7 @@ const SETTINGS_TAB_DESCRIPTIONS: Partial<Record<SettingsTabId, React.ReactNode>>
     </>
   ),
   people:
-    'Everyone Steno has learned to recognise by voice. Deleting someone here removes their voice profile from every meeting.',
+    'Local voice profiles Steno can use to suggest people across meetings. Deleting a profile stops future matching but does not delete recordings or transcripts.',
   organisation: 'Connect to Steno Enterprise for your organisation.',
 };
 

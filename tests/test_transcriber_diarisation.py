@@ -204,10 +204,11 @@ class TranscribeDiarisedMultiSpeakerTests(unittest.TestCase):
         system_diar = [{"start": 9.0, "end": 9.5, "speaker": "SPEAKER_0"}]
         mic_embeddings = {"SPEAKER_0": [0.1, 0.2], "SPEAKER_1": [0.3, 0.4]}
         system_embeddings = {"SPEAKER_0": [0.5, 0.6]}
-        with patch(
-            "src.transcriber._run_steno_diarize",
-            side_effect=[(mic_diar, mic_embeddings), (system_diar, system_embeddings)],
-        ):
+        with patch("src.transcriber._identity_matching_enabled", return_value=True), \
+             patch(
+                "src.transcriber._run_steno_diarize",
+                side_effect=[(mic_diar, mic_embeddings), (system_diar, system_embeddings)],
+             ):
             self.transcriber.transcribe_audio = Mock(side_effect=[
                 {"text": "Hi there. Not bad. Great.", "segments": [
                     {"text": "Hi there.", "start": 0.5, "end": 1.5},
