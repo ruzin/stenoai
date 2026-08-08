@@ -71,7 +71,11 @@ test('People settings sorts profiles and deletes one through the real backend', 
 
   const people = page.getByTestId('people-tab');
   await expect(people).toBeVisible();
-  await expect(page.getByText('Deleting someone here removes their voice profile from every meeting.')).toBeVisible();
+  await expect(
+    page.getByText(
+      'Deleting a profile stops future matching but does not delete recordings or transcripts.',
+    ),
+  ).toBeVisible();
 
   const rows = people.locator(':scope > div');
   await expect(rows).toHaveCount(2);

@@ -111,7 +111,18 @@ test('New person creates and confirms a brand-new profile', async ({ launchApp }
   await expect(row).toContainText('Unidentified speaker');
   await row.getByRole('button', { name: 'New person' }).click();
 
+  await expect(page.getByText('numerical biometric voice profile')).toBeVisible();
+  await expect(page.getByText('stays on this device')).toBeVisible();
   await page.getByTestId('speaker-new-person-input').fill('Person Gamma');
+  await expect(page.getByTestId('speaker-new-person-submit')).toBeDisabled();
+
+  // Pressing Enter must not bypass the same authorisation gate as the button.
+  await page.getByTestId('speaker-new-person-input').press('Enter');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(row).toContainText('Unidentified speaker');
+
+  await page.getByTestId('speaker-profile-authorized').check();
+  await expect(page.getByTestId('speaker-new-person-submit')).toBeEnabled();
   await page.getByTestId('speaker-new-person-submit').click();
 
   await expect(row).toContainText('✓ Confirmed as Person Gamma');
@@ -138,6 +149,8 @@ test('New person blocks creating a duplicate of an existing person', async ({ la
   // A genuinely new name clears the warning and re-enables Create.
   await page.getByTestId('speaker-new-person-input').fill('Someone New');
   await expect(page.getByTestId('speaker-new-person-duplicate')).toHaveCount(0);
+  await expect(page.getByTestId('speaker-new-person-submit')).toBeDisabled();
+  await page.getByTestId('speaker-profile-authorized').check();
   await expect(page.getByTestId('speaker-new-person-submit')).toBeEnabled();
 });
 
@@ -186,7 +199,7 @@ test('People settings deletion unwinds a confirmed meeting row', async ({
     window.location.hash = '#/settings?tab=people';
   });
   await expect(page.getByTestId('people-tab')).toBeVisible();
-  await expect(page.getByText('Deleting someone here removes their voice profile from every meeting.')).toBeVisible();
+  await expect(page.getByText('Deleting a profile stops future matching but does not delete recordings or transcripts.')).toBeVisible();
   await page.getByTestId('people-delete-p-alpha').click();
 
   const confirmDialog = page.locator('[data-confirm-dialog]');

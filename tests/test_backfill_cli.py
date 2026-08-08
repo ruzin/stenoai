@@ -110,6 +110,9 @@ class BackfillSpeakerEmbeddingsCliTests(unittest.TestCase):
 
     def _run(self, args, tmp):
         cfg = Config(config_path=Path(tmp) / "config.json")
+        # Backfill is an identity-matching operation. The production default is
+        # deliberately off, so this test must opt in to exercise the command.
+        cfg.set_identity_matching_enabled(True)
         diar_segments = [{"start": 0.0, "end": 5.0, "speaker": "SPEAKER_0"}]
         embeddings = {"SPEAKER_0": [1.0, 0.0]}
         with mock.patch("src.config.get_config", return_value=cfg), \
@@ -147,6 +150,7 @@ class BackfillSpeakerEmbeddingsCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self._seed_meeting(tmp)
             cfg = Config(config_path=Path(tmp) / "config.json")
+            cfg.set_identity_matching_enabled(True)
             with mock.patch("src.config.get_config", return_value=cfg), \
                  mock.patch.dict("os.environ", {"STENOAI_USER_DATA_DIR": tmp}), \
                  mock.patch(

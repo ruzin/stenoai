@@ -344,6 +344,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
   const [personQuery, setPersonQuery] = React.useState('');
   const [newPersonRow, setNewPersonRow] = React.useState<Row | null>(null);
   const [newPersonName, setNewPersonName] = React.useState('');
+  const [newPersonAuthorized, setNewPersonAuthorized] = React.useState(false);
   const [showFiltered, setShowFiltered] = React.useState(false);
   // Error acknowledgment only -- a SUCCESSFUL confirm needs no separate
   // feedback state: useConfirmSpeaker's onSuccess awaits the suggestions
@@ -774,6 +775,7 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
                   disabled={anyConfirmPending}
                   onClick={() => {
                     setNewPersonName('');
+                    setNewPersonAuthorized(false);
                     setNewPersonRow(row);
                   }}
                   data-testid={`speaker-new-person-${key}`}
@@ -949,12 +951,28 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
         </button>
       )}
 
-      <Dialog open={newPersonRow !== null} onOpenChange={(open) => !open && setNewPersonRow(null)}>
+      <Dialog
+        open={newPersonRow !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setNewPersonRow(null);
+            setNewPersonAuthorized(false);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New person</DialogTitle>
-            <DialogDescription>
-              Give this speaker a name. Future recordings of them can then be suggested automatically.
+            <DialogDescription className="space-y-2">
+              <span className="block">
+                Steno creates a numerical biometric voice profile from confirmed excerpts to
+                suggest this person in future meetings. It stays on this device and is never sent
+                to Steno. Suggestions can be wrong and should be reviewed.
+              </span>
+              <span className="block">
+                Delete the profile anytime in Settings &gt; People. Recordings and transcripts are
+                stored separately and are not deleted with the profile.
+              </span>
             </DialogDescription>
           </DialogHeader>
           <Input
@@ -963,9 +981,16 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
             placeholder="e.g. Person Alpha"
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && newPersonRow && newPersonName.trim() && !duplicateProfile) {
+              if (
+                e.key === 'Enter'
+                && newPersonRow
+                && newPersonName.trim()
+                && !duplicateProfile
+                && newPersonAuthorized
+              ) {
                 confirm(newPersonRow, { newPersonName: newPersonName.trim() });
                 setNewPersonRow(null);
+                setNewPersonAuthorized(false);
               }
             }}
             data-testid="speaker-new-person-input"
@@ -975,16 +1000,40 @@ export function SpeakerReviewPanel({ summaryFile, isDiarised }: SpeakerReviewPan
               A person named "{duplicateProfile.display_name}" already exists -- use Change to pick them instead.
             </p>
           )}
+          <label
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border p-3 text-[13px] leading-[1.4]"
+            style={{ color: 'var(--fg-1)' }}
+          >
+            <input
+              type="checkbox"
+              checked={newPersonAuthorized}
+              onChange={(event) => setNewPersonAuthorized(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-[color:var(--fg-1)]"
+              data-testid="speaker-profile-authorized"
+            />
+            <span>
+              I confirm that I have informed this person and am authorised to create and use their
+              voice profile.
+            </span>
+          </label>
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cancel</Button>
             </DialogClose>
             <Button
-              disabled={!newPersonName.trim() || Boolean(duplicateProfile)}
+              disabled={
+                !newPersonName.trim() || Boolean(duplicateProfile) || !newPersonAuthorized
+              }
               onClick={() => {
-                if (!newPersonRow || !newPersonName.trim() || duplicateProfile) return;
+                if (
+                  !newPersonRow
+                  || !newPersonName.trim()
+                  || duplicateProfile
+                  || !newPersonAuthorized
+                ) return;
                 confirm(newPersonRow, { newPersonName: newPersonName.trim() });
                 setNewPersonRow(null);
+                setNewPersonAuthorized(false);
               }}
               data-testid="speaker-new-person-submit"
             >

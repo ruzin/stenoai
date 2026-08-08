@@ -572,10 +572,57 @@ class ConfigAutoInstallWhenIdleTests(unittest.TestCase):
 
 
 class ConfigIdentityMatchingEnabledTests(unittest.TestCase):
-    def test_default_identity_matching_enabled_is_true(self):
+    def test_default_identity_matching_enabled_is_false(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = Config(config_path=Path(tmp_dir) / "config.json")
-            self.assertTrue(config.get_identity_matching_enabled())
+            self.assertFalse(config.get_identity_matching_enabled())
+
+    def test_existing_implicit_default_is_migrated_to_false_once(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"identity_matching_enabled": True}))
+
+            config = Config(config_path=path)
+
+            self.assertFalse(config.get_identity_matching_enabled())
+            on_disk = json.loads(path.read_text())
+            self.assertFalse(on_disk["identity_matching_enabled"])
+            self.assertEqual(on_disk["identity_matching_privacy_default_version"], 1)
+
+    def test_malformed_migration_marker_falls_back_to_privacy_safe_default(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "identity_matching_enabled": True,
+                        "identity_matching_privacy_default_version": "invalid",
+                    }
+                )
+            )
+
+            config = Config(config_path=path)
+
+            self.assertFalse(config.get_identity_matching_enabled())
+            on_disk = json.loads(path.read_text())
+            self.assertFalse(on_disk["identity_matching_enabled"])
+            self.assertEqual(on_disk["identity_matching_privacy_default_version"], 1)
+
+    def test_explicit_opt_in_survives_reload_after_privacy_migration(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"identity_matching_enabled": True}))
+
+            migrated = Config(config_path=path)
+            self.assertFalse(migrated.get_identity_matching_enabled())
+            self.assertTrue(migrated.set_identity_matching_enabled(True))
+
+            reloaded = Config(config_path=path)
+            self.assertTrue(reloaded.get_identity_matching_enabled())
+            self.assertEqual(
+                json.loads(path.read_text())["identity_matching_privacy_default_version"],
+                1,
+            )
 
     def test_identity_matching_enabled_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
